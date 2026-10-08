@@ -316,19 +316,25 @@ Deno.serve(async (req: Request) => {
     const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []
     const aTirar = etiquetasATirar(acao, etiqueta, doCard)
     const paraTirar = aTirar.map((name) => (idDaEtiqueta.has(name) ? { id: idDaEtiqueta.get(name)! } : { name }))
+    // A ETIQUETA JÁ ESTÁ NO CARD — o caso do lápis, que só ALTERA a cotação
+    // (08/10/2026, pedido do dono): a etiqueta não é reposta. Repô-la deixava no
+    // histórico do Kommo a etiqueta tirada e posta de novo, a nota dizia
+    // "aplicada" e o "há N dias" voltava a "hoje". Só o campo muda.
+    const jaTem = acao === 'adicionar' && doCard.some((t) => mesmaEtiqueta(t, etiqueta))
     const patch = acao === 'adicionar'
       ? {
-        tags_to_add: [{ name: etiqueta }],
+        ...(jaTem ? {} : { tags_to_add: [{ name: etiqueta }] }),
         ...(paraTirar.length > 0 ? { tags_to_delete: paraTirar } : {}),
         ...(campo && textoDoCampo
           ? { custom_fields_values: [{ field_id: campo.id, values: [{ value: textoDoCampo }] }] }
           : {}),
       }
       : { tags_to_delete: paraTirar }
-    // TIRAR O QUE O CARD NÃO TEM é não fazer nada: sem PATCH, segue para a releitura.
+    // TIRAR O QUE O CARD NÃO TEM, ou PÔR O QUE ELE JÁ TEM sem cotação nova, é não
+    // fazer nada: sem PATCH, segue para a releitura.
     // O PATCH É IDEMPOTENTE (pôr o que já está, tirar o que já saiu, gravar o
     // mesmo texto no campo): pode ser repetido depois de 429 ou 5xx.
-    const res = acao === 'remover' && aTirar.length === 0
+    const res = Object.keys(patch).length === 0 || (acao === 'remover' && aTirar.length === 0)
       ? new Response(null, { status: 204 })
       : await kommoFetch(
         `${base}/leads/${leadId}`,
@@ -418,10 +424,13 @@ Deno.serve(async (req: Request) => {
         .maybeSingle()
       if (comDatas) {
         const antes = (comDatas.tags_em ?? {}) as Record<string, string | null>
-        const agora = acao === 'adicionar' ? { [etiqueta]: new Date().toISOString() } : {}
+        // A ETIQUETA QUE JÁ ESTAVA (só a cotação mudou) guarda a data dela.
+        const agora = acao === 'adicionar' && !jaTem ? { [etiqueta]: new Date().toISOString() } : {}
         const tags_em = datasDasEtiquetas({
           tags: tags,
-          antes: { ...Object.fromEntries(Object.entries(antes).filter(([k]) => !mesmaEtiqueta(k, etiqueta))), ...agora },
+          antes: jaTem
+            ? antes
+            : { ...Object.fromEntries(Object.entries(antes).filter(([k]) => !mesmaEtiqueta(k, etiqueta))), ...agora },
         })
         await svc.from('kommo_leads').update({ tags_em }).eq('kommo_lead_id', leadId)
       }
@@ -460,15 +469,21 @@ Deno.serve(async (req: Request) => {
         formatarReais(doSpread.baseCentavos)
       : ''
     const comCotacao = textoDoCampo ? ` Cotação: ${textoDoCampo}${sobre}.` : ''
-    const texto =
-      (acao === 'adicionar'
+    // SÓ A COTAÇÃO MUDOU (o lápis): a nota diz isso, e não "etiqueta aplicada".
+    const doFundo = daLista?.destino ?? etiqueta.replace(/^Cotado\s+/i, '')
+    const texto = jaTem
+      ? textoDoCampo
+        ? `Cotação ${doFundo} alterada por ${autor}: ${textoDoCampo}${sobre}.`
+        : ''
+      : (acao === 'adicionar'
         ? substituidas.length > 0
           ? `Etiqueta "${etiqueta}" aplicada por ${autor}, no lugar de ${
             substituidas.map((t) => `"${t}"`).join(', ')
           }.`
           : `Etiqueta "${etiqueta}" aplicada por ${autor}.`
         : `Etiqueta "${etiqueta}" removida por ${autor}.`) + comCotacao
-    try {
+    // Nada mudou no card (pôr o que já estava, sem cotação): nada a registrar.
+    if (texto) try {
       // POST: só se repete com 429 (não processado) — ver kommoFetch.
       const resNota = await kommoFetch(`${base}/leads/notes`, {
         method: 'POST',
@@ -502,8 +517,9 @@ Deno.serve(async (req: Request) => {
       ok: true,
       tags,
       aviso,
-      mensagem:
-        acao === 'adicionar'
+      mensagem: jaTem
+        ? (textoDoCampo ? `Cotação alterada: ${textoDoCampo}.` : `A etiqueta "${etiqueta}" já estava no card.`)
+        : acao === 'adicionar'
           ? `Etiqueta "${etiqueta}" aplicada${textoDoCampo ? `, com a cotação ${textoDoCampo}` : ''}.`
           : `Etiqueta "${etiqueta}" removida.`,
       // SÓ COM COTAÇÃO — campos novos e opcionais, que a tela antiga ignora.

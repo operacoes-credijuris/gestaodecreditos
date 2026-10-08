@@ -5249,14 +5249,17 @@ export default function AnaliseCredito() {
         antes?.map((l) => {
           if (l.kommo_lead_id !== id) return l
           const tags = r?.tags ?? l.tags
+          // A ETIQUETA QUE JÁ ESTAVA (o lápis só altera a cotação, 08/10/2026)
+          // guarda a data dela — o "há N dias" não volta a "hoje".
+          const jaTinha = (l.tags ?? []).some((t) => mesmaEtiqueta(t, etiqueta))
           // As datas como no `etiquetar`: a que entrou é de agora, as que
           // saíram deixam o mapa.
           const datas: Record<string, string | null> = Object.fromEntries(
             Object.entries(l.tags_em ?? {}).filter(
-              ([k]) => tags.some((t) => mesmaEtiqueta(t, k)) && !mesmaEtiqueta(k, etiqueta),
+              ([k]) => tags.some((t) => mesmaEtiqueta(t, k)) && (jaTinha || !mesmaEtiqueta(k, etiqueta)),
             ),
           )
-          datas[etiqueta] = new Date().toISOString()
+          if (!jaTinha) datas[etiqueta] = new Date().toISOString()
           // OS CAMPOS RELIDOS do Kommo; sem eles, só o campo gravado trocado.
           const campos =
             r?.campos ??

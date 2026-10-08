@@ -397,3 +397,24 @@ describe('tirar etiqueta de fora da lista', () => {
     expect(etiquetasATirar('remover', 'Cliente VIP', ['Cotado BTG'])).toEqual([])
   })
 })
+
+/**
+ * EDITAR A COTAÇÃO NÃO MEXE NA ETIQUETA (08/10/2026, pedido do dono): o lápis
+ * reenviava "pôr Cotado ‹fundo›" e a etiqueta era reposta — no histórico do
+ * Kommo, tirada e posta; na nota, "aplicada"; no card, "há N dias" voltando a
+ * "hoje". Com a etiqueta já no card, só o campo da cotação muda.
+ */
+describe('editar a cotação', () => {
+  const ler = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+  it('a kommo-etiquetar não repõe a etiqueta que o card já tem, e a nota diz "cotação alterada"', () => {
+    const f = ler('../../../supabase/functions/kommo-etiquetar/index.ts')
+    expect(f).toContain("const jaTem = acao === 'adicionar' && doCard.some((t) => mesmaEtiqueta(t, etiqueta))")
+    expect(f).toContain('...(jaTem ? {} : { tags_to_add: [{ name: etiqueta }] }),')
+    expect(f).toContain('`Cotação ${doFundo} alterada por ${autor}: ${textoDoCampo}${sobre}.`')
+    expect(f).toContain("const agora = acao === 'adicionar' && !jaTem ? { [etiqueta]: new Date().toISOString() } : {}")
+  })
+  it('a tela guarda a data da etiqueta que já estava', () => {
+    const t = ler('../../pages/operacional/AnaliseCredito.tsx')
+    expect(t).toContain('if (!jaTinha) datas[etiqueta] = new Date().toISOString()')
+  })
+})
