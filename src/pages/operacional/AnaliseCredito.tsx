@@ -155,7 +155,6 @@ import {
   lerOrdem,
   nomeDaColuna,
   passoDaTecla,
-  POR_VEZ,
   PRAZO_PARADO,
   PREF_ORDEM_DA_ANALISE,
   prepararBusca,
@@ -3860,7 +3859,6 @@ export default function AnaliseCredito() {
   const [filtro, setFiltro] = useState<FiltroRapido>('todos')
   // A ORDEM, ESTA SIM, LEMBRADA ENTRE VISITAS (ver `lerOrdem`).
   const [ordem, setOrdem] = useState<OrdemDaLista>(() => lerOrdem(lerPreferencia<unknown>(PREF_ORDEM_DA_ANALISE, 'recente')))
-  const [mostrar, setMostrar] = useState(POR_VEZ)
   // J E K ANDAM ENTRE OS CARDS (ver `passoDaTecla`): só o foco se move — nenhum
   // card abre, nenhum botão é apertado. Fora de campo e de janela, como o "/".
   useEffect(() => {
@@ -3883,11 +3881,10 @@ export default function AnaliseCredito() {
   // (layout/Consultas), pelo `data-filtro-tela` que o CampoDeBusca põe: a mesma
   // regra — não age com alguém digitando nem com janela aberta. Dois ouvintes
   // para a mesma tecla seriam dois lugares para a regra divergir.
-  /** Abre uma etapa: o filtro e o "Mostrar mais" voltam ao padrão. */
+  /** Abre uma etapa: o filtro volta ao padrão. */
   const irParaAba = (key: string) => {
     setAba(key)
     setFiltro('todos')
-    setMostrar(POR_VEZ)
   }
   // Ação em curso, para o botão certo do card certo mostrar o spinner — o
   // destino, POR CARD (ver lib/emCursoPorCard.ts).
@@ -5067,15 +5064,11 @@ export default function AnaliseCredito() {
     if (realce === null || rolouAte.current === realce) return
     const i = filtrados.findIndex((l) => l.kommo_lead_id === realce)
     if (i < 0) return
-    if (i >= mostrar) {
-      setMostrar(i + 1)
-      return
-    }
     rolouAte.current = realce
     const el = document.querySelector<HTMLElement>(`[data-lead="${realce}"]`)
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     el?.focus({ preventScroll: true })
-  }, [realce, filtrados, mostrar])
+  }, [realce, filtrados])
   // O DESTAQUE SOME SOZINHO depois de alguns segundos: é para achar, não marca.
   useEffect(() => {
     if (realce === null) return
@@ -5845,7 +5838,6 @@ export default function AnaliseCredito() {
           valor={busca}
           onMudar={(v) => {
             setBusca(v)
-            setMostrar(POR_VEZ)
           }}
           aria-describedby="dica-da-busca"
         />
@@ -6107,7 +6099,6 @@ export default function AnaliseCredito() {
                     contagem={contagemDoFiltro[c.key]}
                     onClick={() => {
                       setFiltro(c.key)
-                      setMostrar(POR_VEZ)
                     }}
                   >
                     {c.rotulo}
@@ -6124,7 +6115,6 @@ export default function AnaliseCredito() {
                   const nova = lerOrdem(e.target.value)
                   setOrdem(nova)
                   gravarPreferencia(PREF_ORDEM_DA_ANALISE, nova)
-                  setMostrar(POR_VEZ)
                 }}
                 className="w-full min-w-0 cursor-pointer bg-transparent text-corpo text-texto outline-none"
               >
@@ -6170,7 +6160,6 @@ export default function AnaliseCredito() {
                 }
                 onLimpar={() => {
                   setBusca('')
-                  setMostrar(POR_VEZ)
                 }}
                 rotuloLimpar="Limpar a busca"
               />
@@ -6189,7 +6178,7 @@ export default function AnaliseCredito() {
         ) : (
           <>
             <div className="grid gap-s2">
-              {filtrados.slice(0, mostrar).map((l) => (
+              {filtrados.map((l) => (
                 <CardCredito
                   key={l.kommo_lead_id}
                   lead={l}
@@ -6312,18 +6301,9 @@ export default function AnaliseCredito() {
                 />
               ))}
             </div>
-            {/* DE 8 EM 8 (item "Novo"): a lista longa não empurra a página
-                inteira, e o botão diz quantos faltam. */}
-            {filtrados.length > mostrar && (
-              <div className="mt-[14px] flex justify-center">
-                <Button variant="secondary" className={BTN} onClick={() => setMostrar((m) => m + POR_VEZ)}>
-                  Mostrar mais {Math.min(POR_VEZ, filtrados.length - mostrar)}
-                  <span className="font-medium text-texto-3">
-                    · {mostrar} de {filtrados.length}
-                  </span>
-                </Button>
-              </div>
-            )}
+            {/* SEM "MOSTRAR MAIS" (08/10/2026, pedido do dono): a coluna mostra
+                todos os cards. De 8 em 8, quem vai e volta entre as colunas tinha
+                de apertar o botão de novo a cada visita. */}
           </>
         )}
       </section>

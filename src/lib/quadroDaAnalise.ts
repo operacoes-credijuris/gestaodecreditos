@@ -17,8 +17,6 @@ import { dataDaEtapa, lerTituloCard, ordemNaColuna, type Aba } from './kommo'
  */
 export const PRAZO_PARADO = 7
 
-/** Quantos cards a lista mostra de cada vez — "Mostrar mais" acrescenta outro tanto. */
-export const POR_VEZ = 8
 
 const DIA = 86_400_000
 
