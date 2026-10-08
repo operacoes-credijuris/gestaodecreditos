@@ -15,14 +15,18 @@ import type { PapelDaTela } from './kommo'
  * a coluna seguinte precisa para montar a proposta. Na diligência ou na
  * reprovação ele seria a ficha de um crédito que não vai adiante — por isso mora
  * numa caixa à parte, e não no campo da mensagem. Vai COMO FICOU NA CAIXA (quem
- * aprova completa o que o motor deixou "a confirmar"), em cima, e a mensagem
- * depois, com uma linha em branco entre os dois (o feed do Kommo ignora a quebra
- * simples).
+ * aprova completa o que o motor deixou "a confirmar").
+ *
+ * DUAS NOTAS, E NÃO UMA (07/10/2026, pedido do dono): o resumo (o roteiro, o link
+ * da análise no Drive e o canhoto) numa nota, e a mensagem de quem aprovou na
+ * nota seguinte. Juntos, viravam uma nota só muito grande, e o comercial tinha
+ * de achar o comentário no fim dela. Na ORDEM do feed: o resumo, e depois o
+ * comentário.
  *
  * Sem caixa de resumo (`resumo` null), a nota é a mensagem, como sempre foi.
- * Tudo vazio: nota vazia — e sem texto não há nota (ver `moverComNota`).
+ * Texto vazio não vira nota (lista vazia: nada a anotar — ver `moverComNota`).
  */
-export function montarNotaDoDesfecho({
+export function notasDoDesfecho({
   papel,
   mensagem,
   resumo,
@@ -31,10 +35,10 @@ export function montarNotaDoDesfecho({
   mensagem: string
   /** O texto da caixa do resumo, quando a janela tem a caixa; null quando não tem. */
   resumo: string | null
-}): string {
+}): string[] {
   const msg = mensagem.trim()
-  if (papel !== 'aprovar' || resumo === null) return msg
-  return [resumo.trim(), msg].filter(Boolean).join('\n\n')
+  if (papel !== 'aprovar' || resumo === null) return msg ? [msg] : []
+  return [resumo.trim(), msg].filter(Boolean)
 }
 
 /** A linha que abre a nota do "Fechado!" — o fato, antes da anotação de quem fechou. */

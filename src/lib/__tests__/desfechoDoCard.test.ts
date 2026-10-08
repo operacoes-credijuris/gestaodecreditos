@@ -2,46 +2,52 @@
 // oportunidade só entra ao aprovar, e as notas do "Fechado!" e do "Não fechou".
 
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   comSugestao,
   MOTIVOS_NAO_FECHOU,
-  montarNotaDoDesfecho,
   motivoSuficiente,
   NOTA_DO_FECHADO,
   notaDoFechado,
   notaDoNaoFechou,
+  notasDoDesfecho,
 } from '../desfechoDoCard'
 
-describe('montarNotaDoDesfecho — o resumo só entra ao aprovar', () => {
+describe('notasDoDesfecho — o resumo só entra ao aprovar, numa nota própria', () => {
   const resumo = '  Oportunidade Credijuris — RPV\nCessão: 100% do principal  '
 
-  it('aprovar com a caixa: o resumo como ficou na caixa, depois a mensagem', () => {
-    expect(montarNotaDoDesfecho({ papel: 'aprovar', mensagem: ' Segue para proposta. ', resumo })).toBe(
-      'Oportunidade Credijuris — RPV\nCessão: 100% do principal\n\nSegue para proposta.',
-    )
+  // DUAS NOTAS (07/10/2026, pedido do dono): o resumo (roteiro, link do Drive,
+  // canhoto) numa, e o comentário de quem aprovou na seguinte — juntos, a nota
+  // ficava grande demais para o comercial achar o comentário.
+  it('aprovar com a caixa: o resumo numa nota, a mensagem na seguinte', () => {
+    expect(notasDoDesfecho({ papel: 'aprovar', mensagem: ' Segue para proposta. ', resumo })).toEqual([
+      'Oportunidade Credijuris — RPV\nCessão: 100% do principal',
+      'Segue para proposta.',
+    ])
   })
 
   it('aprovar com a caixa e sem mensagem: só o resumo', () => {
-    expect(montarNotaDoDesfecho({ papel: 'aprovar', mensagem: '', resumo })).toBe(
+    expect(notasDoDesfecho({ papel: 'aprovar', mensagem: '', resumo })).toEqual([
       'Oportunidade Credijuris — RPV\nCessão: 100% do principal',
-    )
+    ])
   })
 
   it('diligência e reprovação: NUNCA o resumo — só a razão escrita', () => {
     for (const papel of ['diligenciar', 'reprovar', 'validar', 'fechar'] as const) {
-      expect(montarNotaDoDesfecho({ papel, mensagem: 'Falta a conta da contadoria.', resumo }), papel).toBe(
+      expect(notasDoDesfecho({ papel, mensagem: 'Falta a conta da contadoria.', resumo }), papel).toEqual([
         'Falta a conta da contadoria.',
-      )
+      ])
     }
   })
 
   it('sem caixa de resumo (null): a mensagem, como sempre foi — inclusive ao aprovar', () => {
-    expect(montarNotaDoDesfecho({ papel: 'aprovar', mensagem: ' texto ', resumo: null })).toBe('texto')
+    expect(notasDoDesfecho({ papel: 'aprovar', mensagem: ' texto ', resumo: null })).toEqual(['texto'])
   })
 
-  it('tudo vazio: nota vazia (e sem texto não há nota)', () => {
-    expect(montarNotaDoDesfecho({ papel: 'aprovar', mensagem: '  ', resumo: '   ' })).toBe('')
-    expect(montarNotaDoDesfecho({ papel: 'reprovar', mensagem: '', resumo: null })).toBe('')
+  it('tudo vazio: nenhuma nota', () => {
+    expect(notasDoDesfecho({ papel: 'aprovar', mensagem: '  ', resumo: '   ' })).toEqual([])
+    expect(notasDoDesfecho({ papel: 'reprovar', mensagem: '', resumo: null })).toEqual([])
   })
 })
 
@@ -79,5 +85,14 @@ describe('a nota do "Fechado!" e do "Não fechou"', () => {
       // TODA SUGESTÃO SOZINHA JÁ PASSA DA RÉGUA: um clique basta.
       for (const s of m.sugestoes) expect(motivoSuficiente(comSugestao('', s)), s).toBe(true)
     }
+  })
+})
+
+describe('o Aprovar da Revisão do RPV manda as notas uma a uma', () => {
+  it('a janela entrega a lista, e moverComNota anota cada uma, retomando da que faltou', () => {
+    const t = readFileSync(join(__dirname, '..', '..', 'pages/operacional/AnaliseCredito.tsx'), 'utf8')
+    expect(t).toContain('await onConfirmar(acao, notasDe(acao))')
+    expect(t).toContain('async function moverComNota(leadId: number, statusId: number, mensagem: string | string[])')
+    expect(t).toContain('for (let i = notasEnviadas.current.get(chave) ?? 0; i < textos.length; i++) {')
   })
 })

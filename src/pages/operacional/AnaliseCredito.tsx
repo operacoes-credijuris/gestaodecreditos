@@ -203,7 +203,7 @@ import { carregarPdfjs } from '@/lib/pdfjs'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   comSugestao,
-  montarNotaDoDesfecho,
+  notasDoDesfecho,
   MOTIVOS_NAO_FECHOU,
   motivoSuficiente,
   notaDoFechado,
@@ -963,7 +963,7 @@ function JanelaDeMensagem({
    * O RESUMO DA OPORTUNIDADE NUMA CAIXA À PARTE, editável (o Concluir da Revisão
    * do RPV, onda 4): o texto inicial da caixa, ou null para a janela sem caixa —
    * a de sempre. Com a caixa, a nota do APROVAR é o resumo como ficou nela mais a
-   * mensagem; nas outras saídas, só a mensagem (ver `montarNotaDoDesfecho`).
+   * mensagem, em duas notas; nas outras saídas, só a mensagem (ver `notasDoDesfecho`).
    */
   resumo?: string | null
   ocupado: boolean
@@ -973,7 +973,8 @@ function JanelaDeMensagem({
    * saída moveria o card de novo, para outra coluna. Indefinido: nada trava.
    */
   jaMovido?: (statusId: number) => boolean
-  onConfirmar: (acao: AcaoTela, mensagem: string) => Promise<void>
+  /** As notas, na ordem do feed: ao aprovar com o resumo, o resumo e depois a mensagem. */
+  onConfirmar: (acao: AcaoTela, notas: string[]) => Promise<void>
   onFechar: () => void
 }) {
   const comResumo = resumo !== null
@@ -1043,15 +1044,15 @@ function JanelaDeMensagem({
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
   const semTexto = mensagem.trim().length < 10
-  /** A nota que esta saída deixa no card — o resumo só entra ao aprovar. */
-  const notaDe = (acao: AcaoTela) =>
-    montarNotaDoDesfecho({ papel: acao.papel, mensagem, resumo: comResumo ? textoDoResumo : null })
+  /** As notas que esta saída deixa no card — o resumo só entra ao aprovar, numa nota própria. */
+  const notasDe = (acao: AcaoTela) =>
+    notasDoDesfecho({ papel: acao.papel, mensagem, resumo: comResumo ? textoDoResumo : null })
   // MOVEU E A NOTA NÃO SUBIU: a saída que já moveu o card nesta janela. Só ela
   // continua na mão (e só anota, com texto); as outras moveriam o card de novo.
   const movida = erro ? acoes.find((a) => jaMovido?.(a.statusId)) : undefined
   const podeEnviar = (acao: AcaoTela) => {
     if (trabalhando) return false
-    if (movida) return acao.statusId === movida.statusId && notaDe(acao) !== ''
+    if (movida) return acao.statusId === movida.statusId && notasDe(acao).length > 0
     // COM A CAIXA DO RESUMO, aprovar sem resumo gravado pede o resumo escrito à
     // mão NA CAIXA DELE, com a mesma régua — e não na mensagem.
     if (comResumo && semResumoDe(acao)) return textoDoResumo.trim().length >= 10
@@ -1089,7 +1090,7 @@ function JanelaDeMensagem({
         setEnviando(true)
         setEmCurso(acao.statusId)
         try {
-          await onConfirmar(acao, notaDe(acao))
+          await onConfirmar(acao, notasDe(acao))
           // ENVIADO, O RASCUNHO SAI. Com falha (inclusive a da nota com o
           // card já movido), ele fica — o texto ainda não chegou ao card.
           esquecerRascunho()
@@ -3841,6 +3842,8 @@ export default function AnaliseCredito() {
    * segunda é segura de repetir. Ver lá.
    */
   const jaMovidos = useRef<Set<string>>(new Set())
+  // Quantas notas do movimento já subiram — o retry manda só as que faltam.
+  const notasEnviadas = useRef<Map<string, number>>(new Map())
 
   // SEM ETAPA GUARDADA, 'pendentes' (a Análise do RPV), como sempre foi; uma
   // etapa que não existe mais cai na primeira com função (ver `abaAtual`).
@@ -5294,7 +5297,7 @@ export default function AnaliseCredito() {
    * O MOVIMENTO PRIMEIRO, a nota depois: o feed ordena pela chegada, e a ordem
    * de leitura é o que aconteceu e então por quê.
    */
-  async function moverComNota(leadId: number, statusId: number, mensagem: string) {
+  async function moverComNota(leadId: number, statusId: number, mensagem: string | string[]) {
     // MOVER UMA VEZ, ANOTAR QUANTAS PRECISAR.
     //
     // Falhando a nota DEPOIS de o card já ter mudado de coluna, a janela fica
@@ -5311,19 +5314,26 @@ export default function AnaliseCredito() {
       await mover.mutateAsync({ leadId, statusId, comentario: '' })
       jaMovidos.current.add(chave)
     }
-    const texto = mensagem.trim()
-    if (texto) {
+    // MAIS DE UMA NOTA, EM ORDEM (07/10/2026): o Aprovar da Revisão do RPV manda
+    // o resumo da oportunidade e, na nota seguinte, o comentário (ver
+    // `notasDoDesfecho`). Uma por vez — o feed ordena pela chegada.
+    const textos = (Array.isArray(mensagem) ? mensagem : [mensagem]).map((t) => t.trim()).filter(Boolean)
+    // AS QUE JÁ SUBIRAM NÃO SOBEM DE NOVO: falhando a segunda, o novo Confirmar
+    // manda só a que faltou, em vez de repetir o resumo no card.
+    for (let i = notasEnviadas.current.get(chave) ?? 0; i < textos.length; i++) {
       try {
         // DE PESSOA: o texto é dela, e é o que a análise seguinte precisa ler no
         // card. Ver marcarComoDePessoa, em _shared/notaCredijuris.ts.
         await invokeFunction('kommo-anotar', {
-          lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome,
+          lead_id: leadId, texto: textos[i], origem: 'pessoa', autor: analistaNome,
         })
+        notasEnviadas.current.set(chave, i + 1)
       } catch (e) {
         throw new Error(
-          'O card foi movido, mas a nota com a mensagem não subiu (' +
+          'O card foi movido, mas ' +
+            (i > 0 ? 'a nota com a mensagem não subiu (a do resumo, sim) (' : 'a nota com a mensagem não subiu (') +
             ((e as Error)?.message ?? String(e)) +
-            '). O texto continua aqui — confirmar de novo tenta só a nota.',
+            '). O texto continua aqui — confirmar de novo tenta só o que faltou.',
         )
       }
     }
@@ -5332,11 +5342,13 @@ export default function AnaliseCredito() {
     // Diligência, Sanar, Revisão de novo (onda 4) — teria o movimento PULADO, e a
     // nota subiria dizendo um movimento que não aconteceu.
     jaMovidos.current.delete(chave)
+    notasEnviadas.current.delete(chave)
   }
 
   /** Esquece os movimentos pendentes de nota de um card — a janela dele fechou. */
   function esquecerMovimentos(leadId: number) {
     for (const k of [...jaMovidos.current]) if (k.startsWith(`${leadId}:`)) jaMovidos.current.delete(k)
+    for (const k of [...notasEnviadas.current.keys()]) if (k.startsWith(`${leadId}:`)) notasEnviadas.current.delete(k)
   }
 
   /** O card já se moveu para esta coluna nesta janela, e falta só a nota? */
