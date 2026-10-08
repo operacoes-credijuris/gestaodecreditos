@@ -241,6 +241,31 @@ export function JanelaJustificativa({
   const linha = consulta.data ?? null
   const semMigracao = !!consulta.error && ehTabelaAusente(consulta.error)
 
+  // O VIGIA DAS FRENTES (08/10/2026): com a janela aberta numa geração em curso
+  // — inclusive a que parece parada —, a cada minuto pede ao servidor que
+  // relance a frente cuja invocação morreu sem sinal (ver `frentesOrfas`). Foi o
+  // que deixou a geração do Renan de Santana esperando para sempre pela frente
+  // da EC 136.
+  const emCurso = linha?.status === 'gerando'
+  useEffect(() => {
+    if (!aberta || !emCurso || !leadId) return
+    let vivo = true
+    const vigiar = () =>
+      void invokeFunction<{ relancadas?: number }>(FUNCAO, { acao: 'vigiar', kommo_lead_id: leadId })
+        // RELÊ SEMPRE (uma vez por minuto): a geração que parecia parada deixa de
+        // ser consultada a cada 3 s, e é esta releitura que a vê voltar a andar.
+        .then(() => {
+          if (vivo) void qc.invalidateQueries({ queryKey: [TABELA] })
+        })
+        .catch(() => {})
+    vigiar()
+    const id = setInterval(vigiar, 60_000)
+    return () => {
+      vivo = false
+      clearInterval(id)
+    }
+  }, [aberta, emCurso, leadId, qc])
+
   // ---------------- gerar ----------------
   const [pedindo, setPedindo] = useState(false)
   const [erroDoPedido, setErroDoPedido] = useState<string | null>(null)

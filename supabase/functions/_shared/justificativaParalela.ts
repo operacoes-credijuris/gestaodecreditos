@@ -637,6 +637,46 @@ export function tomarFrente(
   }
 }
 
+/**
+ * QUANTO TEMPO SEM SINAL FAZ UMA FRENTE ÓRFÃ. Uma invocação não vive mais de
+ * ~150 s (o teto do servidor), e toda invocação que termina deixa sinal na
+ * frente — o checkpoint ao ceder, ou o fechamento. Três minutos sem sinal é,
+ * com certeza, a invocação morta no caminho.
+ */
+export const FRENTE_SEM_SINAL_MS = 180_000
+
+/**
+ * AS FRENTES ÓRFÃS (08/10/2026): pesquisando, e sem sinal há mais de
+ * FRENTE_SEM_SINAL_MS. Devolve o id e a invocação que estava com ela — o
+ * `anterior` do relançamento, que `tomarFrente` aceita.
+ *
+ * O CASO QUE A TROUXE: na geração do Renan de Santana, a frente "Regras
+ * federais: EC 136" foi tomada às 19:18:02 e a invocação morreu no primeiro
+ * segundo — zero buscas, zero segundos. As outras três terminaram até 19:21 e a
+ * redação ficou esperando por ela para sempre: só a própria invocação passava o
+ * bastão adiante, e o detector de morte olhava o pulso da geração INTEIRA, que
+ * as irmãs mantinham vivo.
+ *
+ * RELANÇAR É SEGURO: `tomarFrente` só entrega a frente a quem traz a invocação
+ * anterior certa, e a gravação é condicional à versão — dois vigias ao mesmo
+ * tempo relançam uma vez só. E não roda para sempre: cada relançamento conta
+ * uma invocação, e os tetos de `decidirFrente` encerram a frente com o que tiver.
+ */
+export function frentesOrfas(
+  e: Pick<EstadoDaPesquisa, 'fase' | 'frentes' | 'tempos'>,
+  agora: Date = new Date(),
+): { id: string; anterior: string | null }[] {
+  if (e.fase !== 'pesquisando') return []
+  return e.frentes
+    .filter((f) => !frenteTerminada(f))
+    .filter((f) => {
+      // A FRENTE QUE NUNCA FOI TOMADA (o disparo se perdeu) conta do fim do plano.
+      const ref = Date.parse(String(f.pulso_em ?? e.tempos.planejamento_fim ?? e.tempos.inicio))
+      return Number.isFinite(ref) && agora.getTime() - ref > FRENTE_SEM_SINAL_MS
+    })
+    .map((f) => ({ id: f.id, anterior: f.invocacao_id }))
+}
+
 /** O checkpoint: a conversa salva para a próxima invocação continuar. */
 export function salvarCheckpoint(
   e: EstadoDaPesquisa,
@@ -671,13 +711,16 @@ export type DecisaoDaFrente = 'chamar' | 'encerrar' | 'ceder' | 'desistir'
  * próxima invocação.
  */
 export function decidirFrente(
-  f: Pick<EstadoDaFrente, 'iniciada_em' | 'invocacoes' | 'interrupcoes_sem_avanco' | 'consumo' | 'unica'>,
+  f: Pick<EstadoDaFrente, 'segundos' | 'invocacoes' | 'interrupcoes_sem_avanco' | 'consumo' | 'unica'>,
   restanteDaInvocacaoMs: number,
-  agora: Date = new Date(),
 ): DecisaoDaFrente {
   if (f.invocacoes > MAX_INVOCACOES_DA_FRENTE + 2) return 'desistir'
-  const desde = Date.parse(String(f.iniciada_em ?? ''))
-  const minutos = Number.isFinite(desde) ? (agora.getTime() - desde) / 60_000 : 0
+  // O TEMPO DE TRABALHO, e não o de relógio desde o começo (08/10/2026): o das
+  // invocações anteriores (`segundos`) mais o desta. Pelo relógio, a frente
+  // órfã relançada pelo vigia chegava "estourada" — o tempo em que ficou morta
+  // contava — e encerrava sem pesquisar nada.
+  const desta = Math.max(0, ORCAMENTO_DA_INVOCACAO_MS - restanteDaInvocacaoMs) / 1000
+  const minutos = ((f.segundos ?? 0) + desta) / 60
   const { buscas: maxB, paginas: maxP } = tetosDaFrente(f.unica)
   const noTeto =
     minutos >= TETO_DA_FRENTE_MIN ||

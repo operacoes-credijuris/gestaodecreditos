@@ -7,6 +7,8 @@
  * se atropelarem de verdade.
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   aposInterrupcao,
   aposResposta,
@@ -25,6 +27,8 @@ import {
   FOLGA_PARA_NOVA_CHAMADA_MS,
   type FrenteDoPlano,
   frenteNova,
+  frentesOrfas,
+  FRENTE_SEM_SINAL_MS,
   gravarComVersao,
   juntarDossies,
   MAX_BUSCAS_POR_FRENTE,
@@ -245,22 +249,28 @@ describe('checkpoint — o ponto seguro da conversa', () => {
 
 describe('o relógio e os tetos da frente', () => {
   const f = (o: Partial<Parameters<typeof decidirFrente>[0]> = {}) => ({
-    iniciada_em: AGORA.toISOString(), invocacoes: 1, interrupcoes_sem_avanco: 0, consumo: { ...CONSUMO_ZERO }, unica: false, ...o,
+    segundos: 0, invocacoes: 1, interrupcoes_sem_avanco: 0, consumo: { ...CONSUMO_ZERO }, unica: false, ...o,
   })
   it('com relógio: chama; sem relógio para uma chamada: cede para uma invocação nova', () => {
-    expect(decidirFrente(f(), 300_000, AGORA)).toBe('chamar')
-    expect(decidirFrente(f(), FOLGA_PARA_NOVA_CHAMADA_MS - 1, AGORA)).toBe('ceder')
+    expect(decidirFrente(f(), 300_000)).toBe('chamar')
+    expect(decidirFrente(f(), FOLGA_PARA_NOVA_CHAMADA_MS - 1)).toBe('ceder')
   })
   it(`no teto (${TETO_DA_FRENTE_MIN} min, invocações, buscas e páginas, interrupções sem avanço): encerra com o que tem`, () => {
-    expect(decidirFrente(f(), 300_000, minutosDepois(TETO_DA_FRENTE_MIN))).toBe('encerrar')
-    expect(decidirFrente(f({ invocacoes: MAX_INVOCACOES_DA_FRENTE + 1 }), 300_000, AGORA)).toBe('encerrar')
-    expect(decidirFrente(f({ interrupcoes_sem_avanco: 2 }), 300_000, AGORA)).toBe('encerrar')
-    expect(decidirFrente(f({ consumo: { ...CONSUMO_ZERO, buscas: MAX_BUSCAS_POR_FRENTE, fetches: MAX_PAGINAS_POR_FRENTE } }), 300_000, AGORA)).toBe('encerrar')
+    expect(decidirFrente(f({ segundos: TETO_DA_FRENTE_MIN * 60 }), 300_000)).toBe('encerrar')
+    expect(decidirFrente(f({ invocacoes: MAX_INVOCACOES_DA_FRENTE + 1 }), 300_000)).toBe('encerrar')
+    expect(decidirFrente(f({ interrupcoes_sem_avanco: 2 }), 300_000)).toBe('encerrar')
+    expect(decidirFrente(f({ consumo: { ...CONSUMO_ZERO, buscas: MAX_BUSCAS_POR_FRENTE, fetches: MAX_PAGINAS_POR_FRENTE } }), 300_000)).toBe('encerrar')
     // No teto mas sem relógio: cede, e a próxima invocação encerra.
-    expect(decidirFrente(f(), 10_000, minutosDepois(TETO_DA_FRENTE_MIN))).toBe('ceder')
+    expect(decidirFrente(f({ segundos: TETO_DA_FRENTE_MIN * 60 }), 10_000)).toBe('ceder')
+  })
+  // O TEMPO DE TRABALHO, NÃO O DE RELÓGIO (08/10/2026): a frente órfã relançada
+  // horas depois não chega estourada; a invocação em curso conta.
+  it('o teto de tempo conta o trabalho das invocações, não o tempo parada', () => {
+    expect(decidirFrente(f({ segundos: 0, invocacoes: 2 }), 300_000)).toBe('chamar')
+    expect(decidirFrente(f({ segundos: TETO_DA_FRENTE_MIN * 60 - 60 }), 30_000)).toBe('encerrar')
   })
   it('a rede da rede: invocações demais, desiste sem chamar nada', () => {
-    expect(decidirFrente(f({ invocacoes: MAX_INVOCACOES_DA_FRENTE + 3 }), 300_000, AGORA)).toBe('desistir')
+    expect(decidirFrente(f({ invocacoes: MAX_INVOCACOES_DA_FRENTE + 3 }), 300_000)).toBe('desistir')
   })
   it('o max_uses de cada chamada é o que sobra do teto da frente (nunca menos de 1)', () => {
     expect(usosRestantes({ unica: false, consumo: { ...CONSUMO_ZERO, buscas: 4, fetches: 1 } })).toEqual({ buscas: 2, paginas: 3 })
@@ -579,5 +589,61 @@ describe('o estado nasce no formato 2, e o de antes é reconhecido', () => {
     expect(ehEstadoV2(e)).toBe(true)
     expect(ehEstadoV2({ texto: 'antigo', fontes: [] })).toBe(false)
     expect(frenteNova('f9', PLANO_DO_DONO.frentes[0] as FrenteDoPlano).conversa).toBeNull()
+  })
+})
+
+/**
+ * A FRENTE ÓRFÃ (08/10/2026): na geração do Renan de Santana, a frente da EC
+ * 136 foi tomada e a invocação morreu no primeiro segundo; as irmãs terminaram
+ * e a redação esperou por ela para sempre. O vigia a acha e a relança.
+ */
+describe('frentesOrfas — o vigia das frentes', () => {
+  const comQuatro = () => {
+    let e = comPlano(estadoInicial('P', AGORA), planoDaSaida(PLANO_DO_DONO), null, null, AGORA)
+    for (const id of ['f1', 'f2', 'f3', 'f4']) e = tomarFrente(e, id, `inv-${id}`, null, AGORA)!
+    return e
+  }
+  const fim = {
+    status: 'pronta' as const, dossie: { texto: 'achado', fontes: [] }, parcial: false, erro: null,
+    consumo: { ...CONSUMO_ZERO, buscas: 3 }, segundos: 100, retomadas: 0,
+  }
+
+  it('o caso do Renan: três prontas, a da EC 136 sem sinal desde a tomada — órfã depois de 3 min', () => {
+    let e = comQuatro()
+    for (const id of ['f1', 'f2', 'f4']) e = fecharFrente(e, id, `inv-${id}`, fim, minutosDepois(2))!.estado
+    expect(frentesOrfas(e, minutosDepois(2.5))).toEqual([])
+    expect(frentesOrfas(e, new Date(AGORA.getTime() + FRENTE_SEM_SINAL_MS + 1000))).toEqual([{ id: 'f3', anterior: 'inv-f3' }])
+  })
+
+  it('o relançamento toma a frente (com a invocação anterior) e só uma vez', () => {
+    const e = comQuatro()
+    const depois = minutosDepois(4)
+    const [o] = frentesOrfas(e, depois).filter((x) => x.id === 'f3')
+    const tomada = tomarFrente(e, 'f3', 'inv-nova', o.anterior, depois)!
+    expect(tomada.frentes.find((f) => f.id === 'f3')?.invocacoes).toBe(2)
+    // O SEGUNDO VIGIA, com a mesma invocação anterior: a frente já é de outra, com pulso fresco.
+    expect(tomarFrente(tomada, 'f3', 'inv-outra', o.anterior, depois)).toBeNull()
+    expect(frentesOrfas(tomada, depois).map((x) => x.id)).not.toContain('f3')
+  })
+
+  it('a frente viva (checkpoint recente) não é órfã; fora da pesquisa, nada é órfão', () => {
+    const e = comQuatro()
+    expect(frentesOrfas(e, minutosDepois(2))).toEqual([])
+    expect(frentesOrfas({ ...e, fase: 'redigindo' }, minutosDepois(30))).toEqual([])
+  })
+
+  it('a frente que nunca foi tomada (o disparo se perdeu) conta do fim do plano', () => {
+    const e = comPlano(estadoInicial('P', AGORA), planoDaSaida(PLANO_DO_DONO), null, null, AGORA)
+    expect(frentesOrfas(e, minutosDepois(1))).toEqual([])
+    expect(frentesOrfas(e, minutosDepois(4)).map((x) => x.anterior)).toEqual(e.frentes.map(() => null))
+  })
+
+  it('a função relança quando uma irmã fecha, e a janela vigia a cada minuto', () => {
+    const f = readFileSync(join(__dirname, '..', '..', '..', 'supabase/functions/justificativa-tecnica/index.ts'), 'utf8')
+    expect(f).toContain("else if (feito.ok) await vigiarFrentes(svc, leadId, tentativa).catch(() => 0)")
+    expect(f).toContain("if (acao === 'vigiar') return await vigiar(req, svc, body)")
+    const j = readFileSync(join(__dirname, '..', '..', 'components/JustificativaTecnica.tsx'), 'utf8')
+    expect(j).toContain("invokeFunction<{ relancadas?: number }>(FUNCAO, { acao: 'vigiar', kommo_lead_id: leadId })")
+    expect(j).toContain('setInterval(vigiar, 60_000)')
   })
 })

@@ -105,6 +105,7 @@ import {
   estadoInicial,
   fecharFrente,
   FOLGA_PARA_NOVA_CHAMADA_MS,
+  frentesOrfas,
   gravarComVersao,
   MAX_TOKENS_DA_PAGINA,
   type MensagemDaConversa,
@@ -308,6 +309,33 @@ function dispararEtapa(
   })()
   emSegundoPlano(p)
   return p
+}
+
+/**
+ * O VIGIA DAS FRENTES (08/10/2026): relança as frentes órfãs desta geração —
+ * pesquisando e sem sinal há mais de 3 min, isto é, com a invocação morta no
+ * caminho (ver `frentesOrfas`). Roda quando uma frente fecha (as irmãs vigiam
+ * umas às outras) e quando a janela pede (`acao: 'vigiar'`, a cada minuto,
+ * enquanto ela está aberta numa geração em curso). Devolve quantas relançou.
+ */
+async function vigiarFrentes(svc: SupabaseClient, leadId: number, tentativa: string): Promise<number> {
+  const e = await lerEstado(svc, leadId, tentativa).catch(() => null)
+  if (!e) return 0
+  const orfas = frentesOrfas(e)
+  await Promise.all(orfas.map((o) => dispararEtapa(leadId, tentativa, 'frente', { frente: o.id, anterior: o.anterior })))
+  return orfas.length
+}
+
+/** A ação da janela: vigia a geração em curso do card (ver `vigiarFrentes`). */
+async function vigiar(req: Request, svc: SupabaseClient, body: Record<string, unknown>): Promise<Response> {
+  const caller = await getCallerAtivo(req, svc)
+  if (!caller) return erro(ERRO_ACESSO, 401)
+  const leadId = Number(body.kommo_lead_id)
+  if (!leadId) return erro('kommo_lead_id é obrigatório.', 400)
+  const linha = await lerLinha(svc, leadId)
+  if (!linha || linha.status !== 'gerando') return jsonResponse({ ok: true, relancadas: 0 })
+  const relancadas = await vigiarFrentes(svc, leadId, String(linha.tentativa ?? ''))
+  return jsonResponse({ ok: true, relancadas })
 }
 
 /** A mensagem que a pessoa lê quando a IA falha — sem pilha, sem inglês cru. */
@@ -517,6 +545,9 @@ async function rodarFrente(
     // A TRAVA DA REDAÇÃO: a marca entrou na mesma gravação condicional que
     // fechou a frente. Só quem gravou com ela dispara.
     if (feito.ok && dispara) await dispararEtapa(leadId, tentativa, 'redacao')
+    // AS IRMÃS VIGIAM UMAS ÀS OUTRAS: ao fechar, relança a frente que tenha
+    // morrido sem sinal — senão a redação esperaria por ela para sempre.
+    else if (feito.ok) await vigiarFrentes(svc, leadId, tentativa).catch(() => 0)
   }
 
   /** Salva a conversa e passa a frente para uma invocação nova (relógio zerado). */
@@ -1059,7 +1090,8 @@ Deno.serve(async (req: Request) => {
     if (acao === 'gerar') return await gerar(req, svc, body)
     if (acao === 'rascunho') return await rascunho(req, svc, body)
     if (acao === 'enviar') return await enviar(req, svc, body)
-    return erro('Ação desconhecida. Use gerar, rascunho ou enviar.', 400)
+    if (acao === 'vigiar') return await vigiar(req, svc, body)
+    return erro('Ação desconhecida. Use gerar, rascunho, enviar ou vigiar.', 400)
   } catch (e) {
     if (e instanceof TabelaAusente) return semMigracao()
     return erro('Falha na justificativa técnica: ' + ((e as Error)?.message ?? String(e)), 500)
