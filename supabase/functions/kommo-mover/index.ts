@@ -16,6 +16,7 @@
 //   - Não existe forma de suprimir as automações do Kommo num PATCH de lead:
 //     mover pelo app dispara o Digital Pipeline configurado no funil.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { destinoPermitido } from '../_shared/trilhasDoPrecatorio.ts'
 // AS COLUNAS DO RPV moram em `_shared/colunasRpv.ts`, para o teste as prender.
@@ -154,7 +155,7 @@ Deno.serve(async (req: Request) => {
     let leitura: LeituraDoKommo | null | undefined = undefined
     if (passoDoMovimento(statusId, espelho?.status_id) === 'CONFERIR_NO_KOMMO') {
       try {
-        const resLido = await fetch(`${base}/leads/${leadId}`, { headers })
+        const resLido = await kommoFetch(`${base}/leads/${leadId}`, { headers })
         leitura = resLido.ok ? lerLeituraDoKommo(await resLido.json().catch(() => null)) : null
       } catch {
         // Leitura que falha não para o movimento: segue como sempre seguiu.
@@ -219,11 +220,13 @@ Deno.serve(async (req: Request) => {
 
     // 1. Move o card. Vem primeiro de propósito: se a anotação falhasse antes
     // do PATCH, o card teria registro de uma movimentação que não aconteceu.
-    const resMove = await fetch(`${base}/leads/${leadId}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({ status_id: statusId }),
-    })
+    // IDEMPOTENTE (o mesmo status duas vezes deixa o card no mesmo lugar): pode
+    // ser repetido depois de 429 ou 5xx — ver kommoFetch.
+    const resMove = await kommoFetch(
+      `${base}/leads/${leadId}`,
+      { method: 'PATCH', headers, body: JSON.stringify({ status_id: statusId }) },
+      { idempotente: true },
+    )
     if (!resMove.ok) {
       const txt = await resMove.text().catch(() => '')
       return jsonResponse(
@@ -245,7 +248,7 @@ Deno.serve(async (req: Request) => {
     /** O fetch da nota, que nunca rejeita: devolve o não-ok ou o motivo. */
     const fetchDaNota = async (url: string, init: RequestInit) => {
       try {
-        return await fetch(url, init)
+        return await kommoFetch(url, init)
       } catch (e) {
         return { ok: false, status: 0, motivo: (e as Error)?.message ?? String(e) } as
           { ok: false; status: number; motivo: string }

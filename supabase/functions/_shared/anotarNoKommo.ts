@@ -10,6 +10,7 @@
 //
 // Sem `Deno.` e sem `npm:` — quem chama passa o par token + subdomínio.
 
+import { kommoFetch } from './kommoFetch.ts'
 import { assinarNota, marcarComoDePessoa } from './notaCredijuris.ts'
 
 export interface OpcoesDaNota {
@@ -41,7 +42,8 @@ export async function postarNotas(
   textos: readonly string[],
   op: OpcoesDaNota,
 ): Promise<ResultadoDasNotas> {
-  const res = await fetch(`https://${conta.subdominio}.kommo.com/api/v4/leads/notes`, {
+  // POST: repetido só com 429 (não processado) — ver kommoFetch.
+  const res = await kommoFetch(`https://${conta.subdominio}.kommo.com/api/v4/leads/notes`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${conta.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(corpoDasNotas(leadId, textos, op)),

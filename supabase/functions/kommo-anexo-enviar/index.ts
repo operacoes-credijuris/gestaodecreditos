@@ -27,6 +27,7 @@
 //   x-tamanho (bytes). O TAMANHO VAI EM CABEÇALHO PRÓPRIO porque o Content-Length
 //   pode não chegar até aqui: no caminho do navegador à função o corpo pode ser
 //   reenviado em blocos, e sem tamanho a sessão do Kommo não abre.
+import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
 import { marcarComoDePessoa } from '../_shared/notaCredijuris.ts'
@@ -147,11 +148,11 @@ Deno.serve(async (req: Request) => {
     if (!uuid) throw new Error('o drive do Kommo terminou o envio sem devolver o arquivo')
 
     // 3. O ARQUIVO no card.
-    const rAnexo = await fetch(`${base}/leads/${leadId}/files`, {
+    const rAnexo = await kommoFetch(`${base}/leads/${leadId}/files`, {
       method: 'PUT',
       headers: { ...auth, 'Content-Type': 'application/json' },
       body: JSON.stringify([{ file_uuid: uuid }]),
-    })
+    }, { idempotente: true /* vincular o mesmo arquivo de novo não duplica */ })
     if (!rAnexo.ok) {
       return responder({ erro: `O arquivo subiu, mas o Kommo recusou anexá-lo ao card (HTTP ${rAnexo.status}).` }, 502)
     }
@@ -160,7 +161,7 @@ Deno.serve(async (req: Request) => {
     const { data: perfil } = await svc.from('profiles').select('nome, email').eq('id', caller.id).maybeSingle()
     const autor = perfil?.nome?.trim() || perfil?.email || caller.email || null
     const gravarNota = async (nota: Record<string, unknown>): Promise<string | null> => {
-      const r = await fetch(`${base}/leads/notes`, {
+      const r = await kommoFetch(`${base}/leads/notes`, {
         method: 'POST',
         headers: { ...auth, 'Content-Type': 'application/json' },
         body: JSON.stringify([{ entity_id: leadId, ...nota }]),

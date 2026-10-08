@@ -68,6 +68,7 @@
 // as outras: entra pelo `tags_to_add`, que cria a etiqueta na conta na primeira
 // vez em que é aplicada (ver o cabeçalho de etiquetasDoFundo.ts), sem cotação.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
 import {
@@ -117,7 +118,7 @@ async function lerCamposDaConta(
 ): Promise<{ campos: CampoDoKommo[]; grupos: GrupoDoKommo[] }> {
   const campos: CampoDoKommo[] = []
   for (let pagina = 1; pagina <= 20; pagina++) {
-    const res = await fetch(`${base}/leads/custom_fields?limit=50&page=${pagina}`, { headers })
+    const res = await kommoFetch(`${base}/leads/custom_fields?limit=50&page=${pagina}`, { headers })
     // 204 é "não há (mais) nada" — e o corpo vem vazio, então .json() estouraria.
     if (res.status === 204) break
     if (!res.ok) throw new Error(`Não consegui ler os campos do card no Kommo (HTTP ${res.status}).`)
@@ -132,7 +133,7 @@ async function lerCamposDaConta(
   // nome em qualquer aba (ver `campoDoFundo`). Falhar aqui não impede a cotação.
   let grupos: GrupoDoKommo[] = []
   try {
-    const res = await fetch(`${base}/leads/custom_fields/groups`, { headers })
+    const res = await kommoFetch(`${base}/leads/custom_fields/groups`, { headers })
     if (res.ok && res.status !== 204) {
       const j = (await res.json()) as { _embedded?: { custom_field_groups?: GrupoDoKommo[] } }
       grupos = j._embedded?.custom_field_groups ?? []
@@ -295,35 +296,45 @@ Deno.serve(async (req: Request) => {
     // que o comercial pôs há dez minutos ainda não chegou aqui pelo sync. Se a
     // leitura falhar, vale o espelho.
     let doCard = (espelho.tags ?? []) as string[]
+    // O ID DE CADA ETIQUETA DO CARD, pelo nome como o Kommo o devolve: é por ele
+    // que se tira (08/10/2026). Pelo nome, o "&" que a API devolve como "&amp;"
+    // ("Cotado K &amp; WC Ativos") podia não casar com a etiqueta da conta.
+    const idDaEtiqueta = new Map<string, number>()
     try {
-      const resAntes = await fetch(`${base}/leads/${leadId}`, { headers })
+      const resAntes = await kommoFetch(`${base}/leads/${leadId}`, { headers })
       if (resAntes.ok) {
-        const antes = (await resAntes.json()) as { _embedded?: { tags?: { name?: string }[] } }
+        const antes = (await resAntes.json()) as { _embedded?: { tags?: { id?: number; name?: string }[] } }
         const lidas = antes?._embedded?.tags
-        if (Array.isArray(lidas)) doCard = lidas.map((t) => String(t?.name ?? '').trim()).filter(Boolean)
+        if (Array.isArray(lidas)) {
+          doCard = lidas.map((t) => String(t?.name ?? '').trim()).filter(Boolean)
+          for (const t of lidas) if (t?.name && Number(t?.id) > 0) idDaEtiqueta.set(String(t.name).trim(), Number(t.id))
+        }
       }
     } catch {
       /* rede: fica o espelho */
     }
     const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []
     const aTirar = etiquetasATirar(acao, etiqueta, doCard)
+    const paraTirar = aTirar.map((name) => (idDaEtiqueta.has(name) ? { id: idDaEtiqueta.get(name)! } : { name }))
     const patch = acao === 'adicionar'
       ? {
         tags_to_add: [{ name: etiqueta }],
-        ...(aTirar.length > 0 ? { tags_to_delete: aTirar.map((name) => ({ name })) } : {}),
+        ...(paraTirar.length > 0 ? { tags_to_delete: paraTirar } : {}),
         ...(campo && textoDoCampo
           ? { custom_fields_values: [{ field_id: campo.id, values: [{ value: textoDoCampo }] }] }
           : {}),
       }
-      : { tags_to_delete: aTirar.map((name) => ({ name })) }
+      : { tags_to_delete: paraTirar }
     // TIRAR O QUE O CARD NÃO TEM é não fazer nada: sem PATCH, segue para a releitura.
+    // O PATCH É IDEMPOTENTE (pôr o que já está, tirar o que já saiu, gravar o
+    // mesmo texto no campo): pode ser repetido depois de 429 ou 5xx.
     const res = acao === 'remover' && aTirar.length === 0
       ? new Response(null, { status: 204 })
-      : await fetch(`${base}/leads/${leadId}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify(patch),
-      })
+      : await kommoFetch(
+        `${base}/leads/${leadId}`,
+        { method: 'PATCH', headers, body: JSON.stringify(patch) },
+        { idempotente: true },
+      )
     if (!res.ok) {
       const txt = await res.text().catch(() => '')
       return jsonResponse(
@@ -348,7 +359,7 @@ Deno.serve(async (req: Request) => {
     let campos: ValorDeCampo[] | null = null
     let aviso: string | null = null
     try {
-      const resLead = await fetch(`${base}/leads/${leadId}`, { headers })
+      const resLead = await kommoFetch(`${base}/leads/${leadId}`, { headers })
       if (resLead.ok) {
         const lead = (await resLead.json()) as {
           _embedded?: { tags?: { name?: string }[] }
@@ -458,7 +469,8 @@ Deno.serve(async (req: Request) => {
           : `Etiqueta "${etiqueta}" aplicada por ${autor}.`
         : `Etiqueta "${etiqueta}" removida por ${autor}.`) + comCotacao
     try {
-      const resNota = await fetch(`${base}/leads/notes`, {
+      // POST: só se repete com 429 (não processado) — ver kommoFetch.
+      const resNota = await kommoFetch(`${base}/leads/notes`, {
         method: 'POST',
         headers,
         body: JSON.stringify([
