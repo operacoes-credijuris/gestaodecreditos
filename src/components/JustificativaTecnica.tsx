@@ -30,6 +30,7 @@ import { cn } from '@/lib/cn'
 import { supabase } from '@/lib/supabase'
 import { codigoDoErro, invokeFunction } from '@/lib/functions'
 import { comecarNoCard, terminarNoCard, type PorCard } from '@/lib/emCursoPorCard'
+import { comRascunhoSalvo } from '@/lib/rascunhoDaJustificativa'
 import type { KommoLead } from '@/lib/types'
 import { CaixaDeAviso, IdentificacaoDoCard } from '@/components/analise/Pecas'
 import { Modal } from '@/components/ui/Modal'
@@ -223,6 +224,12 @@ export function JanelaJustificativa({
   const toast = useToast()
   const leadId = lead?.kommo_lead_id ?? 0
   const aberta = lead !== null
+  // O CARD ABERTO AGORA (09/10/2026): a janela é uma só, e a resposta de um
+  // pedido do card A pode voltar com a do B aberta. O que é do A (o cache, o
+  // aviso de falha) segue valendo; o que é da janela (o estado do rascunho, o
+  // erro, o fechar) só vale se ela ainda for do A.
+  const cardAberto = useRef(leadId)
+  cardAberto.current = leadId
 
   const consulta = useQuery({
     queryKey: [TABELA, leadId],
@@ -285,13 +292,16 @@ export function JanelaJustificativa({
         await invokeFunction(FUNCAO, { acao: 'gerar', kommo_lead_id: leadId, refazer })
         await atualizar()
       } catch (e) {
-        if (codigoDoErro(e) === 'migracao-pendente') setMigracaoPelaFuncao(true)
+        // A RESPOSTA É DESTE CARD (09/10/2026): voltando com a janela já noutro,
+        // o erro não pode aparecer como se fosse do outro — vai para o aviso.
+        if (cardAberto.current !== leadId) toast.error(`A justificativa de outro card não foi gerada: ${(e as Error).message}`)
+        else if (codigoDoErro(e) === 'migracao-pendente') setMigracaoPelaFuncao(true)
         else setErroDoPedido((e as Error).message)
       } finally {
         setPedindo(false)
       }
     },
-    [leadId, atualizar],
+    [leadId, atualizar, toast],
   )
 
   // ABRIR PELA PRIMEIRA VEZ É O PEDIDO: sem linha (e com a leitura certa — nunca
@@ -342,32 +352,63 @@ export function JanelaJustificativa({
         setRascunho('salvo')
         return
       }
+      const doCard = linha.kommo_lead_id
+      // FECHADA (0) AINDA É DELE: o Fechar salva a edição pendente, e o estado
+      // tem de voltar a "salvo" — reaberta, a janela do mesmo card não recarrega
+      // o campo, e um "salvando" preso desligaria o Enviar.
+      const daJanela = () => cardAberto.current === doCard || cardAberto.current === 0
       setRascunho('salvando')
       try {
         const r = await invokeFunction<{ rascunho_em: string }>(FUNCAO, {
-          acao: 'rascunho', kommo_lead_id: linha.kommo_lead_id, tentativa: linha.tentativa, texto: valor,
+          acao: 'rascunho', kommo_lead_id: doCard, tentativa: linha.tentativa, texto: valor,
         })
+        const em = r?.rascunho_em ?? new Date().toISOString()
+        // A EDIÇÃO SALVA ENTRA NO CACHE (ver lib/rascunhoDaJustificativa.ts):
+        // sem isto, reabrir este card depois de outro trazia o texto sem ela.
+        qc.setQueryData<Linha | null>([TABELA, doCard], (antes) =>
+          comRascunhoSalvo(antes, { kommo_lead_id: doCard, tentativa: linha.tentativa, texto: valor, rascunho_em: em }),
+        )
+        if (!daJanela()) return
         ultimoEnviado.current = valor
-        setSalvoEm(r?.rascunho_em ?? new Date().toISOString())
+        setSalvoEm(em)
         setRascunho('salvo')
       } catch (e) {
-        setRascunho('erro')
         toast.error(`O rascunho não foi salvo: ${(e as Error).message}`)
+        if (daJanela()) setRascunho('erro')
       }
     },
-    [linha, toast],
+    [linha, toast, qc],
   )
 
   const cancelarRelogio = () => {
     if (relogio.current !== null) window.clearTimeout(relogio.current)
     relogio.current = null
+    pendente.current = null
   }
-  useEffect(() => cancelarRelogio, [])
+  // SAIR DA TELA NÃO PERDE A ÚLTIMA EDIÇÃO (09/10/2026): o relógio da pausa era
+  // cancelado na desmontagem, e o que se digitou no último segundo antes de
+  // trocar de página não era salvo. Agora ele sai na hora, como no Fechar.
+  const pendente = useRef<string | null>(null)
+  const salvarAgora = useRef(salvarRascunho)
+  salvarAgora.current = salvarRascunho
+  useEffect(
+    () => () => {
+      const valor = pendente.current
+      cancelarRelogio()
+      if (valor !== null) void salvarAgora.current(valor)
+    },
+    [],
+  )
 
   function agendarRascunho(valor: string) {
     setRascunho('pendente')
     cancelarRelogio()
-    relogio.current = window.setTimeout(() => void salvarRascunho(valor), ESPERA_RASCUNHO_MS)
+    pendente.current = valor
+    relogio.current = window.setTimeout(() => {
+      relogio.current = null
+      pendente.current = null
+      void salvarRascunho(valor)
+    }, ESPERA_RASCUNHO_MS)
   }
   function aoDigitarCorpo(valor: string) {
     setCorpo(valor)
@@ -414,7 +455,9 @@ export function JanelaJustificativa({
           : 'Justificativa enviada ao card no Kommo.',
       )
       await atualizar()
-      onFechar()
+      // SÓ FECHA A JANELA DESTE CARD (09/10/2026): fechada durante o envio e
+      // aberta noutro card, ela fechava sozinha quando o envio do primeiro voltava.
+      if (cardAberto.current === leadId) onFechar()
     } catch (e) {
       toast.error(`${(e as Error).message}`)
       await atualizar()

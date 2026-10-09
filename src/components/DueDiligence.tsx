@@ -214,7 +214,7 @@ export function DueDiligence({
   async function seguir() {
     setSeguindo(true)
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('dd_historico')
         .update({ liberado_em: new Date().toISOString(), liberado_por: user?.id ?? null })
         .eq('kommo_lead_id', leadId)
@@ -227,7 +227,20 @@ export function DueDiligence({
         // linhas recusadas também: o banco recusava a gravação INTEIRA, e a
         // verba que sobrou não era liberada.
         .is('reprovado_em', null)
+        // QUANTAS LINHAS A LIBERAÇÃO PEGOU (09/10/2026): com a busca ainda no ar,
+        // ou falhada, nenhuma linha está APURADA e o update não grava nada — e a
+        // janela fechava como se tivesse liberado. A análise seguinte lia a
+        // diligência sem a liberação ("Sim, tem dívida"), e ninguém sabia por quê.
+        .select('id')
       if (error) throw new Error(error.message)
+      // SEGUE MESMO ASSIM — Seguir também é o caminho de quem não tem o que
+      // apurar —, mas DIZ que nada foi liberado.
+      if ((data ?? []).length === 0) {
+        toast.error(
+          'Nada foi liberado: este card não tem apuração de processos concluída (a busca ainda está ' +
+            'rodando, falhou ou não foi feita). Se a busca estiver rodando, espere e clique em Seguir de novo.',
+        )
+      }
       onSeguir?.()
       onClose()
     } catch (e) {

@@ -7,17 +7,33 @@
 // A PONTUAÇÃO DO FIM DA FRASE NÃO É DO LINK: "veja https://x.gov.br/doc." leva
 // o ponto para fora; o ")" final também, quando o link não abriu parêntese
 // (o caso "(https://x.gov.br)").
+//
+// AS ASPAS CURVAS, AS RETICÊNCIAS E O "]" TAMBÉM NÃO (09/10/2026): o texto
+// colado do WhatsApp ou do Word chega com “https://x.gov.br”, e a frase
+// cortada termina em "https://x.gov.br…" — o link levava o ” e o …, e abria um
+// endereço que não existe. Num endereço de verdade esses caracteres vêm
+// codificados (%E2%80%9D), então nunca são dele. O "]" e o "}" saem como o
+// ")": só quando o link não abriu o par.
 
 export type PedacoDoTexto = { tipo: 'texto'; texto: string } | { tipo: 'link'; texto: string; href: string }
 
-const ENDERECO = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi
+const ENDERECO = /\b(?:https?:\/\/|www\.)[^\s<>"'“”‘’«»]+/gi
+
+/** Os pares que o link pode conter, quando os abre: (…), […] e {…}. */
+const PARES: Record<string, string> = { ')': '(', ']': '[', '}': '{' }
+
+const conta = (u: string, c: string) => u.split(c).length - 1
 
 function semPontuacaoFinal(url: string): string {
-  let u = url.replace(/[.,;:!?]+$/, '')
-  while (u.endsWith(')') && (u.match(/\(/g)?.length ?? 0) < (u.match(/\)/g)?.length ?? 0)) {
-    u = u.slice(0, -1).replace(/[.,;:!?]+$/, '')
+  let u = url
+  for (;;) {
+    const antes = u
+    u = u.replace(/[.,;:!?…]+$/, '')
+    const fim = u.slice(-1)
+    const abre = PARES[fim]
+    if (abre && conta(u, abre) < conta(u, fim)) u = u.slice(0, -1)
+    if (u === antes) return u
   }
-  return u
 }
 
 export function pedacosComLinks(texto: string): PedacoDoTexto[] {

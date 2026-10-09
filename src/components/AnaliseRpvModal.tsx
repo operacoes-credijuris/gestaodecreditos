@@ -1356,6 +1356,8 @@ export function AnaliseRpvModal({
    * janela; quem quer resolver agora usa os campos manuais.
    */
   const cartorioFalhou = useRef(false)
+  /** Qual execução do levantamento do cartório é a da vez (ver `levantarRegraCartorio`). */
+  const execucaoDoCartorio = useRef(0)
 
   // Uma análise só, ao abrir. Reabrir a janela do mesmo card recomeça do zero
   // (a página monta a janela com `key` pelo card) — é o comportamento que se
@@ -1827,7 +1829,14 @@ export function AnaliseRpvModal({
    * muda, nem aviso de "saiu da faixa": o preço e o emolumento vêm da mesma
    * faixa por construção.
    */
-  async function levantarRegraCartorio(r: RespostaAnaliseRpv): Promise<void> {
+  async function levantarRegraCartorio(
+    r: RespostaAnaliseRpv,
+    /**
+     * O cenário da análise `r`, quando ele acabou de mudar: o `corpoCard` desta
+     * renderização ainda leva o anterior, e a reprecificação o desfaria.
+     */
+    tipo?: string,
+  ): Promise<void> {
     const uf = r.cartorio?.uf
     if (r.reprovado || !uf || !r.cartorio?.falta_regra) return
     // Já falhou nesta janela: não insiste a cada mensagem do chat. Quem quer
@@ -1842,6 +1851,10 @@ export function AnaliseRpvModal({
     // fechar não a muda — a consulta seguia perguntando por até dez minutos e
     // ainda reprecificava, no fim, para uma tela que não existia mais.
     const parou = () => !vivo.current || revisao.current !== naEpoca
+    // ESTA É A EXECUÇÃO DA VEZ? Uma revisão no meio para a anterior e começa
+    // outra (09/10/2026); a anterior, ao sair, apagava o andamento da nova — a
+    // faixa sumia e os campos manuais apareciam com o levantamento ainda no ar.
+    const minha = ++execucaoDoCartorio.current
 
     setPassoCartorio(`Levantando a tabela de emolumentos de ${uf}…`)
     try {
@@ -1853,6 +1866,10 @@ export function AnaliseRpvModal({
       let e: RespostaConsultaEmolumentos | null = null
       let falhasSeguidas = 0
       for (let volta = 0; ; volta++) {
+        // ANTES DE CADA PERGUNTA, e não só depois: fechada a janela durante uma
+        // espera, a volta seguinte ainda consultava o servidor para uma tela
+        // que não existia mais.
+        if (parou()) return
         try {
           e = await comPrazo(
             invokeFunction<RespostaConsultaEmolumentos>('gerar-analise-rpv', { acao: 'emolumentos', uf }),
@@ -1927,6 +1944,7 @@ export function AnaliseRpvModal({
         emolumentos: e.emolumentos,
         avisos_qualificacao: r.avisos_qualificacao ?? [],
         ...corpoCard,
+        ...(tipo ? { tipo_aquisicao: tipo } : {}),
       })
       if (parou()) return
       setFalhaCartorio(null)
@@ -1942,7 +1960,7 @@ export function AnaliseRpvModal({
         }. O preço está sem escritura e registro.`,
       )
     } finally {
-      setPassoCartorio(null)
+      if (execucaoDoCartorio.current === minha) setPassoCartorio(null)
     }
   }
 
@@ -1998,11 +2016,21 @@ export function AnaliseRpvModal({
       })
       if (revisao.current !== naEpoca) return
       setAtual(r)
+      // O LEVANTAMENTO DO CARTÓRIO RECOMEÇA (09/10/2026). O incremento acima
+      // para o que estava no ar, e nada o retomava: sem a tabela ainda, o preço
+      // do cenário novo ficava "sem cartório" para sempre, a faixa sumia e só
+      // uma mensagem no chat voltava a procurar. Com o cenário NOVO, que o
+      // `corpoCard` desta renderização ainda não tem.
+      void levantarRegraCartorio(r, novo)
     } catch (e) {
       // O SELETOR VOLTA AO QUE OS NÚMEROS SÃO. Ficando no novo, a tela mostrava
       // o preço do cenário anterior sob o rótulo do novo, e o Salvar seguinte
       // mandava os dois juntos: planilha de um cenário, nome de outro.
-      if (revisao.current === naEpoca) setCenario(anterior)
+      if (revisao.current === naEpoca) {
+        setCenario(anterior)
+        // A análise na tela continua a de antes: o levantamento parado volta a valer para ela.
+        void levantarRegraCartorio(atual, anterior)
+      }
       setErro((e as Error)?.message ?? String(e))
     } finally {
       setTrocandoCenario(false)
@@ -2047,12 +2075,15 @@ export function AnaliseRpvModal({
       // regra do estado já viajou junto e o motor recalculou o cartório do preço
       // novo sozinho. Isto aqui só cobre o caso de a regra ainda não existir —
       // primeira análise que falhou, ou UF corrigida no chat.
-      void levantarRegraCartorio(r)
+      void levantarRegraCartorio(r, c ?? undefined)
     } catch (e) {
       setMensagens((m) => [
         ...m,
         { papel: 'ia', texto: `Não consegui aplicar: ${(e as Error)?.message ?? String(e)}` },
       ])
+      // O PEDIDO FALHOU, A ANÁLISE NA TELA É A DE ANTES — e o levantamento que o
+      // pedido parou (o incremento da revisão) volta a valer para ela (09/10/2026).
+      void levantarRegraCartorio(atual)
     } finally {
       setPasso(null)
     }

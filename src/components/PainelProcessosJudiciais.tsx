@@ -64,6 +64,7 @@ import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
 import { formatCpfCnpjInput, mesAno, onlyDigits } from '@/lib/format'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
+import { apuracaoMaisRecente } from '@/lib/apuracaoMaisRecente'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import type {
   ApuracaoDD,
@@ -353,9 +354,11 @@ export function PainelProcessosJudiciais({
   }, [ativo, carregar])
 
   // Prefill a partir do que JÁ foi apurado, para reapurar não exigir redigitar.
+  // A MAIS RECENTE DO PAPEL, e não a primeira que o banco devolve (ver
+  // lib/apuracaoMaisRecente.ts): corrigido o titular, a linha antiga continua lá.
   useEffect(() => {
-    const cedente = apuracoes.find((a) => a.papel === 'CEDENTE')
-    const advogado = apuracoes.find((a) => a.papel === 'ADVOGADO')
+    const cedente = apuracaoMaisRecente(apuracoes, 'CEDENTE')
+    const advogado = apuracaoMaisRecente(apuracoes, 'ADVOGADO')
     if (cedente) {
       setCedenteNome((v) => v || cedente.nome || '')
       setCedenteCpf((v) => v || formatCpfCnpjInput(cedente.documento ?? ''))

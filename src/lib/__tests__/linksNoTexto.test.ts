@@ -29,6 +29,19 @@ describe('pedacosComLinks', () => {
     expect(pedacosComLinks('')).toEqual([])
   })
 
+  // AUDITORIA DE 09/10/2026: o texto colado do WhatsApp/Word traz aspas curvas
+  // e reticências, e o link as levava — abria um endereço que não existe.
+  it('aspas curvas, reticências e o "]" sem par ficam fora do link', () => {
+    expect(links('“https://x.gov.br/doc”')).toEqual(['https://x.gov.br/doc'])
+    expect(links('ver ‘https://x.gov.br’ e «https://y.gov.br»')).toEqual(['https://x.gov.br', 'https://y.gov.br'])
+    expect(links('a frase cortada https://x.gov.br/doc…')).toEqual(['https://x.gov.br/doc'])
+    expect(links('[https://x.gov.br/doc]')).toEqual(['https://x.gov.br/doc'])
+    expect(links('{https://x.gov.br/doc}.')).toEqual(['https://x.gov.br/doc'])
+    // O par aberto DENTRO do link continua dele.
+    expect(links('https://x.gov.br/a[1]')).toEqual(['https://x.gov.br/a[1]'])
+    expect(links('(veja https://x.gov.br/doc).')).toEqual(['https://x.gov.br/doc'])
+  })
+
   it('o histórico do card usa a regra, e o link abre em outra aba', () => {
     const t = readFileSync(join(__dirname, '..', '..', 'pages/operacional/AnaliseCredito.tsx'), 'utf8')
     expect(t).toContain('{pedacosComLinks(texto).map((p, i) =>')

@@ -93,8 +93,13 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
 
   const tirar = (chave: string) => {
     if (emVoo.current) return
-    setAnexos((l) => l.filter((a) => a.chave !== chave))
+    const resto = anexos.filter((a) => a.chave !== chave)
+    setAnexos(resto)
     setAviso(null)
+    // TIRADO O ÚLTIMO QUE FALHOU, A RODADA ACABOU (09/10/2026): a marca "o texto
+    // já entrou" ficava ligada, e os arquivos anexados depois, sozinhos, subiam
+    // sem a linha "Arquivo anexado: …" que diz quem os pôs.
+    if (resto.length === 0) textoSubiu.current = false
   }
 
   const mudarEstado = (chave: string, estado: EstadoDoAnexo) =>
@@ -385,9 +390,17 @@ export function CaixaDeAnotacao({
   }
 
   const temArquivos = (e: DragEvent) => [...e.dataTransfer.types].includes('Files')
+  // O ARQUIVO ARRASTADO É SEMPRE DESTA CAIXA, mesmo enviando (09/10/2026): sem
+  // o `preventDefault` o navegador fica com ele, e soltá-lo ABRE o arquivo na
+  // aba — a página sai do ar no meio do envio, e o envio vai junto. Enviando,
+  // ele só não entra na lista (`dropEffect` 'none').
   const sobre = (e: DragEvent) => {
-    if (!temArquivos(e) || a.enviando) return
+    if (!temArquivos(e)) return
     e.preventDefault()
+    if (a.enviando) {
+      e.dataTransfer.dropEffect = 'none'
+      return
+    }
     e.dataTransfer.dropEffect = 'copy'
     setArrastando(true)
   }
@@ -398,6 +411,7 @@ export function CaixaDeAnotacao({
     if (!temArquivos(e)) return
     e.preventDefault()
     setArrastando(false)
+    if (a.enviando) return
     a.acrescentar([...e.dataTransfer.files])
   }
   // COLAR UM PRINT anexa a imagem. Com TEXTO junto na área de transferência

@@ -178,7 +178,7 @@ import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { escolherPaginasParaImagem, LIMITES_DO_CONECTOR } from '@/lib/paginasDigitalizadas'
 import { subirAnexosDeImagem, subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
 import { agruparNotas, ehAnexo, nomeDoAnexo } from '@/lib/historicoDeNotas'
-import { grupoDeMiniaturas } from '@/lib/previaDoAnexo'
+import { grupoDeMiniaturas, validadeDoLink } from '@/lib/previaDoAnexo'
 import { linksDosAnexos } from '@/lib/linksDosAnexos'
 import { baixarSemAba } from '@/lib/baixarSemAba'
 import { pedacosComLinks } from '@/lib/linksNoTexto'
@@ -213,7 +213,10 @@ import { cardDoEndereco } from '@/lib/contratoDoCard'
 import {
   chaveDoMovimento,
   comecarNoCard,
+  ehNotaNaoSubiu,
+  esquecerAgoraOuDepois,
   movimentoRecusado,
+  NotaNaoSubiu,
   soDosAbertos,
   terminarNoCard,
   type PorCard,
@@ -235,6 +238,7 @@ import {
   type LiquidoDaNota,
   liquidoValidadoDasNotas,
 } from '../../../supabase/functions/_shared/liquidoDaOportunidade.ts'
+import { semEntidadesHtml } from '../../../supabase/functions/_shared/textoDoKommo.ts'
 
 // ===== Análise automática do card (Judit -> due diligence -> planilha) =====
 // Lê os dados do próprio card (título + notas) e roda a sequência no motor.
@@ -820,6 +824,21 @@ function useFecharFora(
 }
 
 /**
+ * Chama `aoFechar` quando a caixa fecha — por qualquer porta — OU some aberta
+ * (o card saiu da lista com ela aberta). É o "fechar a janela" das caixas que
+ * movem o card: esquecer o movimento que ficou sem nota (ver
+ * `esquecerMovimentos` na página).
+ */
+function useAoFecharACaixa(aberto: boolean, aoFechar: (() => void) | undefined) {
+  const ultimo = useRef(aoFechar)
+  ultimo.current = aoFechar
+  useEffect(() => {
+    if (!aberto) return
+    return () => ultimo.current?.()
+  }, [aberto])
+}
+
+/**
  * A caixa flutuante da amostra (`.pop`): borda, sombra de menu, cantos de 12 px.
  * A MESMA DO `MenuDeAcoes` (revisão visual 2): `rounded-flutuante` (era o
  * `rounded-campo`, de 10 px) e, no escuro, o anel claro que a separa da página.
@@ -880,7 +899,12 @@ function JanelaDaPlanilha({
         <div className="flex w-full flex-wrap items-center gap-2">
           <button
             type="button"
-            className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
+            className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:cursor-not-allowed disabled:opacity-50"
+            // GRAVANDO O BLOCO, A RESERVA NÃO VALE (09/10/2026): o clique fechava a
+            // janela no meio da gravação — o erro dela ficava sem onde aparecer —
+            // e pagava uma segunda leitura dos autos, com duas planilhas e duas
+            // anotações no card.
+            disabled={enviando}
             onClick={() => {
               onMotorAntigo()
               onFechar()
@@ -1570,11 +1594,14 @@ function BotaoEscolherProposta({
   ocupado,
   carregando,
   onEscolher,
+  onDesistir,
 }: {
   lead: KommoLead
   ocupado: boolean
   carregando: boolean
   onEscolher: (fundo: string) => Promise<void>
+  /** A caixa fechou ou sumiu: o movimento que ficou sem nota é esquecido. */
+  onDesistir?: () => void
 }) {
   const [aberto, setAberto] = useState(false)
   const [fundo, setFundo] = useState<string | null>(null)
@@ -1583,6 +1610,7 @@ function BotaoEscolherProposta({
   const pergunta = useRef<HTMLParagraphElement>(null)
   const fechar = useCallback(() => setAberto(false), [])
   useFecharFora(aberto, fechar, caixa)
+  useAoFecharACaixa(aberto, onDesistir)
   const ajuste = useCaixaNaTela(flutuante, aberto)
 
   // O FOCO ACOMPANHA O PASSO (revisão visual 2): o botão do fundo clicado some
@@ -2475,6 +2503,7 @@ function BotaoFechado({
   destino,
   ocupado,
   onConfirmar,
+  onDesistir,
 }: {
   acao: AcaoTela
   cedente: string
@@ -2482,6 +2511,8 @@ function BotaoFechado({
   destino: string
   ocupado: boolean
   onConfirmar: (nota: string) => Promise<void>
+  /** A caixa fechou ou sumiu: o movimento que ficou sem nota é esquecido. */
+  onDesistir?: () => void
 }) {
   const [aberto, setAberto] = useState(false)
   const [anotacao, setAnotacao] = useState('')
@@ -2495,6 +2526,7 @@ function BotaoFechado({
     if (!enviando) setAberto(false)
   }, [enviando])
   useFecharFora(aberto, fechar, caixa, { foraFecha: false })
+  useAoFecharACaixa(aberto, onDesistir)
   const ajuste = useCaixaNaTela(flutuante, aberto)
 
   async function confirmar() {
@@ -2854,6 +2886,7 @@ function CardCredito({
   onCopiar,
   negociacao,
   onGerarContrato,
+  onDesistirDoMovimento,
   realcado = false,
 }: {
   lead: KommoLead
@@ -2971,6 +3004,14 @@ function CardCredito({
     onFechado: (l: KommoLead, nota: string) => Promise<void>
     onNaoFechou: (l: KommoLead) => void
   }
+  /**
+   * Uma caixa do card que move (o "Fechado!", o "Escolher proposta") fechou, ou
+   * sumiu com o card: os movimentos dele que esperavam a nota são esquecidos,
+   * como no fechar das janelas. Sem isto, depois de uma nota que falhou, todo
+   * movimento seguinte do card na sessão era recusado ("já foi movido nesta
+   * janela para outra coluna") — e um retorno à mesma coluna seria PULADO.
+   */
+  onDesistirDoMovimento?: (leadId: number) => void
   /** Leva à Geração de contratos com este card (onda 4 — para todos desde 03/10/2026). Não move card. */
   onGerarContrato?: (l: KommoLead) => void
   /** O card que o endereço apontou ("Voltar ao card"): moldura de destaque, sem abrir nada. */
@@ -3215,21 +3256,25 @@ function CardCredito({
               // onde o seletor existe (Em precificação), e só nas que NÃO são da
               // lista da casa — as dos fundos se tiram pelo seletor.
               const tiravel = etiquetasOferecidas.length > 0 && !etiquetaCanonica(t)
+              // O NOME LEGÍVEL DA ETIQUETA DE FORA (09/10/2026): a API do Kommo
+              // devolve "&" como "&amp;", e a etiqueta que não é da casa aparecia
+              // assim, crua, no card. Só na tela: para tirar, vai o nome como veio.
+              const nomeNaTela = etiquetaCanonica(t) ?? semEntidadesHtml(t)
               return (
                 <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : 'Etiqueta do Kommo'}>
                   <Badge size="sm" tone={tom} className={cn('h-[22px] gap-1 px-2', tiravel && 'pr-0.5')}>
                     {iconeDaEtiqueta(tom, t)}
                     {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
                         PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
-                    {etiquetaCanonica(t) ?? t}
+                    {nomeNaTela}
                     {idade && <span className="font-medium opacity-80"> · {idade}</span>}
                     {tiravel && (
                       <button
                         type="button"
                         disabled={etiquetaEmVoo !== null}
                         onClick={() => onEtiquetar(lead, t, 'remover')}
-                        title={`Tirar a etiqueta "${t}" do card`}
-                        aria-label={`Tirar a etiqueta "${t}" do card`}
+                        title={`Tirar a etiqueta "${nomeNaTela}" do card`}
+                        aria-label={`Tirar a etiqueta "${nomeNaTela}" do card`}
                         className="relative grid h-[18px] w-[18px] place-items-center rounded-full opacity-70 transition-opacity after:absolute after:-inset-[6px] hover:bg-superficie-3 hover:opacity-100 disabled:cursor-progress"
                       >
                         {etiquetaEmVoo === t ? (
@@ -3610,6 +3655,7 @@ function CardCredito({
               ocupado={ocupado}
               carregando={ocupado}
               onEscolher={(f) => onEscolherProposta(lead, f)}
+              onDesistir={() => onDesistirDoMovimento?.(lead.kommo_lead_id)}
             />
           )}
 
@@ -3645,6 +3691,7 @@ function CardCredito({
               destino={negociacao.destinoDoFechado}
               ocupado={ocupado}
               onConfirmar={(nota) => negociacao.onFechado(lead, nota)}
+              onDesistir={() => onDesistirDoMovimento?.(lead.kommo_lead_id)}
             />
           )}
 
@@ -3895,6 +3942,8 @@ export default function AnaliseCredito() {
    * movimentações ao mesmo tempo, venha o segundo clique de onde vier.
    */
   const cardsTravados = useRef<Set<number>>(new Set())
+  /** Os cards cuja memória de movimentos se esquece quando a operação no ar acabar (ver `esquecerMovimentos`). */
+  const esquecerDepois = useRef<Set<number>>(new Set())
   // Análise automática (Judit + due diligence + planilha) por card.
   // `isAdmin` VAI PARA `abasDoFunil`, que libera o que é `soAdmin`. OS BOTÕES DA
   // ONDA 4 (os que movem card de um jeito novo e o "Gerar contrato") são de TODO
@@ -4015,12 +4064,22 @@ export default function AnaliseCredito() {
     // como se ele ainda cedesse as duas precificaria um crédito que a casa
     // acabou de dizer que não compra. Falha de leitura não impede analisar — o
     // cenário fica o do card, que é o comportamento de sempre.
-    const { data: recusadas } = await supabase
+    const { data: recusadas, error: erroDasRecusadas } = await supabase
       .from('dd_historico')
       .select('papel')
       .eq('kommo_lead_id', lead.kommo_lead_id)
       .not('reprovado_em', 'is', null)
     if (analisePedida.current !== lead.kommo_lead_id) return
+    // A FALHA NÃO IMPEDE, MAS É DITA (09/10/2026): o `error` não era lido, e a
+    // análise abria com o cenário do card como se a diligência não tivesse
+    // recusado nada — precificando, sem aviso, uma verba que a casa recusou.
+    if (erroDasRecusadas) {
+      toast.error(
+        'Não consegui ler as verbas que a due diligence recusou (' +
+          erroDasRecusadas.message +
+          '). A análise vai usar o cenário do título do card — confira antes de salvar.',
+      )
+    }
     setVerbasRecusadas((p) => ({
       ...p,
       [lead.kommo_lead_id]: ((recusadas ?? []) as { papel: string }[])
@@ -4091,6 +4150,14 @@ export default function AnaliseCredito() {
     if (ehCardExterno(Number(lead.pipeline_id))) return
     const dados = lerCardCredijuris(lead)
     if (!dados.cedente.trim()) return
+    // UMA CRIAÇÃO POR CARD DE CADA VEZ (09/10/2026): cada clique em "Executar
+    // análise" abre outra conversa, e é para ser assim — mas o segundo clique,
+    // antes de a pasta do primeiro voltar, ainda vê o card sem pasta e pedia
+    // outra. O Drive procura a pasta e cria se não achar; duas procuras ao mesmo
+    // tempo não acham nada e criam DUAS pastas com o mesmo nome — e cada
+    // planilha cai numa.
+    if (pastasEmCriacao.current.has(lead.kommo_lead_id)) return
+    pastasEmCriacao.current.add(lead.kommo_lead_id)
     try {
       const r = await invokeFunction<{ pasta_id?: string }>('pasta-do-cedente', {
         kommo_lead_id: lead.kommo_lead_id,
@@ -4100,8 +4167,12 @@ export default function AnaliseCredito() {
       anotarPastaNoCard(lead.kommo_lead_id, r.pasta_id)
     } catch (e) {
       toast.error('A análise seguiu, mas não consegui criar a pasta no Drive: ' + ((e as Error)?.message ?? String(e)))
+    } finally {
+      pastasEmCriacao.current.delete(lead.kommo_lead_id)
     }
   }
+  /** Os cards cuja pasta do Drive está sendo criada agora (ver `criarPastaDoCard`). */
+  const pastasEmCriacao = useRef<Set<number>>(new Set())
 
   // ------------------------------------------------ A FILA DAS ANÁLISES EXTERNAS
   //
@@ -4472,23 +4543,43 @@ export default function AnaliseCredito() {
    * a PROMESSA, e não o valor: dois cliques seguidos entram na mesma espera em
    * vez de abrirem duas consultas.
    */
-  const anexosResolvidos = useRef<Map<string, Promise<{ download: string }>>>(new Map())
+  //
+  // COM PRAZO, COMO O DO UUID (09/10/2026): o mapa guardava a promessa resolvida
+  // PARA SEMPRE, e o link assinado do Kommo vence em minutos. Passado o prazo,
+  // todo clique naquele anexo reusava o link morto — e o download falhava em
+  // silêncio até um F5. Agora vale o prazo do próprio link (`validadeDoLink`).
+  const anexosResolvidos = useRef<Map<string, { promessa: Promise<{ download: string }>; venceEm: number | null }>>(
+    new Map(),
+  )
 
   function prepararAnexo(lead: KommoLead, anexo: KommoNota) {
-    // PELO UUID, O CACHE DA PÁGINA RESPONDE (e vence com o link); este mapa
-    // guardaria para sempre um link que vence.
+    // PELO UUID, O CACHE DA PÁGINA RESPONDE (e vence com o link).
     if (anexo.arquivo_uuid) return enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))
     const chave = `${lead.kommo_lead_id}:${nomeDoAnexo(anexo)}`
     const guardada = anexosResolvidos.current.get(chave)
-    if (guardada) return guardada
+    if (guardada && (guardada.venceEm === null || Date.now() < guardada.venceEm)) return guardada.promessa
     const pedido = enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))
+    const novo = { promessa: pedido, venceEm: null as number | null }
     // FALHA NÃO FICA GUARDADA — o clique seguinte tenta de novo, em vez de
-    // repetir para sempre um erro que pode ter sido de rede. O `catch` também
-    // impede o aviso de promessa rejeitada sem dono, já que ninguém espera por
-    // esta aqui quando ela nasce de um passar de mouse.
-    pedido.catch(() => anexosResolvidos.current.delete(chave))
-    anexosResolvidos.current.set(chave, pedido)
+    // repetir para sempre um erro que pode ter sido de rede. O segundo argumento
+    // do `then` também impede o aviso de promessa rejeitada sem dono, já que
+    // ninguém espera por esta aqui quando ela nasce de um passar de mouse.
+    pedido.then(
+      (r) => {
+        novo.venceEm = validadeDoLink(r.download, Date.now())
+      },
+      () => {
+        if (anexosResolvidos.current.get(chave) === novo) anexosResolvidos.current.delete(chave)
+      },
+    )
+    anexosResolvidos.current.set(chave, novo)
     return pedido
+  }
+
+  /** O link que não baixou sai do cache: o próximo clique pede outro. */
+  function esquecerLinkDoAnexo(lead: KommoLead, anexo: KommoNota) {
+    if (anexo.arquivo_uuid) linksDosAnexos.esquecer(anexo.arquivo_uuid)
+    else anexosResolvidos.current.delete(`${lead.kommo_lead_id}:${nomeDoAnexo(anexo)}`)
   }
 
   // O mesmo arquivo clicado duas vezes enquanto baixa sairia salvo duas vezes.
@@ -4507,6 +4598,7 @@ export default function AnaliseCredito() {
       const { download } = await prepararAnexo(lead, anexo)
       await baixarSemAba(download, nome)
     } catch (e) {
+      esquecerLinkDoAnexo(lead, anexo)
       toast.error('Não consegui baixar o anexo: ' + ((e as Error)?.message ?? String(e)))
     } finally {
       window.clearTimeout(avisar)
@@ -5133,6 +5225,9 @@ export default function AnaliseCredito() {
     } finally {
       cardsTravados.current.delete(leadId)
       setEmAndamento((m) => terminarNoCard(m, leadId))
+      // A CAIXA QUE FECHOU (ou se desmontou) NO MEIO pediu para esquecer os
+      // movimentos do card: é agora, com a operação acabada (ver `esquecerMovimentos`).
+      if (esquecerDepois.current.has(leadId)) esquecerMovimentos(leadId)
     }
   }
 
@@ -5325,7 +5420,8 @@ export default function AnaliseCredito() {
         })
         notasEnviadas.current.set(chave, i + 1)
       } catch (e) {
-        throw new Error(
+        // TIPO PRÓPRIO: quem chamou avisa a pessoa mesmo sem a janela (ver `NotaNaoSubiu`).
+        throw new NotaNaoSubiu(
           'O card foi movido, mas ' +
             (i > 0 ? 'a nota com a mensagem não subiu (a do resumo, sim) (' : 'a nota com a mensagem não subiu (') +
             ((e as Error)?.message ?? String(e)) +
@@ -5341,8 +5437,16 @@ export default function AnaliseCredito() {
     notasEnviadas.current.delete(chave)
   }
 
-  /** Esquece os movimentos pendentes de nota de um card — a janela dele fechou. */
+  /**
+   * Esquece os movimentos pendentes de nota de um card — a janela dele fechou.
+   *
+   * COM O CARD AINDA NO AR, DEPOIS (09/10/2026): a caixa do "Fechado!" e a do
+   * "Escolher proposta" se desmontam quando o card sai da lista, o que acontece
+   * entre o movimento e a nota. Esquecer ali apagaria o "já movido" no meio da
+   * operação; `comCardTravado` esquece quando ela acaba.
+   */
   function esquecerMovimentos(leadId: number) {
+    if (!esquecerAgoraOuDepois(cardsTravados.current, esquecerDepois.current, leadId)) return
     for (const k of [...jaMovidos.current]) if (k.startsWith(`${leadId}:`)) jaMovidos.current.delete(k)
     for (const k of [...notasEnviadas.current.keys()]) if (k.startsWith(`${leadId}:`)) notasEnviadas.current.delete(k)
   }
@@ -5631,10 +5735,9 @@ export default function AnaliseCredito() {
     } catch (e) {
       // A falha do MOVIMENTO já tem aviso (o onError do mover); a da NOTA, não.
       // E A RECUSA DE MOVER DE NOVO (ver `movimentoRecusado`), que também não tem.
-      if (
-        jaMovidos.current.has(chaveDoMovimento(lead.kommo_lead_id, statusId)) ||
-        movimentoRecusado(jaMovidos.current, lead.kommo_lead_id, statusId)
-      ) {
+      // PELO TIPO DO ERRO, e não pela memória "já movido": a caixa fechada no
+      // meio já a esqueceu quando o erro chega aqui (ver `NotaNaoSubiu`).
+      if (ehNotaNaoSubiu(e) || movimentoRecusado(jaMovidos.current, lead.kommo_lead_id, statusId)) {
         toast.error((e as Error).message)
       }
       throw e
@@ -5690,6 +5793,21 @@ export default function AnaliseCredito() {
     await comCardTravado(lead.kommo_lead_id, acao.statusId, () =>
       moverComNota(lead.kommo_lead_id, acao.statusId, nota),
     )
+  }
+
+  /**
+   * O "FECHADO!" do card. A FALHA DA NOTA TAMBÉM VAI PARA O AVISO (09/10/2026):
+   * a caixa do "Fechado!" mora no card, e o card sai da Negociação assim que o
+   * movimento invalida a lista — antes de a nota terminar. O erro caía numa
+   * caixa que já não existia, e a tela só dizia "Card movido".
+   */
+  async function fechadoNoCard(lead: KommoLead, acao: AcaoTela, nota: string) {
+    try {
+      await desfechoDaNegociacaoNoCard(lead, acao, nota)
+    } catch (e) {
+      if (ehNotaNaoSubiu(e)) toast.error((e as Error).message)
+      throw e
+    }
   }
 
   /** "Gerar contrato": a Geração de contratos com SÓ o id do card no endereço. */
@@ -6293,13 +6411,13 @@ export default function AnaliseCredito() {
                           destinoDoFechado: abaAtual.negociacao.fechado
                             ? nomeDaColunaDoId(abaAtual.negociacao.fechado.statusId)
                             : '',
-                          onFechado: (lead, nota) =>
-                            desfechoDaNegociacaoNoCard(lead, abaAtual.negociacao!.fechado!, nota),
+                          onFechado: (lead, nota) => fechadoNoCard(lead, abaAtual.negociacao!.fechado!, nota),
                           onNaoFechou: (lead) => setNaoFechou({ lead, opcoes: abaAtual.negociacao! }),
                         }
                       : undefined
                   }
                   onGerarContrato={abaAtual?.gerarContrato ? gerarContratoDoCard : undefined}
+                  onDesistirDoMovimento={esquecerMovimentos}
                   realcado={realce === l.kommo_lead_id}
                 />
               ))}

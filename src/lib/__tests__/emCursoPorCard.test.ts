@@ -9,7 +9,10 @@ import { describe, it, expect } from 'vitest'
 import {
   chaveDoMovimento,
   comecarNoCard,
+  ehNotaNaoSubiu,
+  esquecerAgoraOuDepois,
   movimentoRecusado,
+  NotaNaoSubiu,
   soDosAbertos,
   terminarNoCard,
   type PorCard,
@@ -89,5 +92,35 @@ describe('movimentoRecusado — com a nota pendente, não move para outra coluna
     const ja = new Set([chaveDoMovimento(12, REPROVADOS), chaveDoMovimento(B, REPROVADOS)])
     expect(movimentoRecusado(ja, 123, DILIGENCIA)).toBeNull()
     expect(movimentoRecusado(ja, A, DILIGENCIA)).toBeNull()
+  })
+})
+
+// AUDITORIA DE 09/10/2026: a caixa do "Fechado!" e a do "Escolher proposta"
+// moram no card, e o card sai da lista entre o movimento e a nota. A falha da
+// nota sumia junto com a caixa, e a memória "já movido" ficava presa ao card.
+describe('NotaNaoSubiu — a falha da nota tem tipo próprio', () => {
+  it('é reconhecida pelo tipo, e não pela memória de movimentos', () => {
+    const e = new NotaNaoSubiu('O card foi movido, mas a nota com a mensagem não subiu (x).')
+    expect(ehNotaNaoSubiu(e)).toBe(true)
+    expect(e).toBeInstanceOf(Error)
+    expect(e.message).toMatch(/O card foi movido/)
+    expect(ehNotaNaoSubiu(new Error('HTTP 500'))).toBe(false)
+    expect(ehNotaNaoSubiu('texto')).toBe(false)
+  })
+})
+
+describe('esquecerAgoraOuDepois — esquecer o "já movido" só com o card parado', () => {
+  it('card livre: esquece já, e tira o pedido adiado', () => {
+    const adiados = new Set([A])
+    expect(esquecerAgoraOuDepois(new Set(), adiados, A)).toBe(true)
+    expect(adiados.has(A)).toBe(false)
+  })
+
+  it('card travado (movimento ou nota no ar): adia — esquecer no meio moveria de novo', () => {
+    const adiados = new Set<number>()
+    expect(esquecerAgoraOuDepois(new Set([A]), adiados, A)).toBe(false)
+    expect(adiados.has(A)).toBe(true)
+    // Outro card travado não segura este.
+    expect(esquecerAgoraOuDepois(new Set([B]), adiados, A)).toBe(true)
   })
 })

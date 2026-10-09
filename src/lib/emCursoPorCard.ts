@@ -73,3 +73,47 @@ export function movimentoRecusado(
         'Confirme de novo naquela saída (só anota) ou feche a janela — mover agora deixaria duas movimentações.'
     : null
 }
+
+/**
+ * O CARD SE MOVEU E A NOTA NÃO SUBIU — o erro que `moverComNota` lança nesse
+ * caso, com a mensagem pronta para a tela.
+ *
+ * TIPO PRÓPRIO, e não "a chave ainda está em `jaMovidos`" (09/10/2026): quem
+ * pergunta isso depois do erro pode já não achar a chave — a caixa do
+ * "Fechado!" ou do "Escolher proposta" se desmonta quando o card sai da lista
+ * (o movimento invalida o cache e o card muda de aba antes de a nota terminar),
+ * e ao se desmontar ela esquece os movimentos do card. Pela chave, a falha da
+ * nota passava sem aviso nenhum: a tela dizia "Card movido" e a nota nunca
+ * chegava ao Kommo.
+ */
+export class NotaNaoSubiu extends Error {
+  constructor(mensagem: string) {
+    super(mensagem)
+    this.name = 'NotaNaoSubiu'
+  }
+}
+
+/** O erro é o de "moveu, mas a nota não subiu"? */
+export const ehNotaNaoSubiu = (e: unknown): e is NotaNaoSubiu => e instanceof NotaNaoSubiu
+
+/**
+ * ESQUECER OS MOVIMENTOS DE UM CARD só quando nada dele estiver no ar.
+ *
+ * A caixa que se fecha (ou se desmonta) pede para esquecer; se o card ainda
+ * está travado — o movimento ou a nota correndo —, o pedido fica para quando a
+ * operação acabar. Esquecer no meio apagaria a memória "já movido" entre o
+ * movimento e a nota, e um novo pedido para o mesmo card moveria de novo.
+ * Devolve se é para esquecer JÁ.
+ */
+export function esquecerAgoraOuDepois(
+  travados: ReadonlySet<number>,
+  adiados: Set<number>,
+  leadId: number,
+): boolean {
+  if (travados.has(leadId)) {
+    adiados.add(leadId)
+    return false
+  }
+  adiados.delete(leadId)
+  return true
+}

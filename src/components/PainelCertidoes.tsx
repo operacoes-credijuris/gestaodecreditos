@@ -909,6 +909,8 @@ export function PainelCertidoes({
   const [completude, setCompletude] = useState<Completude | null>(null)
   const [urls, setUrls] = useState<UrlPorEscopo[]>([])
   const [erroLinks, setErroLinks] = useState<string | null>(null)
+  /** A atualização do checklist durante a emissão falhou (ver `recarregarItens`). */
+  const [erroDaAtualizacao, setErroDaAtualizacao] = useState<string | null>(null)
   const [cnjDoCredito, setCnjDoCredito] = useState<string | null>(null)
   /** A pasta da análise do card no Drive (kommo_leads.drive_pasta_id): o atalho do topo. */
   const [drivePastaId, setDrivePastaId] = useState<string | null>(null)
@@ -1308,24 +1310,34 @@ export function PainelCertidoes({
       // Falha aqui não derruba a tela: sem os links a lista ainda serve, e cada
       // linha mostra "sem link" com o campo para cadastrar. Mas o erro aparece,
       // porque "não consegui ler os links" e "não há link" são coisas diferentes.
-      if (ru.error) {
-        setErroLinks(
-          `Não consegui ler os links de emissão: ${ru.error.message}. ` +
-            `A migration 0046 já rodou no SQL Editor?`,
-        )
-      } else {
-        setErroLinks(null)
-      }
+      // A LEITURA DO CARD TAMBÉM (09/10/2026): falhando, o número do processo
+      // ficava vazio sem aviso, e toda certidão que pede o CNJ dizia "falta no
+      // cadastro" — sobre um número que o card tem.
+      const avisosDeLeitura = [
+        ...(ru.error
+          ? [`Não consegui ler os links de emissão: ${ru.error.message}. A migration 0046 já rodou no SQL Editor?`]
+          : []),
+        ...(rl.error
+          ? [
+              `Não consegui ler o card (número do processo e pasta do Drive): ${rl.error.message}. ` +
+                'O "falta Número do processo" das certidões pode não ser verdade — recarregue a janela.',
+            ]
+          : []),
+      ]
+      setErroLinks(avisosDeLeitura.length ? avisosDeLeitura.join(' ') : null)
+      setErroDaAtualizacao(null)
 
       const listaS = (rs.data ?? []) as unknown as Sujeito[]
       setSujeitos(listaS)
       setItens((ri.data ?? []) as unknown as ItemChecklist[])
       setCompletude((rc.data ?? null) as Completude | null)
       setUrls((ru.data ?? []) as unknown as UrlPorEscopo[])
-      setCnjDoCredito(
-        ((rl.data as { processo_cnj?: string } | null)?.processo_cnj ?? null),
-      )
-      setDrivePastaId((rl.data as { drive_pasta_id?: string | null } | null)?.drive_pasta_id ?? null)
+      if (!rl.error) {
+        setCnjDoCredito(
+          ((rl.data as { processo_cnj?: string } | null)?.processo_cnj ?? null),
+        )
+        setDrivePastaId((rl.data as { drive_pasta_id?: string | null } | null)?.drive_pasta_id ?? null)
+      }
 
       // Sem sujeito nenhum, a única coisa útil é o formulário. Com sujeito, o
       // padrão é ver o que já existe — corrigir é ação explícita.
@@ -1399,6 +1411,13 @@ export function PainelCertidoes({
     if (!ri.error) setItens((ri.data ?? []) as unknown as ItemChecklist[])
     if (!rc.error) setCompletude((rc.data ?? null) as Completude | null)
     if (!rl.error) setDrivePastaId((rl.data as { drive_pasta_id?: string | null } | null)?.drive_pasta_id ?? null)
+    // A FALHA É DITA (09/10/2026): é esta leitura que roda a cada minuto durante
+    // a emissão, e falhando (sessão vencida, rede) a lista e o placar paravam
+    // sem aviso enquanto a BullAI seguia trabalhando.
+    const falha = ri.error ?? rc.error
+    setErroDaAtualizacao(
+      falha ? `Não consegui atualizar o checklist (${falha.message}) — a lista abaixo pode estar desatualizada.` : null,
+    )
   }, [leadId])
 
   /**
@@ -1421,6 +1440,8 @@ export function PainelCertidoes({
   cedenteRef.current = cedente
   const tipoRef = useRef(tipoCedente)
   tipoRef.current = tipoCedente
+  const editandoRef = useRef(editando)
+  editandoRef.current = editando
 
   async function lerComIA() {
     const comTexto = arquivos.filter((a) => (a.texto ?? '').trim())
@@ -1442,6 +1463,12 @@ export function PainelCertidoes({
         cedente: cedenteRef.current.nome.trim() || cedenteDoCard,
       })
       setLeituraIA(q)
+      // GRAVADO ENQUANTO A IA LIA, O FORMULÁRIO JÁ É O DO BANCO (09/10/2026): a
+      // leitura que chegava depois preenchia o cônjuge e marcava a janela como
+      // alterada sobre um cadastro já gravado — e o "Editar" seguinte mostrava
+      // um cônjuge que não existe no banco, que um novo Gravar criaria. A
+      // leitura fica à vista (achados e avisos); os campos, só editando.
+      if (!editandoRef.current) return
       aplicarLeitura(q)
     } catch (e) {
       toast.error(`A IA não conseguiu ler a qualificação: ${(e as Error).message}`)
@@ -1907,9 +1934,24 @@ export function PainelCertidoes({
         }
       }
 
-      const r = await invokeFunction<RespostaGeracao>('gerar-checklist-certidoes', {
-        kommo_lead_id: leadId,
-      })
+      // O CADASTRO JÁ ESTÁ GRAVADO daqui em diante (09/10/2026). Se o checklist
+      // falhar, a tela precisa dizer as duas coisas e mostrar o banco como
+      // ficou: antes ela mostrava só o erro da função, com os sujeitos e os
+      // itens de ANTES — e o aviso de remoção seguia anunciando certidões que
+      // a troca de sujeito já tinha apagado.
+      let r: RespostaGeracao
+      try {
+        r = await invokeFunction<RespostaGeracao>('gerar-checklist-certidoes', {
+          kommo_lead_id: leadId,
+        })
+      } catch (e) {
+        await recarregar()
+        setErro(
+          `O cadastro foi gravado, mas o checklist não foi montado: ${(e as Error)?.message ?? String(e)}. ` +
+            'Use "Gerar itens faltantes" para tentar de novo.',
+        )
+        return
+      }
       avisarRegrasIgnoradas(r)
       toast.success(
         `Checklist montado: ${r.total ?? 0} item(ns), ${r.obrigatorias ?? 0} obrigatório(s)` +
@@ -2659,6 +2701,11 @@ export function PainelCertidoes({
       {erroLinks && (
         <CaixaDeAviso tom="aviso" className="mb-s3">
           {erroLinks}
+        </CaixaDeAviso>
+      )}
+      {erroDaAtualizacao && (
+        <CaixaDeAviso tom="aviso" className="mb-s3">
+          {erroDaAtualizacao}
         </CaixaDeAviso>
       )}
 

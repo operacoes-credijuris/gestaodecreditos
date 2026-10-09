@@ -56,6 +56,16 @@ describe('baixarSemAba', () => {
     expect(abrir).not.toHaveBeenCalled()
   })
 
+  // AUDITORIA DE 09/10/2026: link vencido (403) ia para o quadro escondido, que
+  // carregava a página de erro em silêncio — nada era salvo e não havia aviso.
+  it('resposta de erro (link vencido) LANÇA, e não vai para o quadro', async () => {
+    const { criados, cliques } = montarDocumento()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('negado', { status: 403 })))
+    await expect(baixarSemAba('https://drive.kommo.com/download/abc', 'oficio.pdf')).rejects.toThrow(/403/)
+    expect(criados.find((e) => e.tag === 'iframe')).toBeUndefined()
+    expect(cliques).toEqual([])
+  })
+
   it('o clique no anexo do card não abre aba', () => {
     const t = readFileSync(join(__dirname, '..', '..', 'pages/operacional/AnaliseCredito.tsx'), 'utf8')
     const corpo = t.slice(t.indexOf('async function abrirAnexo'), t.indexOf('async function baixarAnexosDoCard'))
