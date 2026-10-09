@@ -233,6 +233,31 @@ export function irmasDaEtiqueta(
 }
 
 /**
+ * A ETIQUETA DA CONTA QUE JÁ É ESTA, em qualquer grafia (09/10/2026): o id para
+ * pôr pelo id, em vez de pelo nome.
+ *
+ * O CASO DA PJUS: a conta tem "Cotado PJUS" (de antes de 01/10/2026) e "Cotado
+ * PJus". Pôr pelo NOME uma grafia que só difere em maiúsculas da que existe dá
+ * ao Kommo a escolha de recusar ou de criar mais uma etiqueta — e "às vezes dá
+ * erro com a PJus" era isso. Pelo id não há o que decidir. O mesmo vale para o
+ * "&" que a API devolve como "&amp;" (K & WC Ativos).
+ *
+ * PREFERE A GRAFIA EXATA da casa; sem ela, a mais antiga (menor id) entre as
+ * equivalentes. Nenhuma: null — e aí vai pelo nome, que cria a etiqueta.
+ */
+export function idDaEtiquetaNaConta(
+  daConta: readonly { id?: unknown; name?: unknown }[],
+  etiqueta: string,
+): number | null {
+  const iguais = daConta
+    .map((t) => ({ id: Number(t?.id), name: String(t?.name ?? '') }))
+    .filter((t) => Number.isFinite(t.id) && t.id > 0 && mesmaEtiqueta(t.name, etiqueta))
+  if (iguais.length === 0) return null
+  const exata = iguais.find((t) => t.name.trim() === etiqueta)
+  return (exata ?? iguais.sort((a, b) => a.id - b.id)[0]).id
+}
+
+/**
  * O QUE O PATCH TIRA DO CARD: só as etiquetas que o card TEM, na grafia que ele
  * tem — as irmãs, ao pôr; a própria, ao tirar.
  *

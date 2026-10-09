@@ -29,7 +29,7 @@ import {
   normalizarEtiqueta,
   tomDaTag,
 } from '@/lib/kommo'
-import { comissoesDoFundo, etiquetasATirar } from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
+import { comissoesDoFundo, etiquetasATirar, idDaEtiquetaNaConta } from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
 
 describe('as etiquetas da precificação', () => {
   // OS SETE FUNDOS QUE A OPERAÇÃO DITOU em 29/09/2026, no molde "‹ato› ‹fundo›"
@@ -409,12 +409,68 @@ describe('editar a cotação', () => {
   it('a kommo-etiquetar não repõe a etiqueta que o card já tem, e a nota diz "cotação alterada"', () => {
     const f = ler('../../../supabase/functions/kommo-etiquetar/index.ts')
     expect(f).toContain("const jaTem = acao === 'adicionar' && doCard.some((t) => mesmaEtiqueta(t, etiqueta))")
-    expect(f).toContain('...(jaTem ? {} : { tags_to_add: [{ name: etiqueta }] }),')
+    expect(f).toContain('...(jaTem ? {} : { tags_to_add: [paraPor] }),')
     expect(f).toContain('`Cotação ${doFundo} alterada por ${autor}: ${textoDoCampo}${sobre}.`')
     expect(f).toContain("const agora = acao === 'adicionar' && !jaTem ? { [etiqueta]: new Date().toISOString() } : {}")
   })
   it('a tela guarda a data da etiqueta que já estava', () => {
     const t = ler('../../pages/operacional/AnaliseCredito.tsx')
     expect(t).toContain('if (!jaTinha) datas[etiqueta] = new Date().toISOString()')
+  })
+})
+
+/**
+ * PÔR PELO ID DA ETIQUETA QUE A CONTA JÁ TEM (09/10/2026): a conta tem "Cotado
+ * PJUS" (antiga) e "Cotado PJus"; pôr pelo nome uma grafia que só difere em
+ * maiúsculas deixava o Kommo recusar ou duplicar — "às vezes dá erro com a PJus".
+ */
+describe('idDaEtiquetaNaConta', () => {
+  const conta = [
+    { id: 10, name: 'Cotado PJUS' },
+    { id: 55, name: 'Cotado PJus' },
+    { id: 7, name: 'Cotado BTG' },
+    { id: 90, name: 'Cotado K &amp; WC Ativos' },
+  ]
+  it('prefere a grafia exata da casa', () => {
+    expect(idDaEtiquetaNaConta(conta, 'Cotado PJus')).toBe(55)
+  })
+  it('sem a exata, a equivalente mais antiga (maiúsculas, &amp;)', () => {
+    expect(idDaEtiquetaNaConta(conta.filter((t) => t.id !== 55), 'Cotado PJus')).toBe(10)
+    expect(idDaEtiquetaNaConta(conta, 'Cotado K & WC Ativos')).toBe(90)
+  })
+  it('nenhuma equivalente: null (vai pelo nome e cria)', () => {
+    expect(idDaEtiquetaNaConta(conta, 'Erro PJus')).toBeNull()
+    expect(idDaEtiquetaNaConta([], 'Cotado PJus')).toBeNull()
+  })
+  it('a kommo-etiquetar põe pelo id quando acha', () => {
+    const f = readFileSync(fileURLToPath(new URL('../../../supabase/functions/kommo-etiquetar/index.ts', import.meta.url)), 'utf8')
+    expect(f).toContain('const id = idDaEtiquetaNaConta(j?._embedded?.tags ?? [], etiqueta)')
+    expect(f).toContain('...(jaTem ? {} : { tags_to_add: [paraPor] }),')
+  })
+})
+
+/** SÓ AS ETIQUETAS DOS FUNDOS TÊM COR (09/10/2026, decisão do dono): o resto é cinza. */
+describe('a etiqueta de fora da lista sai cinza', () => {
+  it('"Prioridade" e "Indicação João" cinza; as dos fundos com a cor do ato', () => {
+    const cores = coresDasTags(['Cotado PJus', 'Prioridade', 'Indicação João', 'Reprovado BTG'])
+    expect(cores.get('Prioridade')).toBe('gray')
+    expect(cores.get('Indicação João')).toBe('gray')
+    expect(cores.get('Cotado PJus')).toBe('green')
+    expect(cores.get('Reprovado BTG')).toBe('red')
+  })
+})
+
+/**
+ * A TRAVA DO MOVIMENTO (09/10/2026): dois "mover" ao mesmo tempo moviam o card
+ * duas vezes e deixavam duas notas. O espelho é a trava (gravação condicional
+ * na coluna lida); se o Kommo recusar, a troca é desfeita.
+ */
+describe('kommo-mover — um movimento por vez', () => {
+  it('troca a coluna no espelho condicionalmente antes do PATCH, e desfaz se o Kommo recusa', () => {
+    const f = readFileSync(fileURLToPath(new URL('../../../supabase/functions/kommo-mover/index.ts', import.meta.url)), 'utf8')
+    expect(f).toContain(".eq('status_id', colunaLida)")
+    expect(f).toContain('nada foi repetido.')
+    const depois = f.slice(f.indexOf('if (!resMove.ok) {'))
+    expect(depois.slice(0, 80)).toContain('await desfazerTrava()')
   })
 })

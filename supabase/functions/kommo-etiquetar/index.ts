@@ -75,6 +75,7 @@ import {
   ETIQUETAS_DA_PRECIFICACAO,
   etiquetaCanonica,
   etiquetasATirar,
+  idDaEtiquetaNaConta,
   irmasDaEtiqueta,
   mesmaEtiqueta,
   datasDasEtiquetas,
@@ -321,9 +322,26 @@ Deno.serve(async (req: Request) => {
     // histórico do Kommo a etiqueta tirada e posta de novo, a nota dizia
     // "aplicada" e o "há N dias" voltava a "hoje". Só o campo muda.
     const jaTem = acao === 'adicionar' && doCard.some((t) => mesmaEtiqueta(t, etiqueta))
+    // PÔR PELO ID DA ETIQUETA QUE A CONTA JÁ TEM, em qualquer grafia (ver
+    // `idDaEtiquetaNaConta` — o caso da PJus). A busca é pelo ato ("Cotado"),
+    // que traz todas as grafias de todos os fundos; falhando, vai pelo nome.
+    let paraPor: { id: number } | { name: string } = { name: etiqueta }
+    if (acao === 'adicionar' && !jaTem) {
+      try {
+        const termo = encodeURIComponent(etiqueta.split(/\s+/)[0] ?? etiqueta)
+        const resConta = await kommoFetch(`${base}/leads/tags?query=${termo}&limit=250`, { headers })
+        if (resConta.ok && resConta.status !== 204) {
+          const j = (await resConta.json().catch(() => null)) as { _embedded?: { tags?: { id?: number; name?: string }[] } } | null
+          const id = idDaEtiquetaNaConta(j?._embedded?.tags ?? [], etiqueta)
+          if (id) paraPor = { id }
+        }
+      } catch {
+        /* rede: vai pelo nome, como sempre */
+      }
+    }
     const patch = acao === 'adicionar'
       ? {
-        ...(jaTem ? {} : { tags_to_add: [{ name: etiqueta }] }),
+        ...(jaTem ? {} : { tags_to_add: [paraPor] }),
         ...(paraTirar.length > 0 ? { tags_to_delete: paraTirar } : {}),
         ...(campo && textoDoCampo
           ? { custom_fields_values: [{ field_id: campo.id, values: [{ value: textoDoCampo }] }] }

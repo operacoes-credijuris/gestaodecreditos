@@ -204,7 +204,7 @@ export const SUBDIVISOES_PRECATORIO = TRILHAS_PRECATORIO
  */
 export const TONS_DA_TAG = ['blue', 'purple', 'orange', 'teal', 'pink', 'indigo'] as const
 
-export type TomDaTag = (typeof TONS_DA_TAG)[number] | 'red' | 'green' | 'yellow'
+export type TomDaTag = (typeof TONS_DA_TAG)[number] | 'red' | 'green' | 'yellow' | 'gray'
 
 /**
  * A COR SAI DO ATO, e não do nome inteiro.
@@ -261,6 +261,9 @@ export function tomDaTag(nome: string): TomDaTag {
   return tons[h % tons.length]
 }
 
+/** A etiqueta sem ato sai cinza (decisão de 09/10/2026); a paleta de reserva fica para quando voltar. */
+export const SEM_ATO_EM_CINZA = true
+
 /**
  * As cores das etiquetas de UM card, garantidamente diferentes entre si.
  *
@@ -288,6 +291,15 @@ export function coresDasTags(nomes: readonly string[]): Map<string, TomDaTag> {
     const doAto = tomPorAto(nome)
     if (doAto) {
       mapa.set(nome, doAto)
+      continue
+    }
+
+    // SEM ATO, CINZA (09/10/2026, decisão do dono): só tem cor a etiqueta que diz
+    // o que aconteceu num fundo (Cotado, Enviado, Reprovado, Erro, Sem proposta,
+    // Pendente). "Prioridade", "Indicação João" e afins saem cinza — a cor
+    // sorteada da paleta de reserva às vezes saía verde-água e lia-se "Cotado".
+    if (SEM_ATO_EM_CINZA) {
+      mapa.set(nome, 'gray')
       continue
     }
 

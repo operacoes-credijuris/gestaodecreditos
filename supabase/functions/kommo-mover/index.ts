@@ -222,12 +222,57 @@ Deno.serve(async (req: Request) => {
     // do PATCH, o card teria registro de uma movimentação que não aconteceu.
     // IDEMPOTENTE (o mesmo status duas vezes deixa o card no mesmo lugar): pode
     // ser repetido depois de 429 ou 5xx — ver kommoFetch.
-    const resMove = await kommoFetch(
-      `${base}/leads/${leadId}`,
-      { method: 'PATCH', headers, body: JSON.stringify({ status_id: statusId }) },
-      { idempotente: true },
-    )
+    //
+    // A TRAVA DO MOVIMENTO (09/10/2026): dois pedidos ao mesmo tempo (duas abas,
+    // duas pessoas) passavam juntos pela conferência acima, moviam o card duas
+    // vezes e deixavam DUAS notas. O espelho é a trava: só um pedido consegue
+    // trocar, numa gravação condicional, a coluna que LEU pela de destino. O outro
+    // vê que perdeu e não repete nada. A troca vale antes do PATCH; se o Kommo
+    // recusar, ela é desfeita.
+    const colunaLida = espelho?.status_id ?? null
+    const travaDoMovimento = colunaLida != null && Number(colunaLida) !== statusId
+    if (travaDoMovimento) {
+      const { data: tomou, error: eTrava } = await svc
+        .from('kommo_leads')
+        .update({ status_id: statusId })
+        .eq('kommo_lead_id', leadId)
+        .eq('status_id', colunaLida)
+        .select('kommo_lead_id')
+      if (!eTrava && (tomou?.length ?? 0) === 0) {
+        const { data: agora } = await svc.from('kommo_leads').select('status_id').eq('kommo_lead_id', leadId).maybeSingle()
+        if (Number(agora?.status_id) === statusId) {
+          return jsonResponse({
+            ok: true,
+            aviso: null,
+            ja_estava: true,
+            mensagem: `O card já está indo para "${nomeDoDestino}" (outro clique ou outra pessoa); nada foi repetido.`,
+          })
+        }
+        return jsonResponse(
+          { error: 'O card acabou de ser movido para outra coluna por outra pessoa. Atualize a tela antes de mover.' },
+          409,
+        )
+      }
+      // Erro do banco na trava: segue sem ela, como sempre seguiu.
+    }
+    const desfazerTrava = async () => {
+      if (!travaDoMovimento) return
+      await svc.from('kommo_leads').update({ status_id: colunaLida }).eq('kommo_lead_id', leadId).eq('status_id', statusId)
+    }
+
+    let resMove: Response
+    try {
+      resMove = await kommoFetch(
+        `${base}/leads/${leadId}`,
+        { method: 'PATCH', headers, body: JSON.stringify({ status_id: statusId }) },
+        { idempotente: true },
+      )
+    } catch (e) {
+      await desfazerTrava()
+      throw e
+    }
     if (!resMove.ok) {
+      await desfazerTrava()
       const txt = await resMove.text().catch(() => '')
       return jsonResponse(
         {

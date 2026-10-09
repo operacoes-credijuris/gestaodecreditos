@@ -1450,24 +1450,14 @@ describe('coresDasTags', () => {
     expect(cores.get('Sem proposta')).toBe('red')
   })
 
-  it('as sem regra não se repetem entre si no mesmo card', () => {
-    const semRegra = ['Fundo Alfa', 'Beta', 'urgente', 'XP', 'zzz']
-    const cores = [...coresDasTags(semRegra).values()]
-    expect(new Set(cores).size).toBe(semRegra.length)
-  })
-
-  it('a cor sai do nome quando não há choque', () => {
-    const so = coresDasTags(['Reprovado BTG'])
-    expect(so.get('Reprovado BTG')).toBe(tomDaTag('Reprovado BTG'))
-  })
-
-  // O DESVIO É LOCAL: só a segunda etiqueta do choque muda, e a primeira guarda
-  // a cor do nome dela — é o que mantém a mancha reconhecível pela coluna.
-  it('quem chega primeiro fica com a cor do próprio nome', () => {
-    const nomes = [...TONS_DA_TAG.keys()].map((i) => `tag ${i}`)
-    const cores = coresDasTags(nomes)
-    expect(cores.get(nomes[0])).toBe(tomDaTag(nomes[0]))
-    expect(new Set(cores.values()).size).toBe(TONS_DA_TAG.length)
+  // SEM ATO, CINZA (09/10/2026, decisão do dono): a paleta de reserva sorteava
+  // verde-água para 'Prioridade' e ela se lia como 'Cotado'.
+  it('as sem ato saem cinza; as de ato mantêm a cor', () => {
+    const cores = coresDasTags(['Fundo Alfa', 'urgente', 'Cotado BTG', 'Sem proposta'])
+    expect(cores.get('Fundo Alfa')).toBe('gray')
+    expect(cores.get('urgente')).toBe('gray')
+    expect(cores.get('Cotado BTG')).toBe('green')
+    expect(cores.get('Sem proposta')).toBe('red')
   })
 
   // Mais etiquetas que cores: aí repete mesmo, e repetir é melhor do que deixar
