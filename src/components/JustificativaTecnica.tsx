@@ -102,7 +102,9 @@ export function useJustificativasDaAba(ids: readonly number[], ligado: boolean) 
   })
 }
 
-const BTN = 'h-[32px] px-4'
+// NO CELULAR, 36PX como os outros botões do card (o `BTN` da página, revisão de
+// UX de 09/10/2026): com 32px, a Justificativa ficava mais baixa que o Anotar ao lado.
+const BTN = 'h-[32px] px-4 max-sm:h-controle'
 const IC = 'h-[16px] w-[16px] flex-none'
 
 /**
@@ -125,7 +127,7 @@ export function BotaoJustificativa({
         type="button"
         onClick={onAbrir}
         title="Justificativa técnica enviada ao Kommo — abrir o texto enviado"
-        className="inline-flex h-[32px] max-w-full items-center gap-s1.5 whitespace-nowrap rounded-full border border-sucesso-borda bg-sucesso-fundo px-s3 text-sm font-semibold text-sucesso transition-colors hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+        className="inline-flex h-[32px] max-w-full items-center max-sm:h-controle gap-s1.5 whitespace-nowrap rounded-full border border-sucesso-borda bg-sucesso-fundo px-s3 text-sm font-semibold text-sucesso transition-colors hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
       >
         <span className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-sucesso-cheio text-white">
           <Check className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />

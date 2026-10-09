@@ -67,7 +67,14 @@ function FundoDaLinha({ linha }: { linha: LinhaDaCotacao }) {
       </span>
       {s && (
         <span className="block truncate text-xs text-texto-3">
-          {s.ato}
+          {/* O ATO NA COR DA ETIQUETA (revisão de UX de 09/10/2026): o "Erro"
+              âmbar e o "Reprovado" vermelho, como no card e no seletor — em
+              cinza, "Erro · ontem" se lia como mais um cotado sem valor. O
+              "Cotado" já vem em destaque no nome do fundo, e o "Enviado" é
+              espera: ficam no cinza. */}
+          <span className={cn(s.ato === 'Erro' && 'font-semibold text-aviso', s.ato === 'Reprovado' && 'font-semibold text-perigo')}>
+            {s.ato}
+          </span>
           {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
         </span>
       )}

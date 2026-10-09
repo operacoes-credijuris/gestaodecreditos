@@ -1001,6 +1001,7 @@ function JanelaDeMensagem({
   onFechar: () => void
 }) {
   const comResumo = resumo !== null
+  const idDaMensagem = useId()
   // O RASCUNHO DESTA JANELA (ver rascunhoDoCard.ts): pelo card E pelas saídas —
   // o motivo escrito para reprovar não reaparece na janela de aprovar.
   const leadId = lead.kommo_lead_id
@@ -1206,8 +1207,31 @@ function JanelaDeMensagem({
           </div>
         </details>
       )}
+      {/* COM A CAIXA DO RESUMO, O SEGUNDO CAMPO GANHA NOME (revisão de UX de
+          09/10/2026): eram dois campos de texto empilhados e só um deles dizia o
+          que era. Aprovar deixa DUAS notas — o resumo e esta mensagem —, e o
+          rótulo diz isso onde se escreve. */}
+      {comResumo && (
+        <label
+          htmlFor={idDaMensagem}
+          className="mb-s1.5 flex flex-wrap items-baseline gap-x-2 gap-y-s0.5 text-corpo font-semibold text-texto"
+        >
+          Mensagem
+          <span className="text-sm font-normal text-texto-3">
+            — vai para o card em qualquer saída; ao aprovar, numa nota depois do resumo
+          </span>
+        </label>
+      )}
       <textarea
-        className="min-h-[220px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] font-mono text-sm leading-relaxed text-texto placeholder:font-sans placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
+        id={idDaMensagem}
+        className={cn(
+          'w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] font-mono text-sm leading-relaxed text-texto placeholder:font-sans placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2',
+          // MAIS BAIXA AO LADO DO RESUMO: com as duas caixas altas (132 + 220px)
+          // a janela passava da altura de um notebook de 768px e o resumo, que
+          // é o que se confere, saía de vista ao escrever a mensagem. Ela cresce
+          // pelo canto se precisar.
+          comResumo ? 'min-h-[132px]' : 'min-h-[220px]',
+        )}
         value={mensagem}
         disabled={trabalhando}
         aria-label="Mensagem"
@@ -1383,6 +1407,25 @@ function DesdeQuando({ quando }: { quando: string | null }) {
  * coluna, e na linha só o círculo — o olho corre a coluna "Cotado" de cima a
  * baixo. CLICAR NA MARCADA DESMARCA: é como se desfaz um clique errado.
  */
+/**
+ * O CÍRCULO MARCADO DE CADA ATO no seletor de etiquetas, no vocabulário dos
+ * checks da Remessa (`ChecksDosFundos`): a cor e o ícone do que aconteceu com o
+ * crédito naquele fundo. O âmbar leva o alerta na cor do texto de aviso sobre o
+ * fundo claro — o branco sobre o âmbar cheio não se lê.
+ */
+function marcaDoAto(ato: string): { classe: string; icone: ReactNode } {
+  const check = <Check className="h-[13px] w-[13px]" strokeWidth={3} aria-hidden />
+  if (ato === 'Cotado') return { classe: 'border-sucesso-cheio bg-sucesso-cheio text-white', icone: check }
+  if (ato === 'Reprovado')
+    return { classe: 'border-perigo-cheio bg-perigo-cheio text-white', icone: <X className="h-[13px] w-[13px]" strokeWidth={3} aria-hidden /> }
+  if (ato === 'Erro')
+    return {
+      classe: 'border-aviso-cheio bg-aviso-fundo text-aviso',
+      icone: <AlertTriangle className="h-[13px] w-[13px]" strokeWidth={2.5} aria-hidden />,
+    }
+  return { classe: 'border-marca bg-marca text-white', icone: check }
+}
+
 function SeletorDeEtiquetas({
   oferecidas,
   aplicadas,
@@ -1526,6 +1569,13 @@ function SeletorDeEtiquetas({
                     const posta = temEtiqueta(e.nome)
                     // A OBSERVAÇÃO VAI TAMBÉM NO TÍTULO: "Marcar "Enviado BTG" (só para atacado)".
                     const dica = e.observacao ? ` (${e.observacao})` : ''
+                    // O CÍRCULO MARCADO NA COR DO ATO (revisão de UX de 09/10/2026):
+                    // a mesma linguagem das etiquetas no card e dos checks da
+                    // Remessa — Cotado verde, Reprovado vermelho com ×, Erro âmbar
+                    // com o alerta (decisão do dono: "amarelo o erro"), Enviado no
+                    // azul da etiqueta. Antes tudo saía no azul da marca, e o "Erro"
+                    // marcado parecia um "Cotado".
+                    const marca = marcaDoAto(ato)
                     return (
                       <button
                         key={e.nome}
@@ -1541,14 +1591,14 @@ function SeletorDeEtiquetas({
                         className={cn(
                           // REDONDO, e não quadrado: no fundo a escolha é uma só,
                           // e círculo é a forma que diz isso antes de testar.
-                          'relative grid h-[24px] w-[24px] place-items-center justify-self-center rounded-full border-[1.5px] text-white transition-colors disabled:cursor-progress after:absolute after:-inset-[6px]',
-                          posta ? 'border-marca bg-marca' : 'border-borda-forte bg-superficie hover:border-marca-viva',
+                          'relative grid h-[24px] w-[24px] place-items-center justify-self-center rounded-full border-[1.5px] transition-colors disabled:cursor-progress after:absolute after:-inset-[6px]',
+                          posta ? marca.classe : 'border-borda-forte bg-superficie hover:border-marca-viva',
                         )}
                       >
                         {emVoo === e.nome ? (
                           <Loader2 className="h-[14px] w-[14px] animate-spin text-marca-texto" aria-hidden />
                         ) : posta ? (
-                          <Check className="h-[13px] w-[13px]" strokeWidth={3} aria-hidden />
+                          marca.icone
                         ) : null}
                       </button>
                     )
@@ -1861,6 +1911,9 @@ function TextoComLinks({ texto }: { texto: string }) {
 const aoFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'à' : 'ao'} ${f.fundo}`
 const doFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'da' : 'do'} ${f.fundo}`
 
+/** "Erro BTG" → "erro"; "Cotado PJus" → "cotado": o ato, sem o fundo (que já está ao lado). */
+const palavraDoAto = (etiqueta: string) => (etiqueta.trim().split(/\s+/)[0] ?? '').toLowerCase()
+
 /** O desfecho do fundo já posto no card (a etiqueta de um dos atos dele), ou null. */
 function atoFeito(f: FundoDoEnvio, tags: readonly string[] | null | undefined): AtoDoEnvio | null {
   // Na trilha, onde é testado: qualquer ato do fundo, de qualquer aba (07/10/2026).
@@ -1901,10 +1954,14 @@ function ChecksDosFundos({
 }) {
   const todos = fundos.every((f) => atoFeito(f, lead.tags))
   return (
+    // NO COMPUTADOR, A FAIXA DO TAMANHO DO QUE ELA TEM (revisão de UX de
+    // 09/10/2026): esticada, eram mil pixels de tracejado em volta de duas
+    // pílulas — a moldura pesava mais que os checks. No celular continua na
+    // largura inteira, onde o "Mover para Em precificação" desce largo.
     <div
       role="group"
       aria-label="Envio aos fundos"
-      className="mt-[10px] flex flex-wrap items-center gap-s2 rounded-campo border border-dashed border-borda-forte bg-superficie-2 px-s3 py-s2"
+      className="mt-[10px] flex flex-wrap items-center gap-s2 rounded-campo border border-dashed border-borda-forte bg-superficie-2 px-s3 py-s2 sm:w-fit sm:max-w-full"
     >
       {fundos.map((f) => {
         const ato = atoFeito(f, lead.tags)
@@ -1958,6 +2015,14 @@ function ChecksDosFundos({
                 ) : null}
               </span>
               {f.fundo}
+              {/* O ATO POR EXTENSO ao lado do fundo (revisão de UX de 09/10/2026):
+                  a cor e o ícone diziam "algo aconteceu", e o quê ficava no
+                  passar do mouse — que o celular não tem. O verde, sozinho, não
+                  separava "enviado" de "cotado"; o âmbar novo do erro, sem a
+                  palavra, se confundia com espera. */}
+              {ato && (
+                <span className="font-medium text-texto-2">· {palavraDoAto(ato.etiqueta)}</span>
+              )}
             </button>
             <a
               href={f.plataforma}
@@ -3438,7 +3503,10 @@ function CardCredito({
                     <span className="flex-none text-xs text-texto-3">{formatDataHoraSegundos(ultima.nota.criado_em)}</span>
                   )}
                   {selo && <Selo className="flex-none">{selo}</Selo>}
-                  <span className="min-w-0 truncate" title={texto}>
+                  {/* NO CELULAR, DUAS LINHAS (revisão de UX de 09/10/2026): numa
+                      só, a nota virava "Falei com o advogado; ele mandou a
+                      certid…" e o link, que agora é clicável, nem aparecia. */}
+                  <span className="min-w-0 truncate max-sm:line-clamp-2 max-sm:whitespace-normal" title={texto}>
                     {ehAnexo(ultima.nota) ? texto : <TextoComLinks texto={texto} />}
                   </span>
                 </div>
