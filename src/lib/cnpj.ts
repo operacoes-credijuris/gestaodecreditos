@@ -83,7 +83,17 @@ export function ufCidadeDoCnpj(
   // Ficha antiga com cidade e sem UF só ganha a UF da Receita se a cidade for de lá.
   const uf = ficha.uf || (!ficha.cidade || daUf.includes(ficha.cidade) ? receita.uf : '')
   if (ficha.cidade || !receita.uf) return { uf, cidade: ficha.cidade, aviso: null }
-  if (uf === receita.uf) return { uf, cidade: cidadeIbge, aviso: null }
+  if (uf === receita.uf) {
+    // O MUNICÍPIO DA RECEITA PODE NÃO CASAR COM O DO IBGE (grafia antiga ou
+    // diferente, como "PARATI" × "Paraty"): a cidade fica em branco, e isso
+    // precisa ser dito — antes ficava calada, sob "Endereço completado".
+    const aviso =
+      !cidadeIbge && receita.cidade
+        ? `A Receita registra o município "${receita.cidade}", que não está na lista do IBGE de ${uf}. ` +
+          'A cidade ficou em branco: escolha-a na lista.'
+        : null
+    return { uf, cidade: cidadeIbge, aviso }
+  }
   return {
     uf,
     cidade: '',

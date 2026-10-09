@@ -627,7 +627,12 @@ export function JanelaDeCotacao({
   return (
     <Modal
       open
-      onClose={onFechar}
+      // DURANTE O ENVIO NÃO FECHA (o Cancelar já ficava desligado): fechada pelo X
+      // ou pelo Esc no meio da gravação, a janela levava junto o erro que a
+      // gravação desse — e a pessoa achava que a cotação tinha entrado.
+      onClose={() => {
+        if (!enviando) onFechar()
+      }}
       dirty={edicao.sujo && !enviando}
       size="md"
       title={etiqueta}

@@ -198,6 +198,23 @@ export async function autorizarDrive(): Promise<string> {
 // Chamadas à API
 // ---------------------------------------------------------------------------
 
+/**
+ * TOKEN RECUSADO (401) NÃO FICA GUARDADO (auditoria de bugs, 09/10/2026).
+ *
+ * O token vale uma hora e fica na sessão; revogado antes disso (a autorização
+ * retirada na conta Google, a senha trocada), ele seguia sendo usado, e TODA
+ * chamada ao Drive falhava até a hora vencer — a única saída era sair da
+ * plataforma. Agora o 401 o esquece, e o próximo clique pede outro.
+ */
+const ERRO_TOKEN_RECUSADO =
+  'O Google não aceitou mais o acesso ao Drive (autorização vencida ou retirada). Tente de novo: ele será pedido outra vez.'
+
+export function tratarTokenRecusado(status: number): void {
+  if (status !== 401) return
+  esquecerTokenDrive()
+  throw new Error(ERRO_TOKEN_RECUSADO)
+}
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const acesso = await autorizarDrive()
   const resp = await fetch(url, {
@@ -205,6 +222,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${acesso}` },
   })
   if (!resp.ok) {
+    tratarTokenRecusado(resp.status)
     let detalhe = `HTTP ${resp.status}`
     try {
       const corpo = (await resp.json()) as { error?: { message?: string } }
@@ -286,20 +304,34 @@ export interface ArquivoDrive {
   mimeType: string
 }
 
-/** Os arquivos (não as pastas) de dentro de uma pasta. */
+/**
+ * Os arquivos (não as pastas) de dentro de uma pasta, TODOS eles — paginado
+ * como listarSubpastas. Pedia 200 numa página só: a pasta com mais arquivos que
+ * isso perdia o excedente em silêncio (auditoria de bugs, 09/10/2026).
+ */
 export async function listarArquivos(paiId: string): Promise<ArquivoDrive[]> {
   const filtro =
     `'${paiId}' in parents and mimeType != 'application/vnd.google-apps.folder' ` +
     `and trashed=false`
-  const dados = await api<{ files?: { id: string; name: string; mimeType: string }[] }>(
-    `https://www.googleapis.com/drive/v3/files?q=${q(filtro)}` +
-      `&fields=files(id,name,mimeType)&pageSize=200&orderBy=name`,
+  const todos: ArquivoDrive[] = []
+  let pagina: string | undefined
+  for (let i = 0; i < MAX_PAGINAS; i++) {
+    const dados = await api<{
+      files?: { id: string; name: string; mimeType: string }[]
+      nextPageToken?: string
+    }>(
+      `https://www.googleapis.com/drive/v3/files?q=${q(filtro)}` +
+        `&fields=nextPageToken,files(id,name,mimeType)&pageSize=200&orderBy=name` +
+        (pagina ? `&pageToken=${q(pagina)}` : ''),
+    )
+    for (const f of dados.files ?? []) todos.push({ id: f.id, nome: f.name, mimeType: f.mimeType })
+    if (!dados.nextPageToken) return todos
+    pagina = dados.nextPageToken
+  }
+  throw new Error(
+    `Esta pasta do Drive tem mais de ${MAX_PAGINAS * 200} arquivos — parei de ler. ` +
+      'Confira se a pasta é a esperada.',
   )
-  return (dados.files ?? []).map((f) => ({
-    id: f.id,
-    nome: f.name,
-    mimeType: f.mimeType,
-  }))
 }
 
 /**
@@ -330,6 +362,7 @@ export async function baixarArquivo(a: ArquivoDrive): Promise<{
     : `https://www.googleapis.com/drive/v3/files/${a.id}?alt=media`
 
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${acesso}` } })
+  if (!resp.ok) tratarTokenRecusado(resp.status)
   if (!resp.ok) throw new Error(`Não foi possível baixar "${a.nome}" (HTTP ${resp.status}).`)
   return { bytes: await resp.arrayBuffer(), mime: exportarComo ?? a.mimeType }
 }
@@ -378,6 +411,7 @@ export async function subirDocx(
     body: corpo,
   })
   if (!resp.ok) {
+    tratarTokenRecusado(resp.status)
     let detalhe = `HTTP ${resp.status}`
     try {
       const erro = (await resp.json()) as { error?: { message?: string } }

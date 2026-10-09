@@ -6,6 +6,9 @@
 
 import type { OperacaoAnalitica } from '../../supabase/functions/_shared/nucleo/tipos.ts'
 
+/** A partir daqui o valor em "mil" arredondaria para 1.000: passa a "mi". */
+const MIL_VIRA_MILHAO = 999_500
+
 const soma = (vs: Array<number | null | undefined>) =>
   vs.reduce<number>((t, v) => t + (typeof v === 'number' && Number.isFinite(v) ? v : 0), 0)
 
@@ -117,7 +120,8 @@ export function brlAbreviado(v: number): string {
 export function valorAbreviado(v: number): string {
   if (!Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e6) return `${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`
+  // A FAIXA SAI DO VALOR JÁ ARREDONDADO: R$ 999.700 em "mil" daria "1.000 mil".
+  if (abs >= MIL_VIRA_MILHAO) return `${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`
   if (abs >= 1e3) return `${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`
   return Math.round(v).toLocaleString('pt-BR')
 }

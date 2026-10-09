@@ -40,6 +40,7 @@ import {
   variaveisUsadas,
 } from '@/lib/peticao'
 import { driveConfigurado } from '@/lib/drive'
+import { abrirEmNovaAba } from '@/lib/abrirEmNovaAba'
 import { invokeFunction } from '@/lib/functions'
 import { peticaoTemplatesCrud, processosCrud, useInvestidorDados } from '@/lib/queries'
 import { formatCNJ } from '@/lib/format'
@@ -580,10 +581,16 @@ export function PeticaoModal({
       setPasso('Salvando no Drive…')
       const { subirDocx } = await import('@/lib/drive')
       const { link } = await subirDocx(alvo.pastaId, nome, blob)
-      // Nova aba, como pedido. `noopener` porque abrir aba com referência à página
-      // de origem é brecha conhecida, e aqui não há motivo para manter o vínculo.
-      window.open(link, '_blank', 'noopener,noreferrer')
-      toast.success(`Salvo em ${alvo.caminho.join(' › ')}`)
+      // Nova aba, como pedido, SEM VÍNCULO com esta página (o que o `noopener`
+      // fazia). Depois de gerar e subir, o bloqueador de pop-up pode engolir a
+      // aba: aí o aviso leva o link num botão (lib/abrirEmNovaAba.ts).
+      if (abrirEmNovaAba(link)) {
+        toast.success(`Salvo em ${alvo.caminho.join(' › ')}`)
+      } else {
+        toast.success(`Salvo em ${alvo.caminho.join(' › ')}`, {
+          action: { label: 'Abrir no Drive', onClick: () => window.open(link, '_blank', 'noopener,noreferrer') },
+        })
+      }
       // A peça da IA está no Drive: o rascunho dela já não guarda nada que se
       // perderia. (Nos dois caminhos de download acima ele fica — o arquivo
       // baixado pode não ter chegado aonde devia.)

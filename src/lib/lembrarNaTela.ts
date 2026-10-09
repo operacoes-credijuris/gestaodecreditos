@@ -60,12 +60,16 @@ export function lerEscolha<T extends string>(
  *
  * `permitidas` é lida só na abertura — passe uma lista fixa (constante do módulo),
  * não uma montada a cada render.
+ *
+ * O TERCEIRO ITEM troca SEM GRAVAR: é para o preenchimento automático (vir de
+ * um card RPV para a Geração de contratos), que não é escolha da pessoa e não
+ * pode virar a abertura de todas as visitas seguintes.
  */
 export function useEscolhaLembrada<T extends string>(
   chave: string,
   permitidas: readonly T[],
   padrao: T,
-): [T, (valor: T) => void] {
+): [T, (valor: T) => void, (valor: T) => void] {
   const [valor, setValor] = useState<T>(() => lerEscolha(chave, permitidas, padrao))
   const escolher = useCallback(
     (novo: T) => {
@@ -74,5 +78,5 @@ export function useEscolhaLembrada<T extends string>(
     },
     [chave],
   )
-  return [valor, escolher]
+  return [valor, escolher, setValor]
 }

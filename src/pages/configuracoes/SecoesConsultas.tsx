@@ -151,7 +151,10 @@ export function SecaoEscavador({
       })
       setTokenCallback('')
       toast.success('Token de callback salvo. A partir de agora os avisos do Escavador são aceitos.')
-      pendencia(false)
+      // O OUTRO CAMPO PODE TER SIDO COLADO E NÃO SALVO: a pendência fica com ele.
+      // Antes, salvar um apagava o "não salvo" do outro, e recarregar a aba
+      // perdia o token colado sem perguntar.
+      pendencia(!!token.trim())
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
@@ -179,7 +182,8 @@ export function SecaoEscavador({
         'Token do Escavador salvo e confirmado' +
           (r.saldo?.descricao ? `. Saldo: ${r.saldo.descricao}` : '.'),
       )
-      pendencia(false)
+      // Mesma regra do callback: o outro campo ainda digitado segue pendente.
+      pendencia(!!tokenCallback.trim())
     } catch (err) {
       toast.error((err as Error).message)
     } finally {

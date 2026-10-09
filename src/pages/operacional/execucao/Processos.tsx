@@ -54,7 +54,8 @@ import {
   INSTRUMENTO,
   ESPECIE_REQUISITORIO,
 } from '@/lib/labels'
-import { formatCNJ, formatDate, hojeISO, mesesDepois, onlyDigits } from '@/lib/format'
+import { formatCNJ, formatDate, mesesDepois, onlyDigits } from '@/lib/format'
+import { useHojeQueAnda } from '@/lib/hojeQueAnda'
 import { casaBusca } from '@/lib/buscaDaTela'
 import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
 import {
@@ -111,8 +112,9 @@ export default function Processos() {
   const ultimaMov = useUltimaMovimentacao()
 
   // Referências do semáforo da coluna Expectativa. Data local (sv-SE dá o
-  // formato ISO), calculada no render: no dia seguinte a régua anda sozinha.
-  const hoje = useMemo(() => hojeISO(), [])
+  // formato ISO), que ANDA COM O DIA (lib/hojeQueAnda.ts) — o useMemo de antes
+  // congelava a régua na montagem, ao contrário do que este comentário dizia.
+  const hoje = useHojeQueAnda()
   const limiteAlerta = useMemo(() => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA), [hoje])
 
   const [busca, setBusca] = useState('')

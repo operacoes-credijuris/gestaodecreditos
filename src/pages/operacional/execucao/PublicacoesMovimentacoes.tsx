@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Clock, ExternalLink, Plus, ChevronDown } from 'lucide-react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
@@ -58,6 +58,29 @@ import { BotaoCopiar } from '@/components/BotaoCopiar'
 const LIMITE_LINHAS = 1000
 
 /**
+ * A JANELA INTEIRA, EM PÁGINAS DO TETO (auditoria de bugs, 09/10/2026). Com uma
+ * página só, passar de 1000 publicações em 30 dias deixava as mais antigas de
+ * fora — e o aviso mandava procurá-las na busca, que só procura no que está na
+ * tela. Agora a lista lê página a página, até `MAX_PAGINAS_DA_LISTA`; passando
+ * disso, o aviso de corte continua valendo (ele compara com a contagem exata).
+ */
+const MAX_PAGINAS_DA_LISTA = 5
+async function lerEmPaginas<T>(
+  pagina: (de: number, ate: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<T[]> {
+  const todas: T[] = []
+  for (let i = 0; i < MAX_PAGINAS_DA_LISTA; i++) {
+    const de = i * LIMITE_LINHAS
+    const { data, error } = await pagina(de, de + LIMITE_LINHAS - 1)
+    if (error) throw new Error(error.message)
+    const lote = (data ?? []) as T[]
+    todas.push(...lote)
+    if (lote.length < LIMITE_LINHAS) break
+  }
+  return todas
+}
+
+/**
  * Quantos registros existem na janela (contagem leve: head:true não baixa
  * linha). Serve a DOIS consumidores — a pílula da aba e o aviso de truncamento
  * da lista — e é o MESMO queryKey nos dois, então o React Query deduplica: uma
@@ -91,12 +114,23 @@ const isoDiasAtras = (n: number) =>
 // Dispara a sincronização UMA vez ao montar (o guard por ref preserva o
 // comportamento no StrictMode). Compartilhado pelas abas Publicações e
 // Movimentações, que têm o mesmo padrão de sync em 2º plano.
-function useSincronizaAoMontar(mutate: () => void) {
+//
+// E NÃO DISPARA OUTRA COM UMA EM CURSO (auditoria de bugs, 09/10/2026): trocar
+// de aba desmonta a lista, e voltar a ela montava de novo — uma segunda
+// sincronização com o DJEN (ou o ADVBOX), de ~1 min, enquanto a primeira ainda
+// rodava. A trava é a chave da mutação, que vive no cliente do React Query e
+// sobrevive à desmontagem.
+const SYNC_DJEN = ['sincronizar', 'djen'] as const
+const SYNC_ADVBOX = ['sincronizar', 'advbox'] as const
+function useSincronizaAoMontar(mutate: () => void, chave: readonly string[]) {
+  const qc = useQueryClient()
   const ja = useRef(false)
   useEffect(() => {
     if (ja.current) return
     ja.current = true
+    if (qc.isMutating({ mutationKey: [...chave] }) > 0) return
     mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mutate])
 }
 
@@ -312,17 +346,16 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
 
   const lista = useQuery({
     queryKey: ['djen_publicacoes', ini30],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('djen_publicacoes')
-        .select('*')
-        .gte('data_disponibilizacao', ini30)
-        .order('data_disponibilizacao', { ascending: false })
-        .order('id', { ascending: false })
-        .limit(LIMITE_LINHAS)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as DjenRow[]
-    },
+    queryFn: () =>
+      lerEmPaginas<DjenRow>((de, ate) =>
+        supabase
+          .from('djen_publicacoes')
+          .select('*')
+          .gte('data_disponibilizacao', ini30)
+          .order('data_disponibilizacao', { ascending: false })
+          .order('id', { ascending: false })
+          .range(de, ate),
+      ),
   })
 
   // Sincroniza com o DJEN em segundo plano ao abrir a página.
@@ -337,6 +370,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
   // antiga, seis dias depois. O `resumo` completo continua na resposta da função,
   // para quem for diagnosticar.
   const sync = useMutation({
+    mutationKey: SYNC_DJEN,
     mutationFn: () => invokeFunction<RespostaSync>('djen-publicacoes', {}),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['djen_publicacoes'] })
@@ -366,7 +400,9 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
     onError: (e) =>
       toast.error(`Sincronização DJEN: ${(e as Error).message}`),
   })
-  useSincronizaAoMontar(sync.mutate)
+  useSincronizaAoMontar(sync.mutate, SYNC_DJEN)
+  // A da montagem anterior (outra aba) ainda correndo também conta.
+  const sincronizando = useIsMutating({ mutationKey: [...SYNC_DJEN] }) > 0
 
   // Marca/desmarca "tratada" (move entre Novas e Tratadas).
   const toggleTratada = useMutation({
@@ -508,7 +544,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
           {filtradas.length === 1 ? 'publicação' : 'publicações'}
         </span>
         <SyncStatus
-          syncing={sync.isPending}
+          syncing={sincronizando}
           updatedAt={lista.dataUpdatedAt}
           label="atualizando do DJEN…"
         />
@@ -529,7 +565,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
             Nada se perde: quando ele voltar, a plataforma busca os últimos 30 dias e as intimações deste intervalo
             entram sozinhas. Até lá, confira as intimações no ADVBOX.
           </p>
-          <Button size="sm" variant="secondary" className="mt-s1" onClick={() => sync.mutate()} loading={sync.isPending}>
+          <Button size="sm" variant="secondary" className="mt-s1" onClick={() => sync.mutate()} loading={sincronizando}>
             Tentar de novo
           </Button>
         </Aviso>
@@ -539,7 +575,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
         <Aviso tom="aviso">
           Mostrando as {lista.data?.length} publicações mais recentes de{' '}
           {total.data} na janela de 30 dias. As mais antigas do período ficaram de
-          fora — use a busca para encontrar uma publicação específica.
+          fora, e a busca só procura nas que estão na tela.
         </Aviso>
       )}
 
@@ -552,7 +588,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
         <EmptyState
           title="Nenhuma publicação"
           description={
-            sync.isPending ? 'Sincronizando… pode levar ~1 min.' : undefined
+            sincronizando ? 'Sincronizando… pode levar ~1 min.' : undefined
           }
         />
       ) : (
@@ -858,16 +894,17 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   const lista = useQuery({
     queryKey: ['advbox_movimentacoes', ini20],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('advbox_movimentacoes')
-        .select('*')
-        .gte('data', ini20)
-        .order('data', { ascending: false })
-        .limit(LIMITE_LINHAS)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as MovRow[]
-    },
+    queryFn: () =>
+      lerEmPaginas<MovRow>((de, ate) =>
+        supabase
+          .from('advbox_movimentacoes')
+          .select('*')
+          .gte('data', ini20)
+          .order('data', { ascending: false })
+          // Ordem estável entre as páginas (sem ela, linhas se repetem ou somem).
+          .order('id', { ascending: true })
+          .range(de, ate),
+      ),
   })
 
   // Status por processo (última movimentação) — grupo Paralisados. Se a tabela
@@ -887,6 +924,7 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   // Sincroniza com o ADVBOX em 2º plano ao abrir a aba.
   const sync = useMutation({
+    mutationKey: SYNC_ADVBOX,
     mutationFn: () => invokeFunction('advbox-movimentacoes', {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['advbox_movimentacoes'] })
@@ -894,7 +932,8 @@ function Movimentacoes({ busca }: { busca: string }) {
     },
     onError: (e) => toast.error(`Sincronização ADVBOX: ${(e as Error).message}`),
   })
-  useSincronizaAoMontar(sync.mutate)
+  useSincronizaAoMontar(sync.mutate, SYNC_ADVBOX)
+  const sincronizando = useIsMutating({ mutationKey: [...SYNC_ADVBOX] }) > 0
 
   // Mesma normalização das Publicações: sem acento, e número de processo
   // comparado também por dígito. Antes, "goiania" e "5524530" não achavam nada.
@@ -1005,7 +1044,7 @@ function Movimentacoes({ busca }: { busca: string }) {
           {totalMovs === 1 ? 'movimentação' : 'movimentações'} nos últimos 20 dias
         </span>
         <SyncStatus
-          syncing={sync.isPending}
+          syncing={sincronizando}
           updatedAt={lista.dataUpdatedAt}
           label="atualizando do ADVBOX…"
         />
@@ -1027,7 +1066,7 @@ function Movimentacoes({ busca }: { busca: string }) {
           <EmptyState
             title="Nenhuma movimentação"
             description={
-              sync.isPending ? 'Sincronizando… pode levar ~1 min.' : undefined
+              sincronizando ? 'Sincronizando… pode levar ~1 min.' : undefined
             }
           />
         </Card>

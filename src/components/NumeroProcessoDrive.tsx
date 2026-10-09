@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 import { formatCNJ } from '@/lib/format'
 import { driveConfigurado } from '@/lib/drive'
+import { abrirEmNovaAba } from '@/lib/abrirEmNovaAba'
 import { useToast } from '@/components/ui/Toast'
 import { processosCrud } from '@/lib/queries'
 import type { Processo } from '@/lib/types'
@@ -119,7 +120,14 @@ export function useAbrirPastaDoCredito(processo: Processo | null) {
         toast.toast(r.motivo, 'info')
         return
       }
-      window.open(linkDaPasta(r.pastaId), '_blank', 'noopener,noreferrer')
+      // Depois de esperar o Drive, o bloqueador de pop-up pode engolir a aba:
+      // aí o link vai num botão do aviso (lib/abrirEmNovaAba.ts).
+      const link = linkDaPasta(r.pastaId)
+      if (!abrirEmNovaAba(link)) {
+        toast.info('Pasta encontrada. O navegador bloqueou a aba nova.', {
+          action: { label: 'Abrir a pasta', onClick: () => window.open(link, '_blank', 'noopener,noreferrer') },
+        })
+      }
       // Guarda para o próximo clique ser instantâneo. Falha aqui não atrapalha o
       // usuário — a pasta já abriu; só custa resolver de novo na próxima vez.
       atualizar.mutate(

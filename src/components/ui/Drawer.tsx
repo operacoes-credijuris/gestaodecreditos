@@ -92,7 +92,12 @@ export function Drawer({
     return () => document.removeEventListener('keydown', onKey)
   }, [open, pedirFechar, ehTopo])
 
-  if (!rendered) return null
+  // `open` TAMBÉM DESENHA, sem esperar o `rendered` (que só vira true no efeito
+  // acima, um render depois): o foco preso (useFocoPreso) procura o painel no
+  // primeiro render aberto, e sem ele no DOM o foco ficava no botão de trás do
+  // véu — Enter acionava a tela de baixo. O `visible` continua false nesse
+  // render, então a animação de entrada é a mesma.
+  if (!open && !rendered) return null
 
   return createPortal(
     <div className="fixed inset-0 z-janela">

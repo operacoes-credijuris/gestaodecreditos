@@ -365,7 +365,9 @@ export function tempoDecorrido(value: string | null | undefined, agora: Date = n
   if (dias < 30) return `há ${dias} dias`
   const meses = Math.floor(dias / 30)
   if (meses < 12) return meses === 1 ? 'há 1 mês' : `há ${meses} meses`
-  const anos = Math.floor(dias / 365)
+  // De 360 a 364 dias já são 12 "meses" e ainda zero anos inteiros: sem o
+  // piso, saía "há 0 anos".
+  const anos = Math.max(1, Math.floor(dias / 365))
   return anos === 1 ? 'há 1 ano' : `há ${anos} anos`
 }
 

@@ -8,6 +8,9 @@
 import { formatBRL } from './format'
 import type { Processo } from './types'
 
+/** A partir daqui o valor em "mil" arredondaria para 1.000: passa a "mi". */
+const MIL_VIRA_MILHAO = 999_500
+
 export interface NumerosDaSelecao {
   quantidade: number
   /** Soma do capital investido; crédito sem o valor conta zero. */
@@ -89,7 +92,8 @@ export function brlCurto(v: number): string {
   const abs = Math.abs(v)
   const fmt = (n: number, casas: number) =>
     n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: casas })
-  if (abs >= 1e6) return `R$ ${fmt(v / 1e6, 1)} mi`
+  // A FAIXA SAI DO VALOR JÁ ARREDONDADO: R$ 999.700 em "mil" daria "1.000 mil".
+  if (abs >= MIL_VIRA_MILHAO) return `R$ ${fmt(v / 1e6, 1)} mi`
   if (abs >= 1e3) return `R$ ${fmt(v / 1e3, 0)} mil`
   return formatBRL(v)
 }

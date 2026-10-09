@@ -102,23 +102,47 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
     }
   }
 
-  async function alternar(id: string) {
+  /**
+   * As skills com uma ação em curso. O "alternar" do servidor LÊ E INVERTE o
+   * estado: um clique duplo invertia duas vezes (ou uma, conforme a corrida), e
+   * a skill que a pessoa desligou podia continuar ligada para todos. Enquanto a
+   * ação corre, os botões daquela skill ficam desligados.
+   */
+  const [emCurso, setEmCurso] = useState<ReadonlySet<string>>(() => new Set())
+  const emCursoRef = useRef(new Set<string>())
+  async function comTrava(id: string, acao: () => Promise<void>) {
+    if (emCursoRef.current.has(id)) return
+    emCursoRef.current.add(id)
+    setEmCurso(new Set(emCursoRef.current))
     try {
-      await invokeFunction('assistente-skills', { acao: 'alternar', id })
-      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
-    } catch (err) {
-      toast.error((err as Error).message)
+      await acao()
+    } finally {
+      emCursoRef.current.delete(id)
+      setEmCurso(new Set(emCursoRef.current))
     }
   }
 
+  async function alternar(id: string) {
+    await comTrava(id, async () => {
+      try {
+        await invokeFunction('assistente-skills', { acao: 'alternar', id })
+        await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
+      } catch (err) {
+        toast.error((err as Error).message)
+      }
+    })
+  }
+
   async function remover(id: string) {
-    try {
-      await invokeFunction('assistente-skills', { acao: 'remover', id })
-      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
-      toast.success('Skill removida.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
+    await comTrava(id, async () => {
+      try {
+        await invokeFunction('assistente-skills', { acao: 'remover', id })
+        await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
+        toast.success('Skill removida.')
+      } catch (err) {
+        toast.error((err as Error).message)
+      }
+    })
   }
 
   // SOLTAR O .zip NA CAIXA (item "Novo" da amostra). O seletor de arquivo filtra
@@ -197,6 +221,7 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                             size="sm"
                             variant="ghost"
                             aria-label={`${s.ativo ? 'Desativar' : 'Ativar'} a skill ${s.nome}`}
+                            loading={emCurso.has(s.id)}
                             onClick={() => alternar(s.id)}
                           >
                             {s.ativo ? 'Desativar' : 'Ativar'}
@@ -205,6 +230,7 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                             label={`Remover skill ${s.nome}`}
                             variant="danger"
                             icon={<Trash2 className="h-[16px] w-[16px]" />}
+                            disabled={emCurso.has(s.id)}
                             onClick={() => remover(s.id)}
                           />
                         </div>
@@ -369,7 +395,7 @@ export function SecaoRoteiro({ pendencia }: { pendencia: Pendencia }) {
     if (naoLido) return
     setSalvando(true)
     try {
-      const { error } = await supabase.from('prompts_operacao').upsert({
+      const linha: PromptDaOperacao = {
         chave: CHAVE_ROTEIRO,
         texto: novo,
         // O QUE ESTAVA VALENDO VIRA O ANTERIOR — é o desfazer de um clique. São
@@ -378,8 +404,14 @@ export function SecaoRoteiro({ pendencia }: { pendencia: Pendencia }) {
         texto_anterior: emVigor,
         atualizado_em: new Date().toISOString(),
         atualizado_por: user?.email ?? null,
-      })
+      }
+      const { error } = await supabase.from('prompts_operacao').upsert(linha)
       if (error) throw new Error(error.message)
+      // O GRAVADO ENTRA NO CACHE ANTES DE SOLTAR O CAMPO: solto, o campo volta a
+      // acompanhar o servidor — e, até a releitura chegar (ou se ela falhar), ele
+      // voltava ao texto ANTIGO sob o aviso de "salvo", e o próximo Salvar
+      // gravava esse antigo como "texto anterior".
+      qc.setQueryData(['prompts_operacao', CHAVE_ROTEIRO], linha)
       setTocado(false)
       await qc.invalidateQueries({ queryKey: ['prompts_operacao', CHAVE_ROTEIRO] })
       toast.success(recado)
@@ -549,6 +581,14 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
       }
       const { error } = await supabase.from('prompts_operacao').upsert(linhas)
       if (error) throw new Error(error.message)
+      // O gravado entra no cache antes de soltar o campo (ver o Roteiro).
+      if (mudouPrompt) {
+        const gravada = linhas[0] as unknown as LinhaDoPrompt
+        qc.setQueryData<LinhaDoPrompt[]>(CONSULTA_DA_JUSTIFICATIVA, (antes) => [
+          ...(antes ?? []).filter((l) => l.chave !== CHAVE_PROMPT_JUSTIFICATIVA),
+          gravada,
+        ])
+      }
       setTocado(false)
       await qc.invalidateQueries({ queryKey: CONSULTA_DA_JUSTIFICATIVA })
       toast.success('Justificativa técnica salva. A próxima geração já a usa.')

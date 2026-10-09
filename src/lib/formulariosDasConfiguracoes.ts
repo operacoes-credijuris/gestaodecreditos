@@ -97,3 +97,34 @@ export function mensagemDaFalhaDoBcb(e: unknown): string {
   const motivo = (avisos.length ? avisos.join('; ') : mensagem).replace(/[.\s]+$/, '')
   return `Não consegui atualizar pelo Banco Central, e nada foi gravado: ${motivo}.`
 }
+
+/** As 27 UFs (a mesma lista da leitura do servidor, em djen-publicacoes). */
+const UFS_DA_OAB = new Set(
+  'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' '),
+)
+
+/**
+ * Lê uma OAB gravada nas Configurações do DJEN para o formulário — A MESMA
+ * LEITURA do servidor (`lerOab` em djen-publicacoes), que já aceita "54.162/GO",
+ * "SP/54162", "54162-SP" e "OAB/SP 54162" (auditoria de bugs, 09/10/2026).
+ *
+ * A tela lia com a expressão antiga: "54.162/GO" virava 54/GO, e "SP/54162",
+ * 54162/GO — e o primeiro Salvar na seção (ao incluir outra OAB, por exemplo)
+ * regravava a OAB errada, e a busca no DJEN deixava de achar as intimações dela.
+ *
+ * Devolve null quando não dá para ler: quem chama decide o que mostrar.
+ */
+export function lerOabGravada(bruto: unknown): { numero: string; uf: string } | null {
+  const t = String(bruto ?? '')
+    .toUpperCase()
+    .replace(/[.\s]/g, '')
+  const numeroPrimeiro = t.match(/(\d{2,7})[/-]?([A-Z]{2})/)
+  if (numeroPrimeiro && UFS_DA_OAB.has(numeroPrimeiro[2])) {
+    return { numero: numeroPrimeiro[1].replace(/\D/g, ''), uf: numeroPrimeiro[2] }
+  }
+  const ufPrimeiro = t.match(/([A-Z]{2})[/-]?(\d{2,7})/)
+  if (ufPrimeiro && UFS_DA_OAB.has(ufPrimeiro[1])) {
+    return { numero: ufPrimeiro[2].replace(/\D/g, ''), uf: ufPrimeiro[1] }
+  }
+  return null
+}
