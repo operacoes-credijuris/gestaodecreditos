@@ -225,7 +225,13 @@ import { TextoComTermos } from '@/components/layout/TextoComTermos'
 import { CamposDaCotacao, JanelaDeCotacao, useCotacaoEmEdicao } from '@/components/JanelaDeCotacao'
 import { registrarEnvioAoFundo, type ResultadoDoEnvio } from '@/lib/envioAoFundo'
 import { Tabs, idDaAba } from '@/components/ui/Tabs'
-import { atosDaAba, desfechoDoFundo } from '../../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
+import {
+  atosDaAba,
+  desfechoDoFundo,
+  ETIQUETA_SEM_PROPOSTA,
+  NOTA_SEM_PROPOSTA,
+} from '../../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   comCotacaoGravada,
   type Cotacao,
@@ -2943,6 +2949,7 @@ function CardCredito({
   etiquetaEmVoo,
   onAnotar,
   onEscolherProposta,
+  onSemProposta,
   verPropostas = false,
   anexarEMover,
   envioAosFundos,
@@ -3024,6 +3031,12 @@ function CardCredito({
    * Só na aba que declara `escolhaDeProposta` (Em precificação do Externo).
    */
   onEscolherProposta?: (l: KommoLead, fundo: string) => Promise<void>
+  /**
+   * "Sem proposta" (09/10/2026): nenhum fundo propôs — abre a confirmação de tirar
+   * todas as etiquetas, pôr "Sem proposta" e mover para Reprovados. Só na aba que
+   * declara `semProposta` (Em precificação do Externo).
+   */
+  onSemProposta?: (l: KommoLead) => void
   /**
    * O indicador "3 propostas", só de leitura, na linha de metadados (ver
    * `BotaoVerPropostas`): na Produção de proposta e na Negociação dos três
@@ -3715,6 +3728,21 @@ function CardCredito({
               ocupado={ocupado}
               onEnviar={(arquivo, onAndamento) => anexarEMover.onEnviar(lead, arquivo, onAndamento)}
             />
+          )}
+
+          {/* SEM PROPOSTA, contornado em vermelho, antes da escolha: é a outra
+              saída da precificação, a de quando nenhum fundo respondeu com valor. */}
+          {onSemProposta && (
+            <Button
+              size="sm"
+              variant="dangerOutline"
+              className={BTN}
+              icon={<X className={IC} aria-hidden />}
+              onClick={() => onSemProposta(lead)}
+              disabled={ocupado}
+            >
+              Sem proposta
+            </Button>
           )}
 
           {onEscolherProposta && (
@@ -5250,6 +5278,8 @@ export default function AnaliseCredito() {
   }
 
   /** O card e o desfecho aguardando a mensagem, quando a decisão vem do card. */
+  /** O card cujo "Sem proposta" está à espera da confirmação (ver `semPropostaNoCard`). */
+  const [semPropostaDe, setSemPropostaDe] = useState<KommoLead | null>(null)
   const [mensagemDoCard, setMensagemDoCard] = useState<{
     lead: KommoLead
     acoes: AcaoTela[]
@@ -5259,7 +5289,7 @@ export default function AnaliseCredito() {
   )
 
   const mover = useMutation({
-    mutationFn: (args: { leadId: number; statusId: number; comentario: string }) =>
+    mutationFn: (args: { leadId: number; statusId: number; comentario: string; semProposta?: boolean }) =>
       invokeFunction<{ mensagem: string; aviso: string | null }>('kommo-mover', args),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['kommo_leads'] })
@@ -5456,7 +5486,13 @@ export default function AnaliseCredito() {
    * O MOVIMENTO PRIMEIRO, a nota depois: o feed ordena pela chegada, e a ordem
    * de leitura é o que aconteceu e então por quê.
    */
-  async function moverComNota(leadId: number, statusId: number, mensagem: string | string[]) {
+  async function moverComNota(
+    leadId: number,
+    statusId: number,
+    mensagem: string | string[],
+    /** O "Sem proposta": as etiquetas mudam no mesmo PATCH do movimento (ver kommo-mover). */
+    opcoes: { semProposta?: boolean } = {},
+  ) {
     // MOVER UMA VEZ, ANOTAR QUANTAS PRECISAR.
     //
     // Falhando a nota DEPOIS de o card já ter mudado de coluna, a janela fica
@@ -5470,7 +5506,7 @@ export default function AnaliseCredito() {
     const recusa = movimentoRecusado(jaMovidos.current, leadId, statusId)
     if (recusa) throw new Error(recusa)
     if (!jaMovidos.current.has(chave)) {
-      await mover.mutateAsync({ leadId, statusId, comentario: '' })
+      await mover.mutateAsync({ leadId, statusId, comentario: '', ...(opcoes.semProposta ? { semProposta: true } : {}) })
       jaMovidos.current.add(chave)
     }
     // MAIS DE UMA NOTA, EM ORDEM (07/10/2026): o Aprovar da Revisão do RPV manda
@@ -5809,6 +5845,32 @@ export default function AnaliseCredito() {
         toast.error((e as Error).message)
       }
       throw e
+    }
+  }
+
+  /**
+   * SEM PROPOSTA (09/10/2026, pedido do dono): nenhum fundo propôs. Depois da
+   * confirmação, a kommo-mover tira TODAS as etiquetas do card, põe "Sem
+   * proposta" e move para Reprovados — num PATCH só — e a nota "Não conseguimos
+   * qualquer proposta para este crédito." sobe em seguida, assinada. O caminho é
+   * o dos desfechos (`moverComNota`): trava do card, retry que só refaz a nota.
+   */
+  async function semPropostaNoCard(lead: KommoLead) {
+    const statusId = abaAtual?.semProposta
+    if (!statusId) {
+      toast.error('Não achei no Kommo a coluna Reprovados. Sincronize e tente de novo.')
+      return
+    }
+    try {
+      await comCardTravado(lead.kommo_lead_id, statusId, () =>
+        moverComNota(lead.kommo_lead_id, statusId, NOTA_SEM_PROPOSTA, { semProposta: true }),
+      )
+      setSemPropostaDe(null)
+    } catch (e) {
+      // A falha do MOVIMENTO já tem aviso (o onError do mover); a da NOTA, não.
+      if (ehNotaNaoSubiu(e) || movimentoRecusado(jaMovidos.current, lead.kommo_lead_id, statusId)) {
+        toast.error((e as Error).message)
+      }
     }
   }
 
@@ -6414,6 +6476,7 @@ export default function AnaliseCredito() {
                   // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
                   // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                   onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
+                  onSemProposta={abaAtual?.semProposta ? (l) => setSemPropostaDe(l) : undefined}
                   // AS PROPOSTAS CADASTRADAS, só para ver — a Produção de
                   // proposta e a Negociação dos três funis (`mostraAsPropostas`).
                   verPropostas={mostraAsPropostas(abaAtual?.statusIds)}
@@ -6550,6 +6613,36 @@ export default function AnaliseCredito() {
           onFechar={() => setCotando(null)}
         />
       )}
+
+      {/* A CONFIRMAÇÃO DO "SEM PROPOSTA": mover para Reprovados dispara as
+          automações do Kommo e não se desfaz. */}
+      <ConfirmDialog
+        open={semPropostaDe !== null}
+        title="Sem proposta"
+        danger
+        confirmLabel="Confirmar sem proposta"
+        loading={semPropostaDe !== null && emAndamento[semPropostaDe.kommo_lead_id] !== undefined}
+        message={
+          // SÓ SPANS: o ConfirmDialog já põe a mensagem dentro de um <p>.
+          <>
+            {semPropostaDe && (
+              <span className="mb-s2 block text-texto-2">
+                <IdentificacaoDoCard titulo={tituloCard(semPropostaDe)} />
+              </span>
+            )}
+            <span className="block">Nenhum fundo propôs para este crédito. Ao confirmar, a plataforma:</span>
+            <span className="mt-s2 block">
+              • tira <strong>todas</strong> as etiquetas do card e põe “{ETIQUETA_SEM_PROPOSTA}”;
+            </span>
+            <span className="block">
+              • move o card para <strong>Reprovados</strong> (dispara as automações do Kommo);
+            </span>
+            <span className="block">• anota: “{NOTA_SEM_PROPOSTA}”</span>
+          </>
+        }
+        onConfirm={() => semPropostaDe && void semPropostaNoCard(semPropostaDe)}
+        onClose={() => setSemPropostaDe(null)}
+      />
 
       {mensagemDoCard && (
         <JanelaDeMensagem

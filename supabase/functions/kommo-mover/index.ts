@@ -18,7 +18,8 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
-import { destinoPermitido } from '../_shared/trilhasDoPrecatorio.ts'
+import { destinoPermitido, ehDestinoDoSemProposta, ETIQUETA_SEM_PROPOSTA } from '../_shared/trilhasDoPrecatorio.ts'
+import { idDaEtiquetaNaConta, mesmaEtiqueta } from '../_shared/etiquetasDoFundo.ts'
 // AS COLUNAS DO RPV moram em `_shared/colunasRpv.ts`, para o teste as prender.
 import { COLUNAS } from '../_shared/colunasRpv.ts'
 // O SELO DA ANOTAÇÃO ("Operacional" ou "Comercial") sai do DESTINO, decidido
@@ -68,6 +69,8 @@ Deno.serve(async (req: Request) => {
       leadId?: number
       statusId?: number
       comentario?: string
+      /** O botão "Sem proposta": tira todas as etiquetas e põe "Sem proposta" no mesmo PATCH. */
+      semProposta?: boolean
     }
     const leadId = Number(body.leadId)
     const statusId = Number(body.statusId)
@@ -260,11 +263,62 @@ Deno.serve(async (req: Request) => {
       await svc.from('kommo_leads').update({ status_id: colunaLida }).eq('kommo_lead_id', leadId).eq('status_id', statusId)
     }
 
+    // SEM PROPOSTA (09/10/2026): TODAS as etiquetas do card saem e "Sem proposta"
+    // entra, NO MESMO PATCH do movimento — o card nunca fica pela metade (sem
+    // etiquetas e ainda na coluna, ou em Reprovados com as etiquetas de antes).
+    // Só para o destino que a trilha declara (`ehDestinoDoSemProposta`). As
+    // etiquetas são lidas do Kommo agora e tiradas pelo id; "Sem proposta" entra
+    // pelo id da que a conta já tem. Sem a leitura, NADA se move.
+    let etiquetasDoPatch: { tags_to_add?: ({ id: number } | { name: string })[]; tags_to_delete?: { id: number }[] } = {}
+    const semProposta = body.semProposta === true &&
+      linhaDoPrecatorio != null &&
+      ehDestinoDoSemProposta(Number(linhaDoPrecatorio.pipeline_id), statusId)
+    if (body.semProposta === true && !semProposta) {
+      await desfazerTrava()
+      return jsonResponse({ error: 'O "Sem proposta" só leva o card aos Reprovados do próprio funil.' }, 400)
+    }
+    if (semProposta) {
+      let doCard: { id: number; name: string }[] | null = null
+      try {
+        const r = await kommoFetch(`${base}/leads/${leadId}`, { headers })
+        if (r.ok) {
+          const j = (await r.json().catch(() => null)) as { _embedded?: { tags?: { id?: number; name?: string }[] } } | null
+          const lidas = j?._embedded?.tags
+          if (Array.isArray(lidas)) {
+            doCard = lidas
+              .map((t) => ({ id: Number(t?.id), name: String(t?.name ?? '').trim() }))
+              .filter((t) => Number.isFinite(t.id) && t.id > 0)
+          }
+        }
+      } catch { /* cai no erro abaixo */ }
+      if (!doCard) {
+        await desfazerTrava()
+        return jsonResponse({ error: 'Não consegui ler as etiquetas do card no Kommo; nada foi movido. Tente de novo.' }, 502)
+      }
+      const jaTemSemProposta = doCard.some((t) => mesmaEtiqueta(t.name, ETIQUETA_SEM_PROPOSTA))
+      let porSemProposta: { id: number } | { name: string } = { name: ETIQUETA_SEM_PROPOSTA }
+      if (!jaTemSemProposta) {
+        try {
+          const r = await kommoFetch(`${base}/leads/tags?query=${encodeURIComponent('Sem')}&limit=250`, { headers })
+          if (r.ok && r.status !== 204) {
+            const j = (await r.json().catch(() => null)) as { _embedded?: { tags?: { id?: number; name?: string }[] } } | null
+            const id = idDaEtiquetaNaConta(j?._embedded?.tags ?? [], ETIQUETA_SEM_PROPOSTA)
+            if (id) porSemProposta = { id }
+          }
+        } catch { /* vai pelo nome */ }
+      }
+      const aTirar = doCard.filter((t) => !mesmaEtiqueta(t.name, ETIQUETA_SEM_PROPOSTA)).map((t) => ({ id: t.id }))
+      etiquetasDoPatch = {
+        ...(jaTemSemProposta ? {} : { tags_to_add: [porSemProposta] }),
+        ...(aTirar.length > 0 ? { tags_to_delete: aTirar } : {}),
+      }
+    }
+
     let resMove: Response
     try {
       resMove = await kommoFetch(
         `${base}/leads/${leadId}`,
-        { method: 'PATCH', headers, body: JSON.stringify({ status_id: statusId }) },
+        { method: 'PATCH', headers, body: JSON.stringify({ status_id: statusId, ...etiquetasDoPatch }) },
         { idempotente: true },
       )
     } catch (e) {
@@ -340,7 +394,8 @@ Deno.serve(async (req: Request) => {
     // errada na tela até alguém sincronizar, sem explicação.
     const { error: eEspelho } = await svc
       .from('kommo_leads')
-      .update({ status_id: statusId })
+      // No "Sem proposta", as etiquetas do espelho viram só "Sem proposta" (o PATCH tirou as outras).
+      .update(semProposta ? { status_id: statusId, tags: [ETIQUETA_SEM_PROPOSTA], tags_em: {} } : { status_id: statusId })
       .eq('kommo_lead_id', leadId)
     const { error: eSelo } = await svc
       .from('kommo_analise_interna')

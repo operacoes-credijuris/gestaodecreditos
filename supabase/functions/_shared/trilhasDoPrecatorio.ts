@@ -221,6 +221,13 @@ export interface DefAbaPrecatorio {
    */
   escolhaDeProposta?: { colunaKommo: string; statusId?: number }
   /**
+   * SEM PROPOSTA (09/10/2026): nenhum fundo propôs. O botão do card tira TODAS
+   * as etiquetas, põe a etiqueta `ETIQUETA_SEM_PROPOSTA`, move o card para esta
+   * coluna (a kommo-mover faz as três coisas num PATCH só, com `semProposta`) e
+   * anota `NOTA_SEM_PROPOSTA`. Fluxo próprio, como a escolha de proposta.
+   */
+  semProposta?: { colunaKommo: string; statusId?: number }
+  /**
    * As saídas saem de UM botão só ("Concluir", na fileira de trabalho) ou de um
    * botão cada, no canto do card? OMITIDO, vale ter saída: agrupado. FALSO na
    * aba cuja saída é um ato pontual e que não tem fileira de trabalho — a
@@ -395,6 +402,10 @@ export const ABA_REPROVADOS_EXTERNO = 'ext-reprovados'
  * quantos são.
  */
 export const ABA_EM_PRECIFICACAO_EXTERNO = 'ext-precificacao'
+
+/** A etiqueta e a nota do botão "Sem proposta" (Em precificação do Externo, 09/10/2026). */
+export const ETIQUETA_SEM_PROPOSTA = 'Sem proposta'
+export const NOTA_SEM_PROPOSTA = 'Não conseguimos qualquer proposta para este crédito.'
 
 /**
  * AS ABAS EM QUE O CARD MOSTRA AS ETIQUETAS DO KOMMO.
@@ -722,6 +733,10 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // OS FUNDOS RESPONDERAM, e a casa escolhe com qual proposta seguir: o
         // card vai para a produção da proposta ao cedente (29/09/2026).
         escolhaDeProposta: { colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533988 },
+        // NENHUM FUNDO PROPÔS (09/10/2026, pedido do dono): o botão "Sem proposta"
+        // tira TODAS as etiquetas do card, põe "Sem proposta", move para
+        // Reprovados (num PATCH só) e anota o motivo.
+        semProposta: { colunaKommo: 'REPROVADOS', statusId: 111534212 },
         // AS CERTIDÕES JÁ NA PRECIFICAÇÃO (03/10/2026): enquanto o fundo precifica,
         // a casa adianta as certidões do cedente que ele vai pedir na formalização.
         // O mesmo botão da Obtenção de documentação.
@@ -870,6 +885,7 @@ export function idsDestinoDaTrilha(pipelineId: number): number[] {
   for (const aba of trilha.abas) {
     for (const saida of aba.saidas ?? []) if (saida.statusId) ids.add(saida.statusId)
     if (aba.escolhaDeProposta?.statusId) ids.add(aba.escolhaDeProposta.statusId)
+    if (aba.semProposta?.statusId) ids.add(aba.semProposta.statusId)
     if (aba.anexarEMover?.statusId) ids.add(aba.anexarEMover.statusId)
     if (aba.envioAosFundos?.destino.statusId) ids.add(aba.envioAosFundos.destino.statusId)
   }
@@ -896,9 +912,21 @@ export function destinosDaTrilha(pipelineId: number): string[] {
   for (const aba of trilha.abas) {
     for (const saida of aba.saidas ?? []) nomes.add(saida.colunaKommo)
     if (aba.escolhaDeProposta) nomes.add(aba.escolhaDeProposta.colunaKommo)
+    if (aba.semProposta) nomes.add(aba.semProposta.colunaKommo)
     if (aba.anexarEMover) nomes.add(aba.anexarEMover.colunaKommo)
     if (aba.envioAosFundos) nomes.add(aba.envioAosFundos.destino.colunaKommo)
   }
   for (const d of destinosDaNegociacao(trilha)) nomes.add(d.colunaKommo)
   return [...nomes]
+}
+
+/**
+ * Este movimento é o do botão "Sem proposta" (09/10/2026)? Só com o destino que
+ * uma aba da trilha declara em `semProposta` — é o que autoriza a kommo-mover a
+ * tirar TODAS as etiquetas do card. Um `semProposta: true` solto no corpo, para
+ * outra coluna, não limpa nada.
+ */
+export function ehDestinoDoSemProposta(pipelineId: number, statusId: number): boolean {
+  const trilha = trilhaDoPipeline(pipelineId)
+  return !!trilha?.abas.some((a) => a.semProposta?.statusId === statusId)
 }

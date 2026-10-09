@@ -92,7 +92,8 @@ describe('o Aprovar da Revisão do RPV manda as notas uma a uma', () => {
   it('a janela entrega a lista, e moverComNota anota cada uma, retomando da que faltou', () => {
     const t = readFileSync(join(__dirname, '..', '..', 'pages/operacional/AnaliseCredito.tsx'), 'utf8')
     expect(t).toContain('await onConfirmar(acao, notasDe(acao))')
-    expect(t).toContain('async function moverComNota(leadId: number, statusId: number, mensagem: string | string[])')
+    expect(t).toContain('async function moverComNota(')
+    expect(t).toContain('mensagem: string | string[],')
     expect(t).toContain('for (let i = notasEnviadas.current.get(chave) ?? 0; i < textos.length; i++) {')
   })
 })

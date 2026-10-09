@@ -958,6 +958,11 @@ export interface Aba {
    */
   escolhaDeProposta?: number | null
   /**
+   * A coluna para onde o botão "Sem proposta" leva o card (Reprovados, a partir
+   * da Em precificação do Externo), ou null. Ver `semProposta` em trilhasDoPrecatorio.ts.
+   */
+  semProposta?: number | null
+  /**
    * Coluna do kanban que a plataforma espelha sem dar função a ela: mostra os
    * cards, sem botão de trabalho nem desfecho. Ver `espelhoCompleto`.
    */
@@ -1412,6 +1417,7 @@ function montarAbasDoFunil(
       // para o Kommo é escrita antes de o card se mover.
       desfechoAgrupado: a.desfechoAgrupado ?? oferece(a),
       escolhaDeProposta: a.escolhaDeProposta ? (coluna(a.escolhaDeProposta) ?? null) : null,
+      semProposta: a.semProposta ? (coluna(a.semProposta) ?? null) : null,
       anexarEMover: (() => {
         const id = a.anexarEMover ? coluna(a.anexarEMover) : undefined
         return a.anexarEMover && id !== undefined
@@ -1560,6 +1566,7 @@ function colunaSoDeLeitura(e: { status_id: number; nome: string }): Aba {
     acoes: [],
     desfechoAgrupado: false,
     escolhaDeProposta: null,
+    semProposta: null,
     soLeitura: true,
   }
 }
