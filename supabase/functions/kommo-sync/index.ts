@@ -13,6 +13,8 @@
 //     Chamar .json() nesse caso estoura.
 //   - Leads não têm contagem total: paginação é seguir _links.next até acabar.
 import { ehNotaNossa } from '../_shared/notaCredijuris.ts'
+import { kommoFetch } from '../_shared/kommoFetch.ts'
+import { lerTodasAsLinhas, orfas, ultimaPorId } from '../_shared/leituraPaginada.ts'
 import { semEntidadesHtml } from '../_shared/textoDoKommo.ts'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
@@ -219,7 +221,12 @@ Deno.serve(async (req: Request) => {
       if (espera > 0) await dormir(espera)
       ultimaChamada = Date.now()
 
-      const res = await fetch(`${base}${path}`, { headers })
+      // PELO kommoFetch (auditoria de bugs, 09/10/2026): era um `fetch` cru, e
+      // UM 429 — o sync sozinho já anda perto do teto, e disputa a cota com a
+      // etiqueta, o movimento e a rotina do Escavador — jogava fora dezenas de
+      // páginas já lidas e devolvia 500. GET é idempotente: o 429/403 e o 5xx
+      // passageiro são repetidos com espera; só o que persistir derruba.
+      const res = await kommoFetch(`${base}${path}`, { headers })
       // 204 = nada encontrado / passou da última página. Corpo vazio.
       if (res.status === 204) return null
       if (res.status === 429) {
@@ -228,7 +235,11 @@ Deno.serve(async (req: Request) => {
         )
       }
       if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`)
-      return (await res.json()) as T
+      try {
+        return (await res.json()) as T
+      } catch {
+        throw new Error(`${path} → o Kommo devolveu um corpo que não é JSON (HTTP ${res.status}).`)
+      }
     }
 
     // Nome dos usuários do Kommo, para exibir o responsável sem outra consulta.
@@ -369,11 +380,20 @@ Deno.serve(async (req: Request) => {
     // Os ids são guardados POR FUNIL, e não numa lista só. O motivo está na
     // limpeza do espelho, mais abaixo: com uma lista só, um funil que devolve
     // vazio faz o delete apagar os cards do OUTRO.
+    //
+    // FUNIL CORTADO NÃO É LIMPO (auditoria de bugs, 09/10/2026): o laço para em
+    // 40 páginas (10 mil cards, contando os fechados). Passando disso, os cards da
+    // página 41 em diante não vinham — e a limpeza abaixo os APAGAVA do espelho,
+    // com `ok: true`. Agora o funil que saiu do laço com `next` ainda presente
+    // fica marcado, a limpeza dele é pulada e o resumo avisa.
     const leads: KommoLead[] = []
     const idsPorFunil = new Map<number, number[]>()
+    const funisCortados = new Set<number>()
     for (const funil of FUNIS) {
       const idsDoFunil: number[] = []
+      let temMais = false
       for (let pagina = 1; pagina <= 40; pagina++) {
+        temMais = false
         const r = await kommo<{
           _embedded?: { leads?: KommoLead[] }
           _links?: { next?: { href?: string } }
@@ -382,8 +402,10 @@ Deno.serve(async (req: Request) => {
         const lote = r._embedded?.leads ?? []
         leads.push(...lote)
         idsDoFunil.push(...lote.map((l) => l.id))
-        if (!r._links?.next?.href) break
+        temMais = !!r._links?.next?.href
+        if (!temMais) break
       }
+      if (temMais) funisCortados.add(funil)
       idsPorFunil.set(funil, idsDoFunil)
     }
 
@@ -391,7 +413,9 @@ Deno.serve(async (req: Request) => {
     let avisoNovos: string | null = null
     if (statusNovos) {
       const idsDaNovos: number[] = []
+      let temMais = false
       for (let pagina = 1; pagina <= 40; pagina++) {
+        temMais = false
         const r = await kommo<{
           _embedded?: { leads?: KommoLead[] }
           _links?: { next?: { href?: string } }
@@ -403,13 +427,27 @@ Deno.serve(async (req: Request) => {
         const lote = r._embedded?.leads ?? []
         leads.push(...lote)
         idsDaNovos.push(...lote.map((l) => l.id))
-        if (!r._links?.next?.href) break
+        temMais = !!r._links?.next?.href
+        if (!temMais) break
       }
+      if (temMais) funisCortados.add(FUNIL_GERAL)
       idsPorFunil.set(FUNIL_GERAL, idsDaNovos)
     } else {
       avisoNovos =
         `Não achei a coluna "${COLUNA_NOVOS}" no funil geral (${FUNIL_GERAL}): os cards dela não foram lidos, ` +
         'e os autos não descem a partir dela. A coluna foi renomeada?'
+    }
+
+    // UM CARD, UMA LINHA (auditoria de bugs, 09/10/2026): o card movido entre a
+    // leitura de um funil e a do outro vinha nas duas, e o upsert com a mesma
+    // chave duas vezes no lote é recusado INTEIRO pelo Postgres — o sync todo
+    // respondia 500. Fica a última leitura, a mais recente.
+    {
+      const unicos = ultimaPorId(leads)
+      if (unicos.length !== leads.length) {
+        leads.length = 0
+        for (const l of unicos) leads.push(l)
+      }
     }
 
     // ---------- Notas ----------
@@ -507,12 +545,22 @@ Deno.serve(async (req: Request) => {
     // o que falta, em vez de morrer com um erro de coluna inexistente.
     let temColunaEtapa = true
     {
-      const { data: doEspelho, error: erroEspelho } = await svc
-        .from('kommo_leads')
-        .select('kommo_lead_id, etapa_em, etapa_status_id')
-        .in('pipeline_id', FUNIS_NO_ESPELHO)
+      // PAGINADA (ver _shared/leituraPaginada.ts): cortada em 1000 linhas, o card
+      // de fora do corte voltava sem data e o upsert a regravava vazia.
+      const { linhas: doEspelho, erro: erroEspelho } = await lerTodasAsLinhas<{
+        kommo_lead_id: number
+        etapa_em: string | null
+        etapa_status_id: number | null
+      }>((de, ate) =>
+        svc
+          .from('kommo_leads')
+          .select('kommo_lead_id, etapa_em, etapa_status_id')
+          .in('pipeline_id', FUNIS_NO_ESPELHO)
+          .order('kommo_lead_id')
+          .range(de, ate)
+      )
       if (erroEspelho) temColunaEtapa = false
-      for (const r of doEspelho ?? []) {
+      for (const r of doEspelho) {
         jaSabido.set(r.kommo_lead_id, { em: r.etapa_em, status: r.etapa_status_id })
       }
     }
@@ -634,12 +682,20 @@ Deno.serve(async (req: Request) => {
     let temColunaTags = true
     const datasAntes = new Map<number, Record<string, string | null>>()
     {
-      const { data: comDatas, error: erroDatas } = await svc
-        .from('kommo_leads')
-        .select('kommo_lead_id, tags_em')
-        .in('pipeline_id', FUNIS_NO_ESPELHO)
+      // PAGINADA, pelo mesmo motivo da leitura da data da coluna.
+      const { linhas: comDatas, erro: erroDatas } = await lerTodasAsLinhas<{
+        kommo_lead_id: number
+        tags_em: Record<string, string | null> | null
+      }>((de, ate) =>
+        svc
+          .from('kommo_leads')
+          .select('kommo_lead_id, tags_em')
+          .in('pipeline_id', FUNIS_NO_ESPELHO)
+          .order('kommo_lead_id')
+          .range(de, ate)
+      )
       if (erroDatas) temColunaTags = false
-      for (const r of comDatas ?? []) {
+      for (const r of comDatas) {
         datasAntes.set(r.kommo_lead_id, (r.tags_em ?? {}) as Record<string, string | null>)
       }
     }
@@ -732,7 +788,12 @@ Deno.serve(async (req: Request) => {
         kommo_lead_id: l.id,
         pipeline_id: l.pipeline_id,
         status_id: l.status_id,
-        nome: l.name ?? null,
+        // O NOME SEM AS ENTIDADES HTML (auditoria de bugs, 09/10/2026): a API
+        // devolve "&" como "&amp;", e o título gravado cru aparecia na tela
+        // como "Fulano &amp; Cia" — e era assim que ia aos prompts e ao Drive.
+        // As etiquetas, não: o espelho guarda o nome como o Kommo o tem, e a
+        // comparação delas já decodifica.
+        nome: l.name == null ? null : semEntidadesHtml(l.name),
         responsavel_id: l.responsible_user_id ?? null,
         responsavel_nome: l.responsible_user_id
           ? usuarios.get(l.responsible_user_id) ?? null
@@ -793,6 +854,13 @@ Deno.serve(async (req: Request) => {
     let removidos = 0
     const avisosEspelho: string[] = []
     for (const [funil, ids] of idsPorFunil) {
+      if (funisCortados.has(funil)) {
+        avisosEspelho.push(
+          `O funil ${funil} tem mais cards do que a leitura alcança (40 páginas de 250). ` +
+          `NÃO limpei o espelho dele: os que não vieram seriam apagados como se tivessem saído.`,
+        )
+        continue
+      }
       // A NOVOS VAZIA É ROTINA, e não sinal de leitura falhada: é a coluna de
       // passagem. E apagar o espelho dela por engano não perde nada — os cards
       // voltam na próxima leitura, e o pedido dos autos já está registrado à parte.
@@ -838,16 +906,33 @@ Deno.serve(async (req: Request) => {
     // Derivado DO ESPELHO, não da lista que acabou de chegar da API: assim uma
     // leitura vazia não apaga as marcações de 150 cards que continuam lá. Órfã é
     // marcação sem card em kommo_leads, e é isso que a consulta pergunta.
-    const { data: noEspelho } = await svc
-      .from('kommo_leads')
-      .select('kommo_lead_id')
-      .in('pipeline_id', FUNIS_NO_ESPELHO)
-    const idsEspelho = (noEspelho ?? []).map((r) => r.kommo_lead_id)
-    if (idsEspelho.length) {
+    //
+    // AS DUAS LEITURAS PAGINADAS, e a conta feita aqui (auditoria de bugs,
+    // 09/10/2026): era um `not in (ids do espelho)` com o espelho lido sem
+    // `range` — cortado em 1000 linhas, a marcação de todo card além do corte
+    // era apagada como órfã. Leitura com erro ou incompleta não apaga nada.
+    const espelho = await lerTodasAsLinhas<{ kommo_lead_id: number }>((de, ate) =>
+      svc
+        .from('kommo_leads')
+        .select('kommo_lead_id')
+        .in('pipeline_id', FUNIS_NO_ESPELHO)
+        .order('kommo_lead_id')
+        .range(de, ate)
+    )
+    const marcadas = await lerTodasAsLinhas<{ kommo_lead_id: number }>((de, ate) =>
+      svc.from('kommo_analise_interna').select('kommo_lead_id').order('kommo_lead_id').range(de, ate)
+    )
+    const semCard = marcadas.erro || marcadas.cortada
+      ? []
+      : orfas(
+          marcadas.linhas.map((r) => r.kommo_lead_id),
+          { ...espelho, linhas: espelho.linhas.map((r) => r.kommo_lead_id) },
+        )
+    for (let i = 0; i < semCard.length; i += 200) {
       await svc
         .from('kommo_analise_interna')
         .delete()
-        .not('kommo_lead_id', 'in', `(${idsEspelho.join(',')})`)
+        .in('kommo_lead_id', semCard.slice(i, i + 200))
     }
 
     // ---------- Os autos dos cards que acabaram de chegar ----------

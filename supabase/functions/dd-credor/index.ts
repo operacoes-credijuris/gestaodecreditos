@@ -12,6 +12,8 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit, chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { driveUploadBytes } from "../_shared/credijuris.ts";
+import { conclusaoDoRelatorio, seloDaClassificacao } from "../_shared/seloDoCredor.ts";
+import { estourouOTempo, sinalAteOTeto } from "../_shared/relogioDaInvocacao.ts";
 
 const CORS = corsHeaders;
 const JUDIT_REQUESTS = "https://requests.prod.judit.io/requests";
@@ -80,7 +82,7 @@ async function montarTextoProcesso(juditKey: string, numero: string) {
   return { ok: true, texto, numero: base.code || numero, partes: (base.parties || []).map((p: any) => `${p.name} [${p.side}]`) };
 }
 
-async function qualificarPeloManual(apiKey: string, texto: string, numeroPrincipal: string) {
+async function qualificarPeloManual(apiKey: string, texto: string, numeroPrincipal: string, inicio: number) {
   const manual = new TextDecoder().decode(Uint8Array.from(atob(MANUAL_B64), (c) => c.charCodeAt(0)));
   const system = manual + `
 
@@ -104,14 +106,19 @@ Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois):
 {"classificacao":"🟢 Aprovada" | "🟡 Ressalvas" | "🔴 Reprovada","risco_ao_credito_principal":{"tem_risco":"SIM" | "NÃO","tipo":"penhora | cessão anterior | insolvência | fraude | bloqueio | outro | nenhum","justificativa":"documento/movimentação + data + trecho que comprova o risco; ou explique por que NÃO há risco ao principal"},"resumo":"1 a 3 frases: o que é este processo e sua relação (ou não) com o crédito principal","riscos":[{"risco":"descrição","fundamento":"documento/movimentação + data + trecho","grau":"Impeditivo | Elevado | Moderado | Ponto de atenção"}],"observacoes":"o que NÃO pôde ser conferido (documentos sigilosos etc.)"}`;
   // 8000 de saída, e não 4000: no Opus 5.5 o raciocínio, sempre ligado, conta dentro do teto e podia
   // comer o JSON. Esforço 'high', o padrão do Opus 5 (o do 5.5 é 'medium').
-  const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 8000, output_config: { effort: ESFORCO_PADRAO_DO_OPUS }, system, messages: [{ role: "user", content: texto }] } satisfies PedidoAoOpus) });
+  // TETO DA INVOCAÇÃO: a chamada é interrompida antes dos ~150 s, e o processo
+  // sai "não qualificado" com o motivo, em vez de a função morrer sem resposta.
+  const res = await fetch("https://api.anthropic.com/v1/messages", { signal: sinalAteOTeto(inicio, { folgaMs: 25_000 }), method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 8000, output_config: { effort: ESFORCO_PADRAO_DO_OPUS }, system, messages: [{ role: "user", content: texto }] } satisfies PedidoAoOpus) });
   const j = await res.json();
   if (!res.ok) return { erro: "IA recusou", http: res.status, resposta: j };
+  // RESPOSTA CORTADA OU RECUSADA não é veredito (o JSON pela metade às vezes ainda se lê).
+  if (j?.stop_reason === "max_tokens") return { ok: false, motivo: "a resposta da IA foi cortada no limite de tamanho", texto_bruto: textoDaResposta(j?.content) };
+  if (j?.stop_reason === "refusal") return { ok: false, motivo: "a IA se recusou a responder", texto_bruto: textoDaResposta(j?.content) };
   // Só os blocos de texto: no Opus 5.5 a resposta pode começar por blocos de raciocínio.
   const txt = textoDaResposta(j?.content);
   const clean = txt.replace(/```json/gi, "").replace(/```/g, "").trim();
   try { return { ok: true, veredito: JSON.parse(clean) }; }
-  catch { return { ok: false, texto_bruto: txt }; }
+  catch { return { ok: false, motivo: "a IA não devolveu JSON válido", texto_bruto: txt }; }
 }
 
 async function buscarProcessosPorCpf(juditKey: string, cpf: string) {
@@ -203,7 +210,12 @@ function limparNomeArquivo(s: string): string { return String(s || "").replace(/
 
 /* ===== Relatório PDF (copiado do dd-relatorio-teste, aprovado) ===== */
 function limpoPdf(s: string) { return String(s || "").replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, "").replace(/\s+/g, " ").trim(); }
-function seloPdf(c: string) { const x = String(c || ""); if (x.includes("🔴") || /reprov/i.test(x)) return { txt: "REPROVADA", cor: rgb(0.75, 0.15, 0.15) }; if (x.includes("🟡") || /ressalv/i.test(x)) return { txt: "RESSALVAS", cor: rgb(0.85, 0.6, 0.05) }; return { txt: "APROVADA", cor: rgb(0.15, 0.55, 0.2) }; }
+// O SELO: sem classificação é NÃO QUALIFICADO, e não APROVADA (ver _shared/seloDoCredor.ts).
+function seloPdf(c: string) {
+  const txt = seloDaClassificacao(c);
+  const cor = txt === "REPROVADA" ? rgb(0.75, 0.15, 0.15) : txt === "RESSALVAS" ? rgb(0.85, 0.6, 0.05) : txt === "APROVADA" ? rgb(0.15, 0.55, 0.2) : rgb(0.45, 0.45, 0.45);
+  return { txt, cor };
+}
 async function gerarRelatorioPdf(dd: any): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica); const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -215,7 +227,8 @@ async function gerarRelatorioPdf(dd: any): Promise<Uint8Array> {
   const regua = () => { if (y < M + 10) { page = doc.addPage([PW, PH]); y = PH - M; } page.drawLine({ start: { x: M, y: y - 2 }, end: { x: PW - M, y: y - 2 }, thickness: 0.6, color: rgb(0.8, 0.8, 0.8) }); y -= 12; };
   esc("RELATÓRIO DE DUE DILIGENCE — PROCESSOS DO CREDOR", { size: 15, bold: true, cor: rgb(0.12, 0.12, 0.35) }); sp(4);
   esc(`Credor (cedente): ${dd.cedente || "-"}  |  CPF: ${dd.cpf || "-"}`); esc(`Crédito principal em análise: ${dd.credito_principal || "-"}`);
-  const g = dd.algum_reprovado ? { t: "ATENÇÃO: há processo com RISCO ao crédito principal — revisão obrigatória.", c: rgb(0.75, 0.15, 0.15) } : { t: "Nenhum processo do credor apresentou risco ao crédito principal.", c: rgb(0.15, 0.55, 0.2) };
+  const conclusao = conclusaoDoRelatorio(dd.processos || [], !!dd.algum_reprovado);
+  const g = { t: conclusao.texto, c: conclusao.tom === "risco" ? rgb(0.75, 0.15, 0.15) : conclusao.tom === "incompleto" ? rgb(0.6, 0.45, 0.05) : rgb(0.15, 0.55, 0.2) };
   esc(g.t, { size: 11, bold: true, cor: g.c }); esc(`Total de processos avaliados: ${(dd.processos || []).length}`, { size: 9.5, cor: rgb(0.45, 0.45, 0.45) }); sp(6); regua();
   (dd.processos || []).forEach((p: any, i: number) => {
     const q = p.qualificacao || {}; const s = seloPdf(q.classificacao);
@@ -238,6 +251,7 @@ async function gerarRelatorioPdf(dd: any): Promise<Uint8Array> {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  const inicio = Date.now();
   try {
     // PORTAO DE ACESSO. Esta function gasta cota da Judit e chamada de IA por
     // processo, e escreve PDF no Drive da casa — deixá-la no verify_jwt padrão
@@ -271,9 +285,16 @@ Deno.serve(async (req) => {
         const t = await montarTextoProcesso(juditKey, p.numero);
         if ((t as any).aguarde) return { numero: p.numero, partes: p.partes, status: "Judit ainda coletando — rode de novo em ~2 min" };
         if ((t as any).erro || (t as any).nao_encontrado) return { numero: p.numero, partes: p.partes, status: (t as any).erro || "não encontrado" };
-        const q = await qualificarPeloManual(anthropicKey, (t as any).texto, principal);
-        return { numero: p.numero, partes: p.partes, valor_causa: p.valor_causa, qualificacao: (q as any).ok ? (q as any).veredito : { erro_formato: true, texto_bruto: (q as any).texto_bruto } };
-      } catch (e) { return { numero: p.numero, partes: p.partes, status: "erro: " + String((e as Error)?.message || e).slice(0, 80) }; }
+        const q = await qualificarPeloManual(anthropicKey, (t as any).texto, principal, inicio);
+        if ((q as any).ok) return { numero: p.numero, partes: p.partes, valor_causa: p.valor_causa, qualificacao: (q as any).veredito };
+        // A FALHA DA IA DIZ O MOTIVO (auditoria de bugs, 09/10/2026): era
+        // descartado, e o processo saía no PDF como "APROVADA".
+        const motivo = (q as any).erro ? `${(q as any).erro} (HTTP ${(q as any).http})` : (q as any).motivo || "a IA não qualificou";
+        return { numero: p.numero, partes: p.partes, valor_causa: p.valor_causa, status: motivo, qualificacao: { erro_formato: true, texto_bruto: (q as any).texto_bruto } };
+      } catch (e) {
+        if (estourouOTempo(e)) return { numero: p.numero, partes: p.partes, status: "a leitura da IA passou do tempo da chamada — rode de novo" };
+        return { numero: p.numero, partes: p.partes, status: "erro: " + String((e as Error)?.message || e).slice(0, 80) };
+      }
     }));
 
     const algumReprovado = resultados.some((r: any) => r.qualificacao?.risco_ao_credito_principal?.tem_risco === "SIM");

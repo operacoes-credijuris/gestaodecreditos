@@ -53,6 +53,7 @@ import { chaveAnthropic, chaveEscavador, contaKommo } from '../_shared/segredos.
 import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
 import { cnjDoCard, digitosDoCnj } from '../_shared/nucleo/cnj.ts'
 import { assinarNota } from '../_shared/notaCredijuris.ts'
+import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { subirAoDriveDoKommo, subirAoDriveDoKommoComVersao } from '../_shared/driveDoKommo.ts'
 import {
   documentosDosAutos,
@@ -106,6 +107,11 @@ type Servico = ReturnType<typeof serviceClient>
 const ORCAMENTO_MS = 100_000
 /** Pedidos novos ao Escavador por dia (R$ 1,34 cada). Protege de uma enxurrada de cards. */
 const LIMITE_PEDIDOS_DIA = 40
+/**
+ * Abaixo disto do orçamento (ORCAMENTO_MS), não se começa outro pedido pago: o
+ * que está em voo ainda tem ~60 s até o teto real de ~150 s para terminar e gravar.
+ */
+const FOLGA_PARA_PEDIR_MS = 10_000
 /** De quanto em quanto se confere um pedido em aberto (a consulta não custa). */
 const REVER_MIN = 30
 /** Pedido parado há mais que isto é dado como perdido. */
@@ -267,7 +273,10 @@ function clienteKommo(token: string, subdominio: string) {
     const espera = 160 - (Date.now() - ultima)
     if (espera > 0) await dormir(espera)
     ultima = Date.now()
-    return fetch(`${base}${caminho}`, {
+    // PELO kommoFetch (auditoria de bugs, 09/10/2026): o 429 (a cota é
+    // disputada com o sync e a equipe) é repetido com espera, em vez de virar
+    // falha; o 5xx só no GET (um POST de nota pode ter gravado).
+    return kommoFetch(`${base}${caminho}`, {
       ...init,
       signal: AbortSignal.timeout(TEMPO_API_MS),
       headers: { ...auth, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
@@ -288,7 +297,12 @@ function clienteKommo(token: string, subdominio: string) {
       let caminho: string | null = `/leads/${leadId}/files?limit=50`
       for (let i = 0; caminho && i < 5; i++) {
         const r = await api(caminho)
-        if (r.status === 204 || !r.ok) break
+        if (r.status === 204) break
+        // FALHA NÃO É "SEM ANEXO" (auditoria de bugs, 09/10/2026): um 429/5xx
+        // aqui devolvia a lista vazia, a IA lia o card sem os PDFs, o card
+        // ficava LIDO e não era relido (a impressão não muda) — o ofício
+        // anexado nunca era olhado. O erro sobe e a leitura conta como passageira.
+        if (!r.ok) throw new Error(`a aba Arquivos do card não veio do Kommo (HTTP ${r.status})`)
         const j = (await r.json().catch(() => ({}))) as any
         for (const f of j?._embedded?.files ?? []) if (f?.file_uuid) fora.push(String(f.file_uuid))
         const prox = j?._links?.next?.href as string | undefined
@@ -299,8 +313,10 @@ function clienteKommo(token: string, subdominio: string) {
     /** Nome, tamanho, tipo e endereço de download de um arquivo do drive. */
     async metadados(uuid: string) {
       const d = await cliente.urlDoDrive()
-      const r = await fetch(`${d}/v1.0/files/${uuid}`, { headers: auth, signal: AbortSignal.timeout(TEMPO_API_MS) })
-      if (!r.ok) return null
+      const r = await kommoFetch(`${d}/v1.0/files/${uuid}`, { headers: auth, signal: AbortSignal.timeout(TEMPO_API_MS) })
+      // 404 é arquivo apagado: não há o que ler. O resto é falha, e sobe.
+      if (r.status === 404) return null
+      if (!r.ok) throw new Error(`os dados de um anexo não vieram do Kommo (HTTP ${r.status})`)
       const m = (await r.json().catch(() => null)) as any
       return {
         nome: String(m?.name ?? ''),
@@ -412,10 +428,12 @@ async function fontesDoCard(kommo: Kommo, lead: any) {
   // lá). De TODAS as notas com arquivo: o espelho marca a nota de anexo como
   // automática, e é nela que o PDF do comercial costuma chegar.
   const uuids = new Set<string>(notas.map((n) => n.arquivo_uuid).filter(Boolean).map(String))
-  for (const u of await kommo.arquivosDoCard(Number(lead.kommo_lead_id)).catch(() => [])) uuids.add(u)
+  // SEM `.catch`: a falha do Kommo sobe e a leitura é refeita na próxima volta
+  // (ver `arquivosDoCard`), em vez de o card ser lido sem os anexos.
+  for (const u of await kommo.arquivosDoCard(Number(lead.kommo_lead_id))) uuids.add(u)
   const candidatos: { nome: string; bytes: number; download: string }[] = []
   for (const u of [...uuids].slice(0, 30)) {
-    const m = await kommo.metadados(u).catch(() => null)
+    const m = await kommo.metadados(u)
     if (!m?.download) continue
     const pdf = /pdf/i.test(m.mime) || /\.pdf$/i.test(m.nome)
     if (!pdf || ehAnexoDosAutos(m.nome) || m.bytes > MAX_BYTES_PDF_LEITURA) continue
@@ -682,6 +700,7 @@ async function pedir(
   soEste: number | null,
   avisos: string[],
   novas: boolean,
+  resta: () => number = () => Infinity,
 ) {
   // REPETIR (0077): o robô falhou de passagem e o pedido se refaz — de 10 em 10
   // minutos, contados do último pedido pago.
@@ -694,15 +713,33 @@ async function pedir(
 
   // A COTA DO DIA, no fuso de Brasília.
   const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
-  const { count } = await svc
+  const { count, error: erroCota } = await svc
     .from('escavador_consumo')
     .select('id', { count: 'exact', head: true })
     .eq('operacao', 'autos_pedido')
     .gte('criado_em', `${hoje}T03:00:00Z`)
-  let pedidosHoje = count ?? 0
+  // SEM A CONTAGEM, NENHUM PEDIDO PAGO (auditoria de bugs, 09/10/2026): o erro
+  // era ignorado e a contagem virava ZERO — com a cota já cheia, uma consulta
+  // que falhasse liberava mais 40 pedidos pagos no mesmo dia. A próxima volta
+  // (cron de 10 min) tenta de novo.
+  if (erroCota || count == null) {
+    console.error('[escavador-autos-rotina] cota do dia ilegível; nenhum pedido nesta volta:', erroCota?.message)
+    avisos.push(`Não consegui contar os pedidos de hoje (${erroCota?.message ?? 'sem resposta'}); nenhum pedido pago nesta volta.`)
+    return
+  }
+  let pedidosHoje = count
   const comCallback = await temCallback(svc)
 
   for (const p of processos) {
+    // O RELÓGIO ANTES DO PEDIDO PAGO (auditoria de bugs, 09/10/2026): cada volta
+    // aqui pode levar ~60 s (a consulta de status e o POST, 30 s de teto cada).
+    // Morrer entre o POST pago e a gravação deixava o consumo sem a linha (a cota
+    // contava a menos) e a tentativa sem contar. Sem folga, o resto fica para a
+    // próxima volta do cron.
+    if (resta() < FOLGA_PARA_PEDIR_MS) {
+      avisos.push('O tempo da volta acabou antes de todos os pedidos; os demais saem na próxima.')
+      break
+    }
     const leadId = Number(p.kommo_lead_id)
     const cnj = p.numero_cnj
     // Posse de pedido só se retoma parada; fila da cota cheia nem se consulta.
@@ -1443,7 +1480,7 @@ Deno.serve(async (req: Request) => {
       if (novas) await rearmarQuemVoltou(svc, kommo, soEste)
       await lerCards(svc, kommo, chaveIA, soEste, resta, avisos)
       await acompanhar(svc, chave, kommo, soEste, novas)
-      await pedir(svc, chave, kommo, soEste, avisos, novas)
+      await pedir(svc, chave, kommo, soEste, avisos, novas, resta)
     }
 
     let sobrou = false
@@ -1454,7 +1491,9 @@ Deno.serve(async (req: Request) => {
     } else {
       // A JUNÇÃO RODA DEPOIS DA RESPOSTA, em segundo plano: uma parte de 48 MB
       // (baixar, juntar, subir) passa dos 150 s em que a resposta tem de sair,
-      // e o relógio da função é 400 s. Sem `waitUntil` (rodando local), ela
+      // e o relógio da função — com o segundo plano — morre por volta de 150 s
+      // (medido; não os 400 s do plano pago): daí PRAZO_JUNCAO_MS = 115 s. Sem
+      // `waitUntil` (rodando local), ela
       // roda aqui mesmo, no orçamento curto.
       const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime
       const fundo = typeof rt?.waitUntil === 'function'

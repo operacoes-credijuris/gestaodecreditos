@@ -7,6 +7,7 @@
 // senão um erro no meio deixaria o e-mail trocado no Auth e o antigo no profile.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { getCaller, isAdmin, serviceClient } from '../_shared/auth.ts'
+import { podeTrocarCredenciais } from '../_shared/contaMestra.ts'
 
 /** Mesmo mínimo que o Supabase Auth exige, validado aqui para o erro ser claro. */
 const SENHA_MINIMA = 6
@@ -57,6 +58,19 @@ Deno.serve(async (req: Request) => {
     }
     if (password) mudancasAuth.password = password
     if (nome !== undefined) mudancasAuth.user_metadata = { nome }
+
+    // A CONTA-MESTRA (auditoria de bugs, 09/10/2026): e-mail e senha dela só
+    // pela própria — ver _shared/contaMestra.ts.
+    if (email || password) {
+      const { data: alvo, error: eAlvo } = await svc.auth.admin.getUserById(userId)
+      if (eAlvo) return jsonResponse({ error: eAlvo.message }, 400)
+      if (!podeTrocarCredenciais(caller?.email, alvo?.user?.email)) {
+        return jsonResponse(
+          { error: 'O e-mail e a senha da conta-mestra só podem ser alterados por ela mesma.' },
+          403,
+        )
+      }
+    }
 
     if (Object.keys(mudancasAuth).length > 0) {
       const { error } = await svc.auth.admin.updateUserById(userId, mudancasAuth)

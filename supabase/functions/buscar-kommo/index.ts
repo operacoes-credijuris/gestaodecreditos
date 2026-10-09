@@ -16,12 +16,23 @@
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
-import { chaveKommo } from "../_shared/segredos.ts";
+import { contaKommo } from "../_shared/segredos.ts";
+import { kommoFetch } from "../_shared/kommoFetch.ts";
 import { arquivosParaAnalise, lerJuntada, type ProcessoParaAnalise } from "../_shared/autosJuntos.ts";
 
 const CORS = corsHeaders;
-// Subdomínio da conta Kommo (o "nome" antes de .kommo.com). Trocar aqui se mudar.
-const KOMMO_SUBDOMAIN = "contatocredijuriscom";
+// O subdomínio da conta vem de integracao_kommo_secret, pelo contaKommo() — era
+// fixo aqui, e trocar a conta pela tela deixava esta função na antiga (auditoria
+// de bugs, 09/10/2026).
+//
+// TETO DE TEMPO DOS METADADOS: um card antigo tem centenas de anexos soltos, e
+// cada um é uma ida ao drive, em série (o limite de taxa da conta não deixa
+// paralelizar). Sem teto, o laço passava dos ~150 s da invocação e a função
+// morria sem resposta. O que não coube volta em `sem_link`, dito.
+const ORCAMENTO_METADADOS_MS = 100_000;
+// A lista vem em páginas de 50; 20 páginas são 1.000 anexos. O que passar disso
+// não some calado: volta em `sem_link`.
+const MAX_PAGINAS_DA_LISTA = 20;
 
 /**
  * Os processos do card que a rotina dos autos conhece, com as partes juntadas
@@ -82,11 +93,11 @@ Deno.serve(async (req) => {
     const leadId = String((body as any).lead_id ?? (body as any).kommo_lead_id ?? "").trim();
     if (!leadId) return json({ erro: "lead_id é obrigatório." }, 400);
 
-    const token = await chaveKommo();
-    if (!token) return json({ erro: "Token da Kommo não configurado (integracao_kommo_secret)." }, 500);
+    const conta = await contaKommo();
+    if (!conta) return json({ erro: "Token ou subdomínio da Kommo não configurado (integracao_kommo_secret)." }, 500);
 
-    const base = `https://${KOMMO_SUBDOMAIN}.kommo.com`;
-    const auth = { Authorization: `Bearer ${token}` };
+    const base = `https://${conta.subdominio}.kommo.com`;
+    const auth = { Authorization: `Bearer ${conta.token}` };
 
     // 1) lista os anexos do card (só vem file_uuid + id — SEM nome/tipo)
     //
@@ -99,8 +110,8 @@ Deno.serve(async (req) => {
       _embedded?: { files?: Array<{ file_uuid: string }> };
       _links?: { next?: { href?: string } };
     };
-    for (let pagina = 0; proxima && pagina < 10; pagina++) {
-      const listRes: Response = await fetch(proxima, { headers: auth });
+    for (let pagina = 0; proxima && pagina < MAX_PAGINAS_DA_LISTA; pagina++) {
+      const listRes: Response = await kommoFetch(proxima, { headers: auth });
       // 204 = card sem anexo nenhum: corpo vazio, não erro.
       if (listRes.status === 204) break;
       if (!listRes.ok) {
@@ -111,6 +122,8 @@ Deno.serve(async (req) => {
       arquivos.push(...(listJson._embedded?.files ?? []));
       proxima = listJson._links?.next?.href ?? null;
     }
+    // Saiu do laço com página seguinte: a lista NÃO está inteira, e isso se diz.
+    const listaCortada = !!proxima;
     if (arquivos.length === 0) {
       return json({ erro: "Nenhum arquivo anexado neste card. Anexe o PDF do processo e tente de novo." }, 404);
     }
@@ -127,7 +140,7 @@ Deno.serve(async (req) => {
     const aOlhar = arquivos.filter((a) => !ignoradosPeloUuid.has(a.file_uuid));
 
     // 2) descobre a URL do drive da conta (ex.: drive-g)
-    const accRes = await fetch(`${base}/api/v4/account?with=drive_url`, { headers: auth });
+    const accRes = await kommoFetch(`${base}/api/v4/account?with=drive_url`, { headers: auth });
     const accJson = await accRes.json().catch(() => ({}));
     const driveUrl = (accJson as any)?.drive_url;
     if (!driveUrl) return json({ erro: "Não foi possível descobrir a drive_url da conta Kommo." }, 502);
@@ -139,9 +152,20 @@ Deno.serve(async (req) => {
     // achei" sobre um arquivo que estava no card.
     const metas: Array<{ uuid: string; nome: string; mime: string; ext: string; download?: string }> = [];
     const semMetadado: string[] = [];
+    if (listaCortada) {
+      semMetadado.push(
+        `o card tem mais de ${arquivos.length} anexos e a lista parou aí — os demais não foram olhados`,
+      );
+    }
+    const inicioMetadados = Date.now();
+    let semTempo = 0;
     for (const a of aOlhar) {
-      const mRes = await fetch(`${driveUrl}/v1.0/files/${a.file_uuid}`, { headers: auth });
-      const m = mRes.ok ? await mRes.json().catch(() => null) : null;
+      if (Date.now() - inicioMetadados > ORCAMENTO_METADADOS_MS) { semTempo++; continue; }
+      let m: unknown = null;
+      try {
+        const mRes = await kommoFetch(`${driveUrl}/v1.0/files/${a.file_uuid}`, { headers: auth });
+        m = mRes.ok ? await mRes.json().catch(() => null) : null;
+      } catch { /* falha de rede depois das tentativas: vira `sem_link`, como o não-ok */ }
       if (!m) { semMetadado.push(`anexo ${a.file_uuid.slice(0, 8)}`); continue; }
       metas.push({
         uuid: a.file_uuid,
@@ -150,6 +174,9 @@ Deno.serve(async (req) => {
         ext: String((m as any)?.metadata?.extension || "").toLowerCase(),
         download: (m as any)?._links?.download?.href,
       });
+    }
+    if (semTempo > 0) {
+      semMetadado.push(`${semTempo} anexo(s) não olhado(s): o tempo da consulta acabou antes — tente de novo`);
     }
 
     // TODOS OS ANEXOS, quando quem pergunta é o histórico do card.

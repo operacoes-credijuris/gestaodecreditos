@@ -15,7 +15,9 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.1
 // em Configurações não mexe no Supabase Auth, então o desligado continua obtendo
 // JWT válido. Logo o portão de acesso é de CÓDIGO (getCallerAtivo/isAdmin
 // abaixo), não do banco. É o fato mais importante deste módulo.
-export const ADMIN_EMAIL = 'contato@credijuris.com'
+// A constante mora em contaMestra.ts (módulo puro, testável); daqui é reexportada.
+import { ADMIN_EMAIL } from './contaMestra.ts'
+export { ADMIN_EMAIL }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!

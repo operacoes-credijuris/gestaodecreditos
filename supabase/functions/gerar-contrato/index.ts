@@ -33,6 +33,7 @@
 import { corsHeaders } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
+import { dataPorExtenso, hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 import { ESFORCO_PADRAO_DO_OPUS, semCercaDeMarkdown, textoDaResposta, type PedidoAoOpus } from '../_shared/respostaDoClaude.ts'
 import { normalizarNome } from '../_shared/nucleo/texto.ts'
 import { ehPastaCredijuris, ORIGINADOR_CREDIJURIS, pastaDoOriginador } from '../_shared/pastaDoOriginador.ts'
@@ -168,7 +169,11 @@ const SCHEMA_APRESENTACAO_FIXOS: Vars = {
   // IA de propósito: vêm de detectCreditosNegociadosFromXlsx(), que lê a resposta
   // direto do XML da planilha. Elas decidem quais contratos são gerados, e um chute
   // errado aqui produz o conjunto errado de documentos jurídicos.
-  DATA_EXTENSO: 'data de hoje por extenso ex: 07 de maio de 2025',
+  // DATA_EXTENSO SAIU DAQUI (auditoria de bugs, 09/10/2026): a IA não sabe que
+  // dia é hoje, e a resposta dela — a data que achou na planilha, o exemplo do
+  // esquema, ou null — vinha por último no espalhamento e sobrescrevia a data
+  // calculada. O contrato saía datado errado, ou com {{DATA_EXTENSO}} literal.
+  // A data é do código, em Brasília (ver `dataExtenso`).
   // Campos do quadro "Dados da operação" do contrato de intermediação (modelo novo).
   JUIZO_TRIBUNAL: 'juízo e tribunal do processo, no formato "<vara/juizado> - <tribunal>", ex: "1ª Vara Cível de Goiânia - TJGO" ou "3º Juizado Especial Federal de Belo Horizonte - TRF6". Se só houver um dos dois, retorne o que houver. Se não encontrar, null',
   // Fallback: o valor normalmente usado vem de classeAtivo(), derivado da categoria e do
@@ -201,16 +206,14 @@ function errorResponse(message: string, status = 400, extra?: Record<string, unk
   return jsonResponse({ error: message, ...extra }, status);
 }
 
+// HOJE EM BRASÍLIA: o runtime está em UTC, e das 21h em diante `getDate()` já
+// dava o dia seguinte (ver _shared/dataDeBrasilia.ts).
 function dataExtenso(): string {
-  const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
-  const d = new Date();
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${day} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
+  return dataPorExtenso(hojeEmBrasilia());
 }
 
 function dateStamp(): string {
-  const d = new Date();
-  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return hojeEmBrasilia().replace(/-/g, '');
 }
 
 // Converte nome para title case respeitando preposições portuguesas
@@ -888,6 +891,8 @@ async function extractApresentacao(
     ...Object.keys(SCHEMA_CEDENTE),
     ...Object.keys(SCHEMA_ESCRITORIO),
     ...Object.keys(SCHEMA_APRESENTACAO_FIXOS),
+    // Preenchida no código, não pela IA — ver SCHEMA_APRESENTACAO_FIXOS.
+    'DATA_EXTENSO',
     'INVESTIDOR_NOME','INVESTIDOR_CPF','INVESTIDOR_RG','INVESTIDOR_ENDERECO',
     'INVESTIDOR_BANCO','INVESTIDOR_AGENCIA','INVESTIDOR_CONTA','INVESTIDOR_PIX',
   ]);
@@ -1720,10 +1725,11 @@ Deno.serve(async (req) => {
       INVESTIDOR_AGENCIA: inv.agencia,
       INVESTIDOR_CONTA: inv.conta,
       INVESTIDOR_PIX: inv.pix,
-      DATA_EXTENSO: dataExtenso(),
       ...cedente,
       ...escritorio,
       ...apresentacao,
+      // POR ÚLTIMO: nada lido de documento pode sobrescrever a data do contrato.
+      DATA_EXTENSO: dataExtenso(),
     };
     for (const k of ['CEDENTE_NOME', 'ESCRITORIO_NOME', 'ESCRITORIO_SOCIO_NOME']) {
       if (dados[k]) dados[k] = toTitleCasePT(dados[k]);

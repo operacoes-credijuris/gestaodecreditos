@@ -10,6 +10,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { ESFORCO_PADRAO_DO_OPUS, textoDaResposta, type PedidoAoOpus } from "../_shared/respostaDoClaude.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit, chaveAnthropic } from "../_shared/segredos.ts";
+import { estourouOTempo, sinalAteOTeto } from "../_shared/relogioDaInvocacao.ts";
 
 const CORS = corsHeaders;
 const JUDIT_REQUESTS = "https://requests.prod.judit.io/requests";
@@ -78,7 +79,7 @@ async function montarTextoProcesso(juditKey: string, numero: string) {
   return { ok: true, texto, numero: base.code || numero, partes: (base.parties || []).map((p: any) => `${p.name} [${p.side}]`) };
 }
 
-async function qualificarPeloManual(apiKey: string, texto: string) {
+async function qualificarPeloManual(apiKey: string, texto: string, inicio: number) {
   const manual = new TextDecoder().decode(Uint8Array.from(atob(MANUAL_B64), (c) => c.charCodeAt(0)));
   const system = manual + `
 
@@ -88,9 +89,14 @@ Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), e
 {"classificacao":"🟢 Aprovada" | "🟡 Aprovada com ressalvas" | "🔴 Reprovada","resumo":"1 a 3 frases: o que é o processo e a conclusão","riscos":[{"risco":"descrição","fundamento":"documento/movimentação + data + trecho onde aparece","grau":"Impeditivo" | "Elevado" | "Moderado" | "Ponto de atenção"}],"observacoes":"o que NÃO pôde ser conferido (documentos sigilosos etc.)"}`;
   // 8000 de saída, e não 4000: no Opus 5.5 o raciocínio, sempre ligado, conta dentro do teto e podia
   // comer o JSON. Esforço 'high', o padrão do Opus 5 (o do 5.5 é 'medium').
-  const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 8000, output_config: { effort: ESFORCO_PADRAO_DO_OPUS }, system, messages: [{ role: "user", content: texto }] } satisfies PedidoAoOpus) });
+  // TETO DA INVOCAÇÃO (auditoria de bugs, 09/10/2026): interrompida antes dos
+  // ~150 s, a chamada vira erro com motivo, e não a função morrendo sem resposta.
+  const res = await fetch("https://api.anthropic.com/v1/messages", { signal: sinalAteOTeto(inicio), method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 8000, output_config: { effort: ESFORCO_PADRAO_DO_OPUS }, system, messages: [{ role: "user", content: texto }] } satisfies PedidoAoOpus) });
   const j = await res.json();
   if (!res.ok) return { erro: "IA recusou", http: res.status, resposta: j };
+  // RESPOSTA CORTADA OU RECUSADA não é veredito: diz o motivo.
+  if (j?.stop_reason === "max_tokens") return { ok: false, motivo: "a resposta da IA foi cortada no limite de tamanho", texto_bruto: textoDaResposta(j?.content) };
+  if (j?.stop_reason === "refusal") return { ok: false, motivo: "a IA se recusou a responder", texto_bruto: textoDaResposta(j?.content) };
   // Só os blocos de texto: no Opus 5.5 a resposta pode começar por blocos de raciocínio.
   const txt = textoDaResposta(j?.content);
   const clean = txt.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -100,6 +106,7 @@ Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), e
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  const inicio = Date.now();
   try {
     // Mesmo portão de dd-credor: consome Judit e IA, então JWT válido não basta.
     const usuario = await getCallerAtivo(req, serviceClient());
@@ -116,7 +123,13 @@ Deno.serve(async (req) => {
     if ((t as any).aguarde) return json({ pronto: false, aguarde: true, mensagem: "Judit ainda coletando; rode de novo em ~2 min." });
     if ((t as any).erro || (t as any).nao_encontrado) return json(t);
 
-    const q = await qualificarPeloManual(anthropicKey, (t as any).texto);
+    let q: unknown;
+    try {
+      q = await qualificarPeloManual(anthropicKey, (t as any).texto, inicio);
+    } catch (e) {
+      if (!estourouOTempo(e)) throw e;
+      return json({ erro: "A leitura da IA passou do tempo de uma chamada e foi interrompida. Rode de novo." }, 504);
+    }
     return json({ numero: (t as any).numero, partes: (t as any).partes, tamanho_texto: (t as any).texto.length, qualificacao: q });
   } catch (e) { return json({ erro: String((e as Error)?.message || e) }, 500); }
 });

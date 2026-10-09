@@ -136,7 +136,14 @@ export function normalizarProcessos(
   let processos = [...porCnj.values()]
   if (processos.length > MAX_PROCESSOS) {
     avisos.push(`A IA indicou ${processos.length} processos; ficaram os ${MAX_PROCESSOS} primeiros.`)
-    processos = processos.slice(0, MAX_PROCESSOS)
+    // O DO TÍTULO NÃO SAI NO CORTE (auditoria de bugs, 09/10/2026): ele entra
+    // por último no mapa, e o corte pelos primeiros o tirava justamente quando a
+    // IA trazia outros quatro — contra a regra acima de que ele entra sempre.
+    // Fica ele e os primeiros dos outros, na ordem em que vieram.
+    const doTitulo = processos.find((p) => digitosDoCnj(p.cnj) === dTitulo)
+    const ficam = new Set(processos.filter((p) => p !== doTitulo).slice(0, doTitulo ? MAX_PROCESSOS - 1 : MAX_PROCESSOS))
+    if (doTitulo) ficam.add(doTitulo)
+    processos = processos.filter((p) => ficam.has(p))
   }
   const doModelo = texto((bruto as { aviso?: unknown })?.aviso, 400)
   if (doModelo) avisos.push(doModelo)

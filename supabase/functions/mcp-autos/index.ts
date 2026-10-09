@@ -50,7 +50,7 @@ import {
 } from "../_shared/planilhaJuridica.ts";
 import { lerCadastroDoCard } from "../_shared/cadastroDoCard.ts";
 import { anotacoesDaAnalise, VEREDITO_JURIDICO } from "../_shared/anotacaoKommo.ts";
-import { assinarNota } from "../_shared/notaCredijuris.ts";
+import { postarNotas } from "../_shared/anotarNoKommo.ts";
 import { contaKommo } from "../_shared/segredos.ts";
 
 /** A chave do roteiro na tabela que a operação edita (ver migration 0065). */
@@ -569,19 +569,13 @@ async function entregarPlanilha(g: AutosGuardados, args: any) {
     });
     for (const texto of textos) {
       try {
-        const res = await fetch(`https://${conta.subdominio}.kommo.com/api/v4/leads/notes`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${conta.token}`, "Content-Type": "application/json" },
-          body: JSON.stringify([{
-            entity_id: g.lead_id,
-            // NOTA DE VERDADE, com a marca no rodapé — o mesmo formato da
-            // kommo-anotar, que o kommo-sync reconhece e não relê como cadastro.
-            note_type: "common",
-            params: { text: assinarNota(texto) },
-            is_need_to_trigger_digital_pipeline: false,
-          }]),
-        });
-        if (!res.ok) falhasDaNota.push(`HTTP ${res.status}`);
+        // PELO `postarNotas` (auditoria de bugs, 09/10/2026): era um `fetch` cru,
+        // e um 429 do Kommo — que a sincronização e a equipe disputam a cota o
+        // tempo todo — derrubava a nota sem nova tentativa. O POST repete só o
+        // 429 (não processado), nunca o 5xx; o formato da nota é o da kommo-anotar
+        // (nota `common`, marca no rodapé, gatilho desligado).
+        const r = await postarNotas(conta, g.lead_id, [texto], { dePessoa: false });
+        if (!r.ok) falhasDaNota.push(`HTTP ${r.status}`);
       } catch (e) {
         falhasDaNota.push(String((e as Error)?.message ?? e));
       }

@@ -51,27 +51,31 @@ export async function segredoGoogle(): Promise<SegredoGoogle | null> {
  * subdomínio trocado (renomear a conta no Kommo, migrar para outra) consertava
  * duas funções e deixava a terceira escrevendo no lugar errado.
  */
+//
+// A TABELA PRIMEIRO, o ambiente só na falta dela (auditoria de bugs, 09/10/2026).
+// Era o contrário para o TOKEN: com um secret KOMMO_TOKEN no Supabase, trocar o
+// token pela tela (salvar-token-kommo, que grava na tabela e responde
+// "validado") valia para a kommo-sync e a kommo-mover — que só leem a tabela — e
+// NÃO para etiquetar, anotar e anexar, que seguiam no token antigo. Agora todas
+// leem a mesma fonte, na mesma ordem.
 export async function contaKommo(): Promise<{ token: string; subdominio: string } | null> {
-  const doAmbiente = Deno.env.get('KOMMO_TOKEN')
   const { data } = await serviceClient()
     .from('integracao_kommo_secret')
     .select('token, subdominio')
     .eq('id', 1)
     .maybeSingle()
-  const token = doAmbiente || data?.token
+  const token = data?.token || Deno.env.get('KOMMO_TOKEN')
   const subdominio = data?.subdominio || Deno.env.get('KOMMO_SUBDOMINIO')
   return token && subdominio ? { token, subdominio } : null
 }
 
 export async function chaveKommo(): Promise<string | null> {
-  const doAmbiente = Deno.env.get('KOMMO_TOKEN')
-  if (doAmbiente) return doAmbiente
   const { data } = await serviceClient()
     .from('integracao_kommo_secret')
     .select('token')
     .eq('id', 1)
     .maybeSingle()
-  return data?.token ?? null
+  return data?.token || Deno.env.get('KOMMO_TOKEN') || null
 }
 
 /**

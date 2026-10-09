@@ -20,6 +20,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
+import { lerTodasAsLinhas, type PaginaDoBanco } from '../_shared/leituraPaginada.ts'
 
 // Haiku dá conta desta tarefa: o texto é curto, o formato é fixo e o dossiê
 // chega pronto e em ordem cronológica, então sobra pouca decisão para o modelo.
@@ -497,23 +498,51 @@ Deno.serve(async (req: Request) => {
     // desempate o texto entregue ao investidor podia afirmar que o alvará saiu,
     // quando ele havia voltado. data_ts primeiro, id como último critério —
     // é ele que garante saída estável quando data_ts for meia-noite.
-    const { data: movData } = todosDigits.length
-      ? await svc
-          .from('advbox_movimentacoes')
-          .select('id, numero_digits, data, data_ts, conteudo')
-          .in('numero_digits', todosDigits)
-          .order('data', { ascending: false })
-          .order('data_ts', { ascending: false, nullsFirst: false })
-          .order('id', { ascending: false })
-      : { data: [] }
-    const { data: tarData } = todosDigits.length
-      ? await svc
-          .from('advbox_tarefas')
-          .select('id, numero_digits, tipo, data, date_deadline, notes, concluida')
-          .in('numero_digits', todosDigits)
-          .order('data', { ascending: false })
-          .order('id', { ascending: false })
-      : { data: [] }
+    //
+    // PAGINADAS (auditoria de bugs, 09/10/2026): o PostgREST para em 1000 linhas
+    // sem avisar, e o histórico é integral — com o lote de créditos passando de
+    // 1000 andamentos, os mais antigos sumiam, e o crédito cujo histórico ficou
+    // todo além do corte saía "sem andamentos" para o investidor. Leitura que
+    // falha é erro do lote, e não lista vazia.
+    const movLidas = todosDigits.length
+      ? await lerTodasAsLinhas<MovRow>((de, ate) =>
+          svc
+            .from('advbox_movimentacoes')
+            .select('id, numero_digits, data, data_ts, conteudo')
+            .in('numero_digits', todosDigits)
+            .order('data', { ascending: false })
+            .order('data_ts', { ascending: false, nullsFirst: false })
+            .order('id', { ascending: false })
+            .range(de, ate) as unknown as PromiseLike<PaginaDoBanco<MovRow>>
+        )
+      : { linhas: [] as MovRow[], erro: null, cortada: false }
+    const tarLidas = todosDigits.length
+      ? await lerTodasAsLinhas<TarefaRow>((de, ate) =>
+          svc
+            .from('advbox_tarefas')
+            .select('id, numero_digits, tipo, data, date_deadline, notes, concluida')
+            .in('numero_digits', todosDigits)
+            .order('data', { ascending: false })
+            .order('id', { ascending: false })
+            .range(de, ate) as unknown as PromiseLike<PaginaDoBanco<TarefaRow>>
+        )
+      : { linhas: [] as TarefaRow[], erro: null, cortada: false }
+    if (movLidas.erro || tarLidas.erro) {
+      // O LOTE NÃO É GERADO (gerar sem os andamentos seria dizer ao investidor
+      // "nenhum andamento"), mas a cadeia segue para os próximos.
+      if (resto.length) dispararProximo(resto, forcar, modelo)
+      return jsonResponse({
+        ok: false,
+        modelo,
+        gerados: 0,
+        pulados: 0,
+        falhas: processos.length,
+        restantes: resto.length,
+        erro: `não consegui ler os andamentos/tarefas do lote: ${movLidas.erro ?? tarLidas.erro}`,
+      })
+    }
+    const movData = movLidas.linhas
+    const tarData = tarLidas.linhas
 
     const movsPor = new Map<string, MovRow[]>()
     for (const m of (movData ?? []) as MovRow[]) {
@@ -610,10 +639,13 @@ Deno.serve(async (req: Request) => {
         })
         gerados++
       } catch (e) {
-        // Não grava fonte_hash: assim a próxima rodada tenta de novo em vez de
-        // achar que este crédito já está em dia.
+        // fonte_hash APAGADO, e não só omitido (auditoria de bugs, 09/10/2026):
+        // omitido, o upsert mantinha o hash da geração anterior — igual ao atual
+        // quando não houve andamento novo —, a varredura seguinte pulava o
+        // crédito, e o erro ficava na célula do investidor até surgir novidade.
         await svc.from('carteira_resumos').upsert({
           processo_id: p.id,
+          fonte_hash: null,
           erro: String((e as Error).message ?? e).slice(0, 500),
           gerado_em: new Date().toISOString(),
         })

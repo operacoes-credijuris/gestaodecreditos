@@ -34,6 +34,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
+import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 
 // Haiku dá conta: a saída é um código fixo de uma lista curta, não prosa livre.
 const MODELO = 'claude-haiku-4-5-20251001'
@@ -198,7 +199,7 @@ function montarDossie(p: ProcessoRow, movs: MovRow[], atual: FaseAtual | null): 
     `- Tribunal/vara: ${[p.tribunal, p.comarca, p.vara].filter(Boolean).join(' · ') || 'não informado'}`,
   )
   linhas.push(`- Data de aquisição do crédito: ${p.data_aquisicao || 'não informada'}`)
-  linhas.push(`- Hoje: ${new Date().toISOString().slice(0, 10)}`)
+  linhas.push(`- Hoje: ${hojeEmBrasilia()}`)
 
   linhas.push('')
   if (atual) {
@@ -378,7 +379,7 @@ async function mapPool<T, R>(itens: T[], limite: number, fn: (item: T) => Promis
  * da varredura orientada por andamento). Roda de graça, sem chamar o modelo.
  */
 async function varrerTransicaoPorCalendario(svc: ReturnType<typeof serviceClient>): Promise<number> {
-  const hoje = new Date().toISOString().slice(0, 10)
+  const hoje = hojeEmBrasilia()
   const { data: vencidos } = await svc
     .from('processos_fase')
     .select('processo_id')
@@ -471,7 +472,7 @@ Deno.serve(async (req: Request) => {
       // Leitura falha ANTES de gravar: sem ela o histórico registraria "fase anterior:
       // nenhuma" para quem tinha fase.
       if (erroLeitura) return jsonResponse({ error: erroLeitura.message }, 500)
-      const hoje = new Date().toISOString().slice(0, 10)
+      const hoje = hojeEmBrasilia()
       const { error: erroFase } = await svc.from('processos_fase').upsert({
         processo_id: body.processo_id,
         fase_codigo: body.fase_codigo,
@@ -687,7 +688,7 @@ Deno.serve(async (req: Request) => {
         await svc.from('processos_fase').upsert({
           processo_id: p.id,
           fase_codigo: trilha === 'ativo' ? 'ATV-08' : 'CMP-10',
-          data_entrada_fase: new Date().toISOString().slice(0, 10),
+          data_entrada_fase: hojeEmBrasilia(),
           fonte_hash: fonte,
           erro: 'Sem andamentos no cache do ADVBOX para este crédito.',
           classificado_em: new Date().toISOString(),
@@ -708,7 +709,7 @@ Deno.serve(async (req: Request) => {
           processo_id: p.id,
           fase_codigo: roteamento.fase_codigo,
           ciclo_complementacao: resultado.ciclo_complementacao,
-          data_entrada_fase: resultado.data_entrada_fase ?? new Date().toISOString().slice(0, 10),
+          data_entrada_fase: resultado.data_entrada_fase ?? hojeEmBrasilia(),
           movimentacao_ancora_data: resultado.movimentacao_ancora_data,
           movimentacao_ancora_texto: resultado.movimentacao_ancora_texto,
           fase_anterior_valida: resultado.fase_anterior_valida,
@@ -747,7 +748,7 @@ Deno.serve(async (req: Request) => {
         await svc.from('processos_fase').upsert({
           processo_id: p.id,
           fase_codigo: atual?.fase_codigo ?? (trilha === 'ativo' ? 'ATV-08' : 'CMP-10'),
-          data_entrada_fase: atual?.data_entrada_fase ?? new Date().toISOString().slice(0, 10),
+          data_entrada_fase: atual?.data_entrada_fase ?? hojeEmBrasilia(),
           erro: String((e as Error).message ?? e).slice(0, 500),
           classificado_em: new Date().toISOString(),
         })

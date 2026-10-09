@@ -20,6 +20,7 @@ import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_sh
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { resolverModeloDoAssistente } from '../_shared/modeloDoAssistente.ts'
+import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 
 /**
  * Chave da Anthropic, gravada pela tela de Configurações (mesmo caminho do
@@ -749,7 +750,8 @@ async function carregarPainel(
       .maybeSingle(),
   ])
   if (creditos.error) return { erro: creditos.error.message }
-  const hoje = new Date().toISOString().slice(0, 10)
+  // Em Brasília, como desde()/daqui() abaixo: das 21h em diante o UTC já é amanhã.
+  const hoje = hojeEmBrasilia()
   return {
     painel: montarPainel(
       (creditos.data ?? []) as unknown as CreditoBruto[],
@@ -2630,9 +2632,11 @@ Deno.serve(async (req: Request) => {
       Anthropic.MessageCreateParamsNonStreaming,
       'container'
     > & {
-      container?: { skills: { type: string; skill_id: string; version: string }[] }
+      container?: { id?: string; skills: { type: string; skill_id: string; version: string }[] }
     }
 
+    // O container da execução de código PAUSADA: a retomada tem de voltar a ele.
+    let containerPausado: string | undefined
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
       const params: ParametrosMensagem = {
         model: modeloResolvido,
@@ -2663,6 +2667,7 @@ Deno.serve(async (req: Request) => {
       }
       if (skills.length > 0) {
         params.container = {
+          ...(containerPausado ? { id: containerPausado } : {}),
           skills: skills.map((s) => ({
             type: 'custom',
             skill_id: s.skill_id,
@@ -2690,6 +2695,17 @@ Deno.serve(async (req: Request) => {
 
       mensagens.push({ role: 'assistant', content: resposta.content })
 
+      // TURNO PAUSADO (auditoria de bugs, 09/10/2026): a execução de código das
+      // Skills roda no servidor e, num trabalho longo (gerar planilha, docx),
+      // bate no limite dele e volta com `pause_turn`. Era entregue como resposta
+      // final — o "Vou gerar o arquivo…" sem arquivo nenhum, e sem aviso. A
+      // retomada é reenviar a conversa como está (a resposta pausada já entrou
+      // acima), no mesmo container. Na última rodada, sai marcada como truncada.
+      if (resposta.stop_reason === 'pause_turn' && rodada < MAX_RODADAS - 1) {
+        containerPausado = resposta.container?.id ?? containerPausado
+        continue
+      }
+
       if (resposta.stop_reason !== 'tool_use') {
         const texto = resposta.content
           .filter((b): b is Anthropic.TextBlock => b.type === 'text')
@@ -2699,7 +2715,7 @@ Deno.serve(async (req: Request) => {
         // Resposta INTERROMPIDA por limite de tokens não pode ser entregue como
         // se estivesse inteira: uma tabela de 60 processos cortada na linha 35
         // parece completa, e quem lê usa o pedaço como se fosse o todo.
-        const truncada = resposta.stop_reason === 'max_tokens'
+        const truncada = resposta.stop_reason === 'max_tokens' || resposta.stop_reason === 'pause_turn'
         // Arquivo gerado por Skill: só existe quando há skills ativas, então
         // a varredura do content não custa nada nas conversas sem nenhuma.
         const arquivos =

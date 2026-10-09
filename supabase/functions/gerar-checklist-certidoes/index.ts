@@ -22,6 +22,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 
 const CORS = corsHeaders
 
@@ -323,7 +324,7 @@ Deno.serve(async (req) => {
     }
 
     // ---- 2. Catálogo e regras vigentes ----
-    const hoje = new Date().toISOString().slice(0, 10)
+    const hoje = hojeEmBrasilia()
     const [{ data: catalogo }, { data: regras }] = await Promise.all([
       svc.from('certidao_catalogo').select('*'),
       svc.from('certidao_regra').select('*')

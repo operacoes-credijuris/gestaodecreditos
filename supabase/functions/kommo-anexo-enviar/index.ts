@@ -36,6 +36,14 @@ import { urlDoDriveDaConta } from '../_shared/driveDoKommo.ts'
 /** Teto do arquivo (pedido de 29/09/2026). */
 const MAX_BYTES = 100 * 1024 * 1024
 
+// O RELÓGIO DA INVOCAÇÃO (auditoria de bugs, 09/10/2026). A função morre por
+// volta de 150 s de parede, e um arquivo grande numa conexão lenta — o navegador
+// enviando e as partes indo ao drive, em série — chega lá. Morrer calado deixa a
+// tela sem resposta e uma sessão aberta no drive; parar em 140 s devolve o motivo.
+const PRAZO_DO_ENVIO_MS = 140_000
+// Cada parte tem 512 KB: um minuto parado é conexão morta, não lentidão.
+const TEMPO_PARTE_MS = 60_000
+
 // OS CABEÇALHOS PRÓPRIOS entram no CORS desta função: sem isso o navegador nem
 // chega a enviar.
 const cors = {
@@ -57,6 +65,7 @@ const decodificar = (s: string | null) => {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  const inicio = Date.now()
   try {
     const svc = serviceClient()
     const caller = await getCallerAtivo(req, svc)
@@ -91,7 +100,7 @@ Deno.serve(async (req: Request) => {
 
     // 1. A SESSÃO DE ENVIO no drive do Kommo, com o tamanho declarado.
     const drive = await urlDoDriveDaConta(base, auth)
-    const s = await fetch(`${drive}/v1.0/sessions`, {
+    const s = await kommoFetch(`${drive}/v1.0/sessions`, {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_name: nome, file_size: tamanho, content_type: mime }),
@@ -110,8 +119,22 @@ Deno.serve(async (req: Request) => {
 
     const enviarParte = async (bytes: Uint8Array<ArrayBuffer>) => {
       if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
+      if (Date.now() - inicio > PRAZO_DO_ENVIO_MS) {
+        throw new Error(
+          `o envio passou de ${PRAZO_DO_ENVIO_MS / 1000} s, o tempo de uma chamada, e foi interrompido ` +
+          `(${Math.round(recebidos / 1048576)} de ${Math.round(tamanho / 1048576)} MB). ` +
+          'Tente numa conexão mais rápida ou com o arquivo dividido.',
+        )
+      }
       // O TIPO DO ARQUIVO em cada parte, como na receita oficial do Kommo.
-      const r = await fetch(url, { method: 'POST', headers: { ...auth, 'Content-Type': mime }, body: bytes })
+      // PELO kommoFetch: um 429 (a cota da conta é disputada) não foi processado
+      // e é repetido; o 5xx não, porque a parte pode ter entrado.
+      const r = await kommoFetch(url, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': mime },
+        body: bytes,
+        signal: AbortSignal.timeout(TEMPO_PARTE_MS),
+      })
       if (!r.ok) throw new Error(`o drive do Kommo recusou uma parte (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
       const j = (await r.json().catch(() => ({}))) as { uuid?: string; version_uuid?: string; next_url?: string }
       if (j?.uuid) uuid = String(j.uuid)

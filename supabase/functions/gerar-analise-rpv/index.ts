@@ -12,6 +12,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
+import { diaMesAno, hojeEmBrasilia, somarDiasAoDia } from "../_shared/dataDeBrasilia.ts";
 import {
   consultarRegra,
   executarPasso,
@@ -2285,9 +2286,11 @@ async function arquivoToContentBlocks(filename: string, bytes: Uint8Array): Prom
 // ============================================================================
 // Datas
 // ============================================================================
+// EM BRASÍLIA (auditoria de bugs, 09/10/2026): o runtime está em UTC, e um
+// "salvar" depois das 21h gravava em I5 a aquisição de AMANHÃ — e a data de
+// pagamento (J5 e o card) andava junto; em 31/12, virava o ano.
 function hojeDDMMAAAA(): string {
-  const d = new Date();
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  return diaMesAno(hojeEmBrasilia());
 }
 // hoje + o prazo, em dias — a MESMA grandeza que a fórmula do preço usa.
 //
@@ -2295,8 +2298,7 @@ function hojeDDMMAAAA(): string {
 // fim do 8º mês. A planilha (J5) e a tela mostravam uma data que não era a do
 // cálculo, e quem conferia via o prazo de um jeito e a data de outro.
 function dataPagamento(meses: number): string {
-  const alvo = new Date(Date.now() + Math.round(Math.max(0, meses) * 30) * 86400000);
-  return `${String(alvo.getDate()).padStart(2, '0')}/${String(alvo.getMonth() + 1).padStart(2, '0')}/${alvo.getFullYear()}`;
+  return diaMesAno(somarDiasAoDia(hojeEmBrasilia(), Math.round(Math.max(0, meses) * 30)));
 }
 
 // ============================================================================

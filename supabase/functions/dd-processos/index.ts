@@ -135,6 +135,9 @@ async function apurarAlvo(
       }
       const quem = await identidadeDoAdvogado(chave, oab)
       requisicoes += 1
+      // O CUSTO DA CONSULTA DA OAB entra no consumo (auditoria de bugs, 09/10/2026):
+      // era descartado, e o escavador_consumo registrava menos do que se gastou.
+      centavos += quem.centavos
       if (!quem.cpf) {
         throw new ErroEscavador(
           404,
@@ -178,7 +181,12 @@ async function apurarAlvo(
     if (!documento) {
       notas.push('Busca feita PELO NOME (sem CPF): confirme que os processos são da mesma pessoa')
     }
-    if (busca.truncado) {
+    if (busca.falha) {
+      notas.push(
+        `A consulta parou na página ${busca.paginas + 1} (${busca.falha}) — ` +
+          'a lista abaixo é o que veio antes e não é exaustiva',
+      )
+    } else if (busca.truncado) {
       notas.push(
         `Há mais processos do que as ${busca.paginas} páginas consultadas — ` +
           'a lista abaixo não é exaustiva',

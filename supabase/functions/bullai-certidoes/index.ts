@@ -21,6 +21,7 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveBullai } from '../_shared/segredos.ts'
+import { hojeEmBrasilia, somarDiasAoDia } from '../_shared/dataDeBrasilia.ts'
 import { BASE_BULLAI, ErroBullai, pedirBullai, portaisBullai } from '../_shared/bullai.ts'
 import { corpoDoPedido, estadoDoItem, type RodadaDoPortal } from '../_shared/resultadoBullai.ts'
 import { driveUploadBytes } from '../_shared/credijuris.ts'
@@ -29,7 +30,9 @@ import { pastaDasCertidoesDoCard } from '../_shared/pastaDoCard.ts'
 import { urlDaPasta } from '../_shared/pastaDaAnalise.ts'
 // A RESERVA ATÔMICA DOS ITENS ANTES DE PEDIR (03/10/2026) — ver o módulo.
 import {
+  itemEDoPedido,
   itemPedivel,
+  pedidoCobreAReserva,
   type ItemDoChecklist,
   pedidoRepetido,
   pedidosSemRegistro,
@@ -40,6 +43,12 @@ import {
 } from '../_shared/reservaBullai.ts'
 
 type Servico = ReturnType<typeof serviceClient>
+
+// O orçamento da atualização, abaixo dos ~150 s da invocação com folga para a
+// gravação do pedido e dos itens (ver `atualizar`).
+const ORCAMENTO_DA_ATUALIZACAO_MS = 95_000
+// Um PDF de certidão é pequeno: um minuto parado é conexão morta.
+const TEMPO_DO_DOWNLOAD_MS = 60_000
 
 interface JobDaBullai {
   jobId: string
@@ -359,12 +368,13 @@ async function recomporPedidos(
 
   // RESERVA VENCIDA que nenhum pedido registrado cobre: a função que a fez
   // morreu antes de pedir (ou o pedido falhou e a devolução também).
-  const cobertos = new Set<string>(
-    [...pedidos, ...novos].flatMap((p) => Object.values((p.portais ?? {}) as Record<string, string[]>).flat()),
-  )
+  //
+  // COBRE SÓ O PEDIDO CRIADO DEPOIS DA RESERVA (ver `pedidoCobreAReserva`): o
+  // pedido velho em que o item já esteve não segura a reserva nova para sempre.
+  const registrados = [...pedidos, ...novos] as { portais?: Record<string, string[]> | null; criado_em?: string | null }[]
   const agora = Date.now()
   for (const i of lista) {
-    if (!reservaVencida(i, agora) || cobertos.has(i.id)) continue
+    if (!reservaVencida(i, agora) || registrados.some((p) => pedidoCobreAReserva(p, i))) continue
     const { data: soltos, error: eSolta } = await svc
       .from('dd_certidao')
       .update({
@@ -422,7 +432,19 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
   const validadeDe = new Map(((validades ?? []) as any[]).map((v) => [v.codigo, v.validade_dias as number | null]))
   const falhas: string[] = [...recomposicao.falhas]
 
+  // O RELÓGIO (auditoria de bugs, 09/10/2026): cada anexo é um download da
+  // BullAI e um envio ao Drive, e um sujeito com dezenas de PDFs passava dos
+  // ~150 s da invocação — que morria antes de gravar `baixados`, e a próxima
+  // atualização baixava e reenviava tudo de novo, para sempre. Passado o
+  // orçamento, o pedido grava o que já desceu e a atualização seguinte continua.
+  const inicio = Date.now()
+  const semTempo = () => Date.now() - inicio > ORCAMENTO_DA_ATUALIZACAO_MS
+  let parouPorTempo = false
   for (const p of abertos as any[]) {
+    if (semTempo()) {
+      parouPorTempo = true
+      break
+    }
     let job: JobDaBullai
     try {
       job = await pedirBullai<JobDaBullai>(chave, `/jobs/${encodeURIComponent(p.job_id)}`)
@@ -442,12 +464,17 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
       arquivosPorPortal.set(a.portalKey, lista)
     }
     const { data: sujeito } = await svc.from('dd_sujeito').select('nome').eq('id', p.sujeito_id).maybeSingle()
+    let cortadoNesteJob = false
     for (const art of job.artifacts ?? []) {
       if (baixados.has(art.artifactId)) continue
+      if (semTempo()) {
+        cortadoNesteJob = true
+        break
+      }
       try {
         const res = await fetch(
           `${BASE_BULLAI}/jobs/${encodeURIComponent(p.job_id)}/artifacts/${encodeURIComponent(art.artifactId)}/download`,
-          { headers: { 'x-api-key': chave } },
+          { headers: { 'x-api-key': chave }, signal: AbortSignal.timeout(TEMPO_DO_DOWNLOAD_MS) },
         )
         if (!res.ok) throw new Error(`download HTTP ${res.status}`)
         const bytes = new Uint8Array(await res.arrayBuffer())
@@ -498,6 +525,14 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
       .eq('job_id', p.job_id)
     if (ePedido) falhas.push(`pedido ${p.job_id}: ${ePedido.message}`)
 
+    // CORTADO NO MEIO DOS ANEXOS: o pedido gravou o que desceu; os itens ficam
+    // como estão até a próxima atualização baixar o resto — julgá-los agora daria
+    // "sem PDF" a um portal cujo arquivo só não coube no tempo.
+    if (cortadoNesteJob) {
+      parouPorTempo = true
+      break
+    }
+
     // CADA ITEM DO CHECKLIST, pelo que os portais DELE disseram.
     const comArquivo = new Set([...arquivosPorPortal.entries()].filter(([, l]) => l.length > 0).map(([k]) => k))
     const itens = new Set<string>(Object.values((p.portais ?? {}) as Record<string, string[]>).flat())
@@ -509,10 +544,20 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
       const arquivos = doItem.flatMap((k) =>
         (arquivosPorPortal.get(k) ?? []).map((a) => ({ portal: k, ...a })),
       )
-      const { data: item } = await svc.from('dd_certidao').select('certidao_codigo').eq('id', id).maybeSingle()
-      const hoje = new Date().toISOString().slice(0, 10)
+      const { data: item } = await svc
+        .from('dd_certidao')
+        .select('certidao_codigo, bullai_job_id')
+        .eq('id', id)
+        .maybeSingle()
+      // O ITEM FOI PEDIDO DE NOVO EM OUTRO JOB: o resultado deste não é mais dele
+      // (ver `itemEDoPedido`). Sem esta guarda, o pedido velho ainda aberto
+      // regravava FALHA por cima da certidão que o novo obteve.
+      const jobDoItem = (item?.bullai_job_id ?? null) as string | null
+      if (item && !itemEDoPedido(jobDoItem, String(p.job_id))) continue
+      // Em Brasília: das 21h em diante o UTC já é amanhã (ver dataDeBrasilia.ts).
+      const hoje = hojeEmBrasilia()
       const dias = validadeDe.get(String(item?.certidao_codigo ?? '')) ?? null
-      const validade = dias ? new Date(Date.now() + dias * 86_400_000).toISOString().slice(0, 10) : null
+      const validade = dias ? somarDiasAoDia(hoje, dias) : null
       const mudanca: Record<string, unknown> = {
         status: estado.status,
         resultado: estado.resultado,
@@ -531,7 +576,11 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
         mudanca.erro_classe = estado.status === 'FALHA' ? 'bullai' : 'presencial'
         mudanca.erro_detalhe = estado.detalhe
       }
-      const { error } = await svc.from('dd_certidao').update(mudanca).eq('id', id)
+      // CONDICIONAL AO JOB LIDO: se entre a leitura e aqui o item foi reservado
+      // ou ligado a outro pedido, a linha não muda.
+      let gravar = svc.from('dd_certidao').update(mudanca).eq('id', id)
+      if (item) gravar = jobDoItem ? gravar.eq('bullai_job_id', jobDoItem) : gravar.is('bullai_job_id', null)
+      const { error } = await gravar
       if (error) falhas.push(`item ${id}: ${error.message}`)
     }
   }
@@ -540,6 +589,9 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
   // Drive" ao lado do resultado. Campos novos — quem não os lê segue igual.
   // (O elenco: o TypeScript não enxerga a atribuição feita dentro de `pasta()`.)
   const aberta = pastaCertidoes as PastaAberta | null
+  if (parouPorTempo) {
+    falhas.push('Ainda há certidões a baixar: o tempo desta atualização acabou antes. Clique em atualizar de novo para continuar.')
+  }
   return jsonResponse({
     ok: true,
     atualizados: abertos.length,

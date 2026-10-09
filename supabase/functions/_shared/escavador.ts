@@ -549,7 +549,18 @@ export interface BuscaEscavador {
   paginas: number
   /** Havia mais páginas e o teto foi atingido. */
   truncado: boolean
+  /**
+   * Uma página DEPOIS da primeira falhou: `items` e `centavos` são o que veio (e
+   * foi pago) antes dela, e a lista não é exaustiva. Null quando não houve falha.
+   */
+  falha?: string | null
 }
+
+/**
+ * Sem teto, uma conexão parada segurava a invocação até ela morrer nos ~150 s —
+ * sem gravar nem o consumo nem o histórico do que já fora pago.
+ */
+const TEMPO_PEDIDO_MS = 30_000
 
 async function pedir(chave: string, url: string): Promise<{ corpo: unknown; centavos: number }> {
   const res = await fetch(url, {
@@ -558,6 +569,7 @@ async function pedir(chave: string, url: string): Promise<{ corpo: unknown; cent
       Accept: 'application/json',
       'X-Requested-With': 'XMLHttpRequest',
     },
+    signal: AbortSignal.timeout(TEMPO_PEDIDO_MS),
   })
   const texto = await res.text()
   let corpo: unknown = texto
@@ -590,7 +602,24 @@ async function paginar(
   let paginas = 0
 
   while (url && paginas < MAX_PAGINAS) {
-    const resposta: { corpo: unknown; centavos: number } = await pedir(chave, url)
+    let resposta: { corpo: unknown; centavos: number }
+    try {
+      resposta = await pedir(chave, url)
+    } catch (e) {
+      // A PRIMEIRA PÁGINA QUE FALHA é erro, como antes. DEPOIS DELA (auditoria
+      // de bugs, 09/10/2026), o que já veio foi PAGO: lançar jogava fora as
+      // páginas e os centavos delas — o consumo era gravado com zero, e o
+      // clique seguinte pagava tudo de novo. Volta o parcial, dito como tal.
+      if (paginas === 0) throw e
+      return {
+        items,
+        encontrado,
+        centavos,
+        paginas,
+        truncado: true,
+        falha: String((e as Error)?.message ?? e).slice(0, 200),
+      }
+    }
     centavos += resposta.centavos
     paginas += 1
     const pagina = (resposta.corpo ?? {}) as {
@@ -605,7 +634,7 @@ async function paginar(
     url = pagina.links?.next ?? null
   }
 
-  return { items, encontrado, centavos, paginas, truncado: Boolean(url) }
+  return { items, encontrado, centavos, paginas, truncado: Boolean(url), falha: null }
 }
 
 /**
@@ -663,13 +692,15 @@ export async function identidadeDoAdvogado(
   cpf: string | null
   quantidadeProcessos: number
   sociedades: { nome?: string; inscricao?: string; uf?: string }[]
+  /** O que a consulta custou (header `Creditos-Utilizados`) — entra no consumo. */
+  centavos: number
 }> {
   const q = new URLSearchParams({
     oab_estado: semAcento(oab.uf).trim(),
     oab_numero: soDigitos(oab.numero),
   })
   if (oab.tipo) q.set('oab_tipo', oab.tipo)
-  const { corpo } = await pedir(chave, `${BASE_ESCAVADOR}/advogado/resumo?${q}`)
+  const { corpo, centavos } = await pedir(chave, `${BASE_ESCAVADOR}/advogado/resumo?${q}`)
   const d = (corpo ?? {}) as {
     nome?: string
     cpf?: string
@@ -682,6 +713,7 @@ export async function identidadeDoAdvogado(
     cpf: cpf.length === 11 ? cpf : null,
     quantidadeProcessos: Number(d.quantidade_processos ?? 0) || 0,
     sociedades: d.sociedades ?? [],
+    centavos,
   }
 }
 
