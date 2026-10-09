@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Copy, Info, Loader2, Wallet } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
-import { formatBRL } from '@/lib/format'
+import { contar, formatBRL } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { BotaoCopiar, useCopiarTexto } from '@/components/ui/BotaoCopiar'
@@ -88,7 +88,7 @@ function SeloSaldo({ saldo }: { saldo: ConsultaSaldo }) {
       disabled={isFetching}
       title={
         data
-          ? `Saldo na API do Escavador · ${data.creditos.toLocaleString('pt-BR')} crédito(s). ` +
+          ? `Saldo na API do Escavador · ${contar(data.creditos, 'crédito', 'créditos')}. ` +
             'Cada consulta da diligência gasta daqui. Clique para atualizar.'
           : undefined
       }
@@ -339,7 +339,7 @@ export function SecaoBullai({
       const c = r.creditos
       toast.success(
         'Chave da BullAI salva e confirmada' +
-          (c ? (c.restantes == null ? '. Plano ilimitado.' : `. ${c.restantes} consulta(s) restante(s).`) : '.'),
+          (c ? (c.restantes == null ? '. Plano ilimitado.' : `. ${c.restantes === 1 ? '1 consulta restante' : `${c.restantes.toLocaleString('pt-BR')} consultas restantes`}.`) : '.'),
       )
       pendencia(false)
     } catch (err) {
@@ -381,7 +381,7 @@ export function SecaoBullai({
                 title="Cada portal pedido gasta uma consulta do plano."
               >
                 <Info className="h-[13px] w-[13px] shrink-0" aria-hidden />
-                {c.restantes == null ? 'Plano ilimitado' : `${c.restantes.toLocaleString('pt-BR')} consulta(s)`}
+                {c.restantes == null ? 'Plano ilimitado' : contar(c.restantes, 'consulta', 'consultas')}
               </span>
             )}
             {configurado && catalogo.error && (

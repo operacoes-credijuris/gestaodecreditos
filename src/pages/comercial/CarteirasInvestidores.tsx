@@ -81,6 +81,7 @@ import {
   hojeISO,
   normalizarNome,
   sentenceCase,
+  contar,
 } from '@/lib/format'
 import {
   CabecalhoDaAba,
@@ -479,7 +480,7 @@ function Individual() {
       } else {
         toast.success(
           r.gerados > 0
-            ? `${r.gerados} resumo(s) gerado(s).`
+            ? `${r.gerados === 1 ? '1 resumo gerado' : `${r.gerados} resumos gerados`}.`
             : 'Nenhum crédito teve novidade desde a última geração.',
         )
       }
@@ -853,13 +854,13 @@ function Individual() {
                     // afirmava que o investidor não tem nada a receber — o oposto
                     // da verdade.
                     calc.aReceber.incalculaveis > 0
-                    ? `sem projeção calculável em ${calc.aReceber.incalculaveis} crédito(s) — confira o índice e os Parâmetros de atualização`
+                    ? `sem projeção calculável em ${contar(calc.aReceber.incalculaveis, 'crédito', 'créditos')} — confira o índice e os Parâmetros de atualização`
                     : 'nada a receber nesta carteira'
                   : [
                       calc.aReceber.emAberto > 0 &&
-                        `${calc.aReceber.emAberto} crédito(s) em aberto`,
+                        `${contar(calc.aReceber.emAberto, 'crédito', 'créditos')} em aberto`,
                       calc.aReceber.complementares > 0 &&
-                        `${calc.aReceber.complementares} complementar(es) pendente(s)`,
+                        contar(calc.aReceber.complementares, 'complementar pendente', 'complementares pendentes'),
                     ]
                       .filter(Boolean)
                       .join(' + ')
@@ -1221,7 +1222,7 @@ function Consolidado() {
         noPeriodo > 0 ? (
           <EmptyState
             title="Sem investidor identificado"
-            description={`${noPeriodo} crédito(s) adquirido(s) no período, nenhum com cessionário cadastrado. Preencha o cessionário na aba Créditos para eles aparecerem aqui.`}
+            description={`${noPeriodo === 1 ? '1 crédito adquirido' : `${noPeriodo} créditos adquiridos`} no período, nenhum com cessionário cadastrado. Preencha o cessionário na aba Créditos para ${noPeriodo === 1 ? 'ele aparecer' : 'eles aparecerem'} aqui.`}
           />
         ) : (
           <EmptyState
@@ -1323,8 +1324,9 @@ function Consolidado() {
               fecha com a aba Créditos. */}
           {semCessionario > 0 && (
             <p className="border-t border-borda px-s5 py-s4 text-xs text-texto-3">
-              {semCessionario} crédito(s) do período estão fora desta tabela por não
-              ter cessionário cadastrado, e por isso também não entram no total.
+              {semCessionario === 1
+                ? '1 crédito do período está fora desta tabela por não ter cessionário cadastrado, e por isso também não entra no total.'
+                : `${semCessionario} créditos do período estão fora desta tabela por não ter cessionário cadastrado, e por isso também não entram no total.`}
             </p>
           )}
         </>

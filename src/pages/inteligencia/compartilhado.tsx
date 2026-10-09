@@ -343,10 +343,15 @@ export function CartaoNumero({
         // Cartão de indicador: 16px de respiro (§0.1).
         'flex h-full min-w-0 flex-col gap-s1 p-s4',
         menor && 'py-s3',
+        // NO CELULAR, O DA SEGUNDA FAIXA VIRA UMA LINHA (revisão UX, 09/10/2026):
+        // o rótulo à esquerda e o número à direita. Empilhados, os seis cartões
+        // da Visão geral ocupavam quase duas telas antes do primeiro gráfico; a
+        // taxa e o prazo cabem numa linha só.
+        menor && 'max-sm:flex-row max-sm:items-center max-sm:justify-between max-sm:gap-s3',
         to && 'transition group-hover:border-marca-viva group-hover:shadow-nivel-2',
       )}
     >
-      <div className="flex items-center gap-s2">
+      <div className="flex min-w-0 items-center gap-s2">
         {icone && (
           <span className={cn('grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle', placa)} aria-hidden>
             {icone}
@@ -358,7 +363,7 @@ export function CartaoNumero({
       {/* NA FONTE DO CORPO, como o `.kpi-v` da amostra, e não na de display:
           o espaço do "R$ 7.075.026,00" na Plus Jakarta tem 3px, e o valor se
           lia "R$7.075.026,00". */}
-      <div className={cn('font-bold tabular-nums tracking-tight text-texto', menor ? 'text-xl' : 'text-2xl')}>
+      <div className={cn('font-bold tabular-nums tracking-tight text-texto', menor ? 'shrink-0 text-xl' : 'text-2xl')}>
         {valor}
       </div>
       {sub && <div className="text-xs text-texto-3">{sub}</div>}
@@ -380,7 +385,9 @@ export function GradeCartoes({ children, seis = false }: { children: ReactNode; 
   return (
     <div
       className={cn(
-        'grid gap-s4',
+        // 12px entre os cartões no celular (16px no computador): na coluna
+        // única, 16px somados seis vezes eram quase um cartão de vão.
+        'grid gap-s3 sm:gap-s4',
         seis ? 'grid-cols-2 md:grid-cols-3 min-[1180px]:grid-cols-6' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
       )}
     >

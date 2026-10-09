@@ -17,6 +17,7 @@ import {
   brlAbreviado, cabeRotuloNaBarra, valorAbreviado, type FaixaDoHistograma, type PontoDaEvolucao,
 } from '@/lib/graficosDoQuadro'
 import { formatBRL } from '@/lib/format'
+import { cn } from '@/lib/cn'
 import { DicaDoGrafico, LegendaDoGrafico } from './compartilhado'
 
 /** O texto dos eixos, na cor de rótulo do tema que se vê. */
@@ -135,19 +136,34 @@ export function Histograma({ faixas }: { faixas: FaixaDoHistograma[] }) {
   const CHART = useCoresDoGrafico()
   const EIXO = eixo(CHART)
   const total = faixas.reduce((s, f) => s + f.operacoes, 0)
+  // NO CELULAR, AS FAIXAS DO EIXO INCLINADAS (revisão UX, 09/10/2026): sete
+  // rótulos de até 7 letras ("80–100%") em 300px se encostavam e viravam uma
+  // linha só ("0–20%20–40%40–60%…"). Inclinados, todos cabem e continuam lidos;
+  // aqui não dá para pular rótulo, porque cada barra É uma faixa.
+  const [largura, setLargura] = useState(0)
+  const inclinar = largura > 0 && (largura - 48) / Math.max(1, faixas.length) < 56
   return (
     <div
-      className="h-[220px] px-s5 pb-s5"
+      className={cn('px-s5 pb-s5', inclinar ? 'h-[244px]' : 'h-[220px]')}
       role="img"
       aria-label={
         `Distribuição da rentabilidade total de ${total} operações encerradas: ` +
         faixas.map((f) => `${f.rotulo}, ${f.operacoes}`).join('; ') + '.'
       }
     >
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" onResize={(w) => setLargura(w)}>
         <BarChart data={faixas} margin={{ top: 12, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid stroke={CHART.grid} vertical={false} />
-          <XAxis dataKey="rotulo" tick={EIXO} tickLine={false} axisLine={{ stroke: CHART.axis }} interval={0} />
+          <XAxis
+            dataKey="rotulo"
+            tick={EIXO}
+            tickLine={false}
+            axisLine={{ stroke: CHART.axis }}
+            interval={0}
+            angle={inclinar ? -40 : 0}
+            textAnchor={inclinar ? 'end' : 'middle'}
+            height={inclinar ? 48 : 30}
+          />
           {/* Contagem: só inteiros. Meia operação não existe. */}
           <YAxis tick={EIXO} tickLine={false} axisLine={false} allowDecimals={false} width={40} />
           <Tooltip
@@ -192,6 +208,12 @@ export function GraficoPrevisoes({
     largura - MARGEM_PREVISOES.left - MARGEM_PREVISOES.right - EIXO_Y_PREVISOES,
     dados.length,
   )
+  // OS MESES DO EIXO SÓ QUANDO CABEM (revisão UX, 09/10/2026): "out de 26" pede
+  // uns 56px. No celular, 20 meses em 300px viravam uma faixa de letras
+  // encavaladas ("outnovdez…"); ali o Recharts pula os que não cabem, mantendo o
+  // primeiro e o último. O mês de cada barra continua na dica do toque.
+  const porMes = (largura - MARGEM_PREVISOES.left - MARGEM_PREVISOES.right - EIXO_Y_PREVISOES) / Math.max(1, dados.length)
+  const todosOsMeses = largura === 0 || porMes >= 56
   return (
     <div className="px-s5 pb-s5">
       {/* A LEGENDA DIZ O QUE É A ALTURA (Q1): a barra conta operações, e o
@@ -218,7 +240,14 @@ export function GraficoPrevisoes({
         <ResponsiveContainer width="100%" height="100%" onResize={(w) => setLargura(w)}>
           <BarChart data={dados} margin={MARGEM_PREVISOES}>
             <CartesianGrid stroke={CHART.grid} vertical={false} />
-            <XAxis dataKey="mes" tick={EIXO} tickLine={false} axisLine={{ stroke: CHART.axis }} interval={0} />
+            <XAxis
+              dataKey="mes"
+              tick={EIXO}
+              tickLine={false}
+              axisLine={{ stroke: CHART.axis }}
+              interval={todosOsMeses ? 0 : 'preserveStartEnd'}
+              minTickGap={8}
+            />
             <YAxis tick={EIXO} tickLine={false} axisLine={false} allowDecimals={false} width={EIXO_Y_PREVISOES} />
             <Tooltip
               cursor={{ fill: CHART.grid, fillOpacity: 0.5 }}

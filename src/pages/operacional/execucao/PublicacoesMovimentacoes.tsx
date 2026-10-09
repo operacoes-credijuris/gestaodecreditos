@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Clock, ExternalLink, Plus, ChevronDown } from 'lucide-react'
-import { useIsMutating, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutationState, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
@@ -403,6 +403,17 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
   useSincronizaAoMontar(sync.mutate, SYNC_DJEN)
   // A da montagem anterior (outra aba) ainda correndo também conta.
   const sincronizando = useIsMutating({ mutationKey: [...SYNC_DJEN] }) > 0
+  // A ÚLTIMA RESPOSTA DO DJEN, DE QUEM QUER QUE TENHA PEDIDO (revisão UX,
+  // 09/10/2026). O `sync.data` é só da sincronização disparada POR ESTA
+  // montagem: quando uma de outra montagem ainda corria (voltar à aba no meio de
+  // uma), esta não dispara outra — e a faixa do DJEN fora do ar não aparecia
+  // até a próxima visita. O cache das mutações guarda a resposta de todas.
+  const respostasDoDjen = useMutationState({
+    filters: { mutationKey: [...SYNC_DJEN], status: 'success' },
+    select: (m) => m.state.data as RespostaSync | undefined,
+  })
+  const diagnosticoDoDjen = (respostasDoDjen[respostasDoDjen.length - 1] ?? sync.data)?.diagnostico
+  const djenFora = djenForaDoAr(diagnosticoDoDjen)
 
   // Marca/desmarca "tratada" (move entre Novas e Tratadas).
   const toggleTratada = useMutation({
@@ -536,28 +547,16 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
 
   return (
     <div className="space-y-s4">
-      {/* A contagem à esquerda e o indicador da sincronização no canto (a
-          amostra): o mesmo lugar em toda tela que sincroniza. */}
-      <LinhaDeResumo>
-        <span>
-          <strong className="text-texto">{filtradas.length}</strong>{' '}
-          {filtradas.length === 1 ? 'publicação' : 'publicações'}
-        </span>
-        <SyncStatus
-          syncing={sincronizando}
-          updatedAt={lista.dataUpdatedAt}
-          label="atualizando do DJEN…"
-        />
-      </LinhaDeResumo>
-
       {/* O DJEN FORA DO AR, À VISTA E FIXO (09/10/2026): enquanto a última busca
           disser que ele está fora, a faixa fica — com a última captura e o que
-          acontece quando ele voltar. */}
-      {djenForaDoAr(sync.data?.diagnostico) && (
+          acontece quando ele voltar. LOGO ABAIXO DA BUSCA (revisão UX,
+          09/10/2026): abaixo da contagem ela disputava com o "✓ atualizado às…",
+          que dizia o contrário dela. */}
+      {djenFora && (
         <Aviso tom="perigo" papel="alert">
           <p className="font-semibold">
             O DJEN (Comunica PJe, do CNJ) está fora do ar
-            {sync.data?.diagnostico?.djen_em_manutencao ? ', em manutenção' : ''} — as intimações novas não estão
+            {diagnosticoDoDjen?.djen_em_manutencao ? ', em manutenção' : ''} — as intimações novas não estão
             chegando.
           </p>
           <p className="text-texto-2">
@@ -570,6 +569,25 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
           </Button>
         </Aviso>
       )}
+
+      {/* A contagem à esquerda e o indicador da sincronização no canto (a
+          amostra): o mesmo lugar em toda tela que sincroniza. Com o DJEN fora,
+          o "✓ atualizado às…" sai (ele só diz que a LISTA foi lida, e o ✓ verde
+          ao lado da faixa vermelha se lia como "está tudo em dia"); o giro do
+          "Tentar de novo" continua. */}
+      <LinhaDeResumo>
+        <span>
+          <strong className="text-texto">{filtradas.length}</strong>{' '}
+          {filtradas.length === 1 ? 'publicação' : 'publicações'}
+        </span>
+        {(!djenFora || sincronizando) && (
+          <SyncStatus
+            syncing={sincronizando}
+            updatedAt={lista.dataUpdatedAt}
+            label="atualizando do DJEN…"
+          />
+        )}
+      </LinhaDeResumo>
 
       {truncou && (
         <Aviso tom="aviso">

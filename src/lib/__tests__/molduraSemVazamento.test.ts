@@ -45,12 +45,14 @@ describe('moldura sem vazamento: outras caixas que rolam', () => {
   })
 
   it('a régua de abas (rola de lado) é posicionada', () => {
-    expect(ler('components/ui/Tabs.tsx')).toMatch(/className="relative flex min-w-0 gap-1 overflow-x-auto/)
+    // Desde a revisão UX de 09/10/2026 a classe vai num cn(...), com a pista de rolagem.
+    expect(ler('components/ui/Tabs.tsx')).toMatch(/className=(?:"|\{cn\(')relative flex min-w-0 gap-1 overflow-x-auto/)
   })
 
   it('a fileira de seções das Configurações é posicionada e usa a barra fina', () => {
     const cfg = ler('pages/configuracoes/Configuracoes.tsx')
-    const nav = /className="([^"]*overflow-x-auto[^"]*)"/.exec(cfg)?.[1] ?? ''
+    // A classe pode vir direto ou dentro de um cn(...) (pista de rolagem, revisão UX de 09/10/2026).
+    const nav = /(?:className="|cn\(\s*')([^"']*overflow-x-auto[^"']*)["']/.exec(cfg)?.[1] ?? ''
     expect(nav).toMatch(/(^| )relative( |$)/)
     // A barra NATIVA do Windows (com setinhas) aparecia embaixo das seções.
     expect(nav).toMatch(/(^| )scrollbar-thin( |$)/)

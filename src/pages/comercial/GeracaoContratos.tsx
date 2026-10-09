@@ -395,7 +395,7 @@ function GerarPanel() {
       }
 
       // 2. Chama a geração — pode levar de 30 a 90 segundos (leitura da análise + IA).
-      setProgresso('Gerando contrato(s)… isso pode levar até 1 minuto.')
+      setProgresso('Gerando os contratos… isso pode levar até 1 minuto.')
       const data = await invokeFunction<ResultadoGeracao & { success: boolean; error?: string }>(
         'gerar-contrato',
         {
@@ -519,7 +519,9 @@ function GerarPanel() {
               vez de espremer o texto numa coluna de uma palavra. */}
           <div className="min-w-[200px] flex-1 space-y-s1">
             <p className="font-semibold text-texto">
-              {resultado.tipos_gerados.length} contrato(s) gerado(s)
+              {resultado.tipos_gerados.length === 1
+                ? '1 contrato gerado'
+                : `${resultado.tipos_gerados.length} contratos gerados`}
             </p>
             {/* OS NOMES EM PORTUGUÊS: a função devolve as chaves
                 ("cessao_credito"), e só a tela traduz. */}
@@ -746,7 +748,7 @@ function GerarPanel() {
             <LinhaResumo rotulo="Categoria" valor={categoria} falta="" />
             <LinhaResumo rotulo="Originador" valor={originador} falta="a escolher" />
             <LinhaResumo rotulo="Processo" valor={numeroProcesso.trim()} falta="a informar" />
-            <LinhaResumo rotulo="Documentos" valor={`${totalArquivos} arquivo(s)`} falta="" />
+            <LinhaResumo rotulo="Documentos" valor={totalArquivos === 0 ? '' : totalArquivos === 1 ? '1 arquivo' : `${totalArquivos} arquivos`} falta="nenhum" />
             <LinhaResumo
               rotulo="Peças"
               valor={

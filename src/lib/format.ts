@@ -500,6 +500,15 @@ export function sentenceCase(value: string | null | undefined): string {
   return s.charAt(0).toLocaleUpperCase('pt-BR') + s.slice(1)
 }
 
+/**
+ * A CONTAGEM COM O PLURAL CERTO (revisão UX, 09/10/2026): "1 arquivo" /
+ * "3 arquivos", no lugar do "3 arquivo(s)" que a tela mostrava. O número sai no
+ * formato brasileiro ("1.204 créditos").
+ */
+export function contar(n: number, um: string, muitos: string): string {
+  return `${n.toLocaleString('pt-BR')} ${n === 1 ? um : muitos}`
+}
+
 // Cálculo de datas: fonte única no núcleo compartilhado com as Edge Functions.
 // Reexportado aqui para que nenhum import existente de '@/lib/format' quebre.
 export { diasEntre, mesesEntre } from '../../supabase/functions/_shared/nucleo/datas.ts'
