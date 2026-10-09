@@ -300,7 +300,10 @@ export default function VisaoGeral() {
             />
           }
         >
-          <Metricas className="pb-s2">
+          {/* NA LARGURA DE UM PAINEL INTEIRO, A LISTA NÃO ESTICA (revisão UX, 09/10/2026):
+              o rótulo à esquerda e o número a mais de 1000px dele, no outro canto,
+              não se liam como par. 640px, como os painéis de meia largura. */}
+          <Metricas className="max-w-[640px] pb-s2">
             <LinhaMetrica rotulo="Desvio mediano" valor={dias(aderencia.desvioDias.mediana)} destaque />
             <LinhaMetrica rotulo="Desvio médio" valor={dias(aderencia.desvioDias.media)} explicacao={EXPLICA.media} />
             <LinhaMetrica rotulo="Pagas até a previsão" valor={aderencia.pagasAteAPrevisao} />

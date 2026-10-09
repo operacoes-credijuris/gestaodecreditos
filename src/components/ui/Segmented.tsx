@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/cn'
 import { rolarParaAVista } from '@/lib/rolarParaAVista'
+import { usePistaLateral } from '@/lib/rolagemLateral'
 
 export interface SegmentedItem {
   key: string
@@ -45,6 +46,8 @@ export function Segmented({
   // A OPÇÃO ESCOLHIDA SEMPRE À VISTA quando a fila rola de lado (celular): um
   // filtro lembrado ("Todos", à direita) não pode ficar escondido.
   const filaRef = useRef<HTMLDivElement>(null)
+  // A borda que esconde opção esmaece (lib/rolagemLateral.ts).
+  const pista = usePistaLateral(filaRef)
   useEffect(() => {
     const fila = filaRef.current
     rolarParaAVista(fila, fila?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? null)
@@ -54,6 +57,7 @@ export function Segmented({
       ref={filaRef}
       role="group"
       aria-label={ariaLabel}
+      onScroll={pista.aoRolar}
       className={cn(
         // O `.seg` da amostra: trilho na superfície 3 com contorno, e a opção
         // escolhida "levantada" em branco com o texto no azul da marca.
@@ -62,6 +66,7 @@ export function Segmented({
         // duas linhas dentro do trilho cinza, que virava um bloco. A opção cortada
         // na borda já mostra que há mais para o lado.
         'relative inline-flex max-w-full items-center gap-s0.5 overflow-x-auto rounded-campo border border-borda bg-superficie-3 p-[3px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        pista.classe,
         className,
       )}
     >

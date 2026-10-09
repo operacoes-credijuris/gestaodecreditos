@@ -13,7 +13,7 @@ import { Select, Input } from '@/components/ui/Field'
 import { CaixaSuave, TituloDaSecao, TituloDoGrupo } from '@/components/operacional/Pecas'
 import { EmptyState, ErrorState, Loading, Table, THead, TH, TBody, TR, TD } from '@/components/ui/Table'
 import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } from '@/lib/labels'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { contar, formatCNJ, formatDate } from '@/lib/format'
 import type { Processo } from '@/lib/types'
 import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
 import { aplicarSituacao, dataIncompleta, type PedidoDeSituacao } from '@/lib/situacaoDaFase'
@@ -660,7 +660,10 @@ function CartaoDaFase({
         {aviso && <CheckCircle2 className="mt-px h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden="true" />}
         {rotulo}
       </span>
-      <span className="font-display text-2xl font-bold tabular-nums leading-tight text-texto">{n}</span>
+      {/* O NÚMERO NO PÉ DO CARTÃO (`mt-auto`, revisão UX, 09/10/2026): numa
+          fileira com rótulos de uma, duas e três linhas, os números ficavam em
+          alturas diferentes e a comparação se fazia em zigue-zague. */}
+      <span className="font-display mt-auto text-2xl font-bold tabular-nums leading-tight text-texto">{n}</span>
       <span className="text-xs text-texto-3">{n === 1 ? 'crédito' : 'créditos'}</span>
     </button>
   )
@@ -782,7 +785,9 @@ export function FaseProcessual({
       // `falhas`. Sucesso só quando não houve nenhuma.
       if (r?.falhas) {
         toast.error(
-          `${r.falhas} crédito(s) não puderam ser classificados; os demais foram atualizados.`,
+          r.falhas === 1
+            ? '1 crédito não pôde ser classificado; os demais foram atualizados.'
+            : `${r.falhas} créditos não puderam ser classificados; os demais foram atualizados.`,
         )
       } else {
         toast.success('Classificação atualizada.')
@@ -818,7 +823,8 @@ export function FaseProcessual({
               <Input
                 className="w-full"
                 aria-label="Localizar processo pelo número"
-                placeholder="Localizar processo pelo número… (Enter)"
+                placeholder="Localizar processo pelo número"
+                enterKeyHint="search"
                 value={buscaProcesso}
                 onChange={(e) => setBuscaProcesso(e.target.value)}
                 onKeyDown={(e) => {
@@ -844,7 +850,16 @@ export function FaseProcessual({
         <ErrorState message={(fase.error as Error)?.message} onRetry={() => fase.refetch()} />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-s3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          {/* AS FASES NUMA CONTA QUE FECHA (revisão UX, 09/10/2026): seis fases
+              + Concluso eram 6 + 1 no computador, e o Concluso ficava sozinho
+              numa segunda fileira. Ativos (7 cartões): 7 numa linha; os
+              complementares (10): 5 + 5. */}
+          <div
+            className={cn(
+              'grid grid-cols-2 gap-s3 sm:grid-cols-3 lg:grid-cols-4',
+              ordem.length + 1 <= 7 ? 'xl:grid-cols-7' : 'xl:grid-cols-5',
+            )}
+          >
             {ordem.map((codigo) => (
               <CartaoDaFase
                 key={codigo}
@@ -866,10 +881,24 @@ export function FaseProcessual({
             />
           </div>
 
+          {/* A AÇÃO AO LADO DO AVISO (revisão UX, 09/10/2026): a frase mandava
+              clicar em "Atualizar fases (ao lado da busca)", mas lá só há um
+              ícone, sem esse nome. Agora o próprio aviso traz o botão — o mesmo
+              pedido do ícone. E o plural certo, sem "crédito(s)". */}
           {contagem.semClassificacao > 0 && (
-            <p className="text-xs text-texto-3">
-              {contagem.semClassificacao} crédito(s) ainda sem classificação — clique em "Atualizar
-              fases" (ao lado da busca) para gerar.
+            <p className="flex flex-wrap items-center gap-x-s2 text-xs text-texto-3">
+              <span>
+                {contar(contagem.semClassificacao, 'crédito', 'créditos')} ainda sem fase.
+              </span>
+              <button
+                type="button"
+                onClick={() => gerar.mutate({})}
+                disabled={gerar.isPending}
+                className="inline-flex items-center gap-s1 font-semibold text-marca-texto underline-offset-2 hover:underline disabled:cursor-wait disabled:opacity-60 [@media(pointer:coarse)]:min-h-[32px]"
+              >
+                <RefreshCw className={gerar.isPending ? 'h-[14px] w-[14px] animate-spin' : 'h-[14px] w-[14px]'} aria-hidden />
+                {gerar.isPending ? 'Atualizando as fases…' : 'Atualizar fases'}
+              </button>
             </p>
           )}
 
@@ -901,9 +930,13 @@ export function FaseProcessual({
               ) : listaFiltrada.length === 0 ? (
                 <EmptyState title="Nada aqui" description="Nenhum crédito nesta seleção." />
               ) : (
+                // NO CELULAR, CADA LINHA EMPILHA (revisão UX, 09/10/2026): o
+                // processo em cima, e a Situação e a Data lado a lado embaixo. Em
+                // três colunas, a tabela rolava de lado e a Situação — o que se
+                // vem mudar aqui — ficava cortada na borda da tela.
                 <Table>
                   <THead>
-                    <tr>
+                    <tr className="max-sm:hidden">
                       <TH>Processo</TH>
                       <TH className="md:w-96">Situação</TH>
                       <TH>Data da situação</TH>
@@ -916,8 +949,12 @@ export function FaseProcessual({
                       const faseDaLinha = r?.fase_codigo ?? ''
                       const opcoes = situacoesPorFase.get(faseDaLinha) ?? []
                       return (
-                        <TR key={processo.id} onClick={() => onAbrirDetalhe(processo)}>
-                          <TD>
+                        <TR
+                          key={processo.id}
+                          onClick={() => onAbrirDetalhe(processo)}
+                          className="max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-s2 max-sm:pb-s3"
+                        >
+                          <TD className="max-sm:col-span-2 max-sm:pb-s2">
                             <p className="flex items-center gap-s1.5 whitespace-nowrap font-semibold tabular-nums text-texto">
                               {formatCNJ(processo.numero_cnj)}
                               {r?.conclusao_pendente && (
@@ -931,7 +968,7 @@ export function FaseProcessual({
                             </p>
                             <p className="text-xs text-texto-2">{processo.entidade_devedora || '—'}</p>
                           </TD>
-                          <TD className="min-w-[220px] md:w-96">
+                          <TD className="min-w-[220px] md:w-96 max-sm:min-w-0 max-sm:py-0 max-sm:pr-0">
                             <SituacaoSelect
                               nomeFase={getLabel(FASE_PROCESSUAL, faseDaLinha).label}
                               situacaoIdAtual={r?.situacao_id ?? null}
@@ -951,7 +988,7 @@ export function FaseProcessual({
                               onExcluir={(id) => excluirSituacao.mutate(id)}
                             />
                           </TD>
-                          <TD className="w-40">
+                          <TD className="w-40 max-sm:w-[150px] max-sm:py-0 max-sm:pl-0">
                             <DataDaSituacao
                               valor={r?.situacao_data ?? null}
                               onGravar={(data) =>

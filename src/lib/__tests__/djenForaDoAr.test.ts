@@ -18,7 +18,12 @@ describe('DJEN fora do ar', () => {
   it('a tela mostra a faixa fixa (manutenção, ou todas as OABs falharam) com a última captura', () => {
     const t = ler('src/pages/operacional/execucao/PublicacoesMovimentacoes.tsx')
     expect(t).toContain('return !!d.djen_em_manutencao || (oabs > 0 && d.buscas_falharam >= oabs)')
-    expect(t).toContain('{djenForaDoAr(sync.data?.diagnostico) && (')
+    // A faixa lê a última resposta do DJEN no cache das mutações, e não só a desta
+    // montagem (revisão UX, 09/10/2026): com uma sincronização de outra montagem
+    // em curso, esta não dispara outra, e o sync.data dela fica vazio.
+    expect(t).toContain("filters: { mutationKey: [...SYNC_DJEN], status: 'success' },")
+    expect(t).toContain('const djenFora = djenForaDoAr(diagnosticoDoDjen)')
+    expect(t).toContain('{djenFora && (')
     expect(t).toContain('Última captura:')
     expect(t).toContain('if (djenForaDoAr(d)) return')
   })

@@ -333,9 +333,14 @@ export function SecaoDaFicha({
 /** O cartão de valor da ficha do crédito (capital, valor de face…). */
 export function CartaoDeValor({ rotulo, valor }: { rotulo: string; valor: ReactNode }) {
   return (
-    <div className="rounded-cartao border border-borda bg-superficie px-s4 py-s3 shadow-nivel-1 dark:shadow-none">
-      <p className="text-corpo font-medium text-texto-2">{rotulo}</p>
-      <p className="font-display mt-s0.5 break-words text-xl font-bold tabular-nums tracking-tight text-texto">
+    // UM BLOCO EMBUTIDO, E NÃO UM CARTÃO DENTRO DA GAVETA (revisão UX,
+    // 09/10/2026; §0.4 "cartão dentro de cartão: não"): o fundo do papel, sem
+    // borda nem sombra. E DOIS POR LINHA TAMBÉM NO CELULAR (a grade é da ficha),
+    // com o número um degrau menor lá: empilhados, os valores empurravam as
+    // Partes para a segunda tela.
+    <div className="min-w-0 rounded-campo bg-papel px-s3 py-s3 sm:px-s4">
+      <p className="text-sm font-medium text-texto-2 sm:text-corpo">{rotulo}</p>
+      <p className="font-display mt-s0.5 break-words text-lg font-bold tabular-nums tracking-tight text-texto sm:text-xl">
         {valor}
       </p>
     </div>

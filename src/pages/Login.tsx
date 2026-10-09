@@ -56,7 +56,8 @@ export default function Login() {
             "créditos judiciais" ficavam em 4:1 sobre o papel escuro; com o
             filtro passam de 6:1, sem trocar a arte nem pôr placa branca. */}
         <img src={logo} alt="Credijuris — créditos judiciais" className="block h-[40px] w-auto dark:brightness-125" />
-        <p className="text-corpo text-texto-2">Sistema de Gestão de Créditos</p>
+        {/* Em sentence case, como no menu ("Gestão de créditos"), revisão UX de 09/10/2026. */}
+        <p className="text-corpo text-texto-2">Sistema de gestão de créditos</p>
       </div>
 
       {/* O RAIO DE JANELA (16px, §0.3): o `rounded-[18px]` de antes era um raio

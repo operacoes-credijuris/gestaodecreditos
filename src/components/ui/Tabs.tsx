@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 import { rolarParaAVista } from '@/lib/rolarParaAVista'
+import { usePistaLateral } from '@/lib/rolagemLateral'
 
 export interface TabItem {
   key: string
@@ -75,6 +76,8 @@ export function Tabs({
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const filaRef = useRef<HTMLDivElement>(null)
+  // A borda que esconde aba esmaece (lib/rolagemLateral.ts).
+  const pista = usePistaLateral(filaRef)
   // A ABA ABERTA SEMPRE À VISTA quando a régua rola de lado (celular).
   const indiceAberto = items.findIndex((it) => it.key === value)
   useEffect(() => {
@@ -116,7 +119,8 @@ export function Tabs({
         // `relative`: o que for `absolute` dentro (um `sr-only`) se mede por esta
         // régua que rola, e não pela página — senão a aba fora da vista alarga a
         // tela no celular.
-        className="relative flex min-w-0 gap-1 overflow-x-auto scrollbar-thin"
+        onScroll={pista.aoRolar}
+        className={cn('relative flex min-w-0 gap-1 overflow-x-auto scrollbar-thin', pista.classe)}
       >
         {items.map((item, index) => {
           const active = item.key === value

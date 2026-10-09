@@ -101,7 +101,11 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         >
           {partes.map((parte, i) =>
             i === partes.length - 1 ? (
-              <span key={i} aria-current="page" className="truncate font-semibold text-texto-2">
+              // O LUGAR ATUAL NÃO SE CORTA (revisão UX, 09/10/2026): a 1440px,
+              // "Operacional › Quadro econômico › Performan…" cortava justamente o
+              // que diz onde se está. Ele fica inteiro (`shrink-0`, até a largura
+              // do caminho), e os trechos de antes é que cedem.
+              <span key={i} aria-current="page" className="max-w-full shrink-0 truncate font-semibold text-texto-2">
                 {curto ? (
                   <>
                     <span className="sm:hidden">{curto}</span>
@@ -112,9 +116,24 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                 )}
               </span>
             ) : (
+              // COM TRÊS TRECHOS, O SETOR SÓ NA TELA LARGA: "Operacional" já está
+              // no menu, ao lado, e "Quadro econômico › Performance" cabe inteiro.
               <Fragment key={i}>
-                <span className="hidden shrink-0 whitespace-nowrap sm:inline">{parte}</span>
-                <ChevronRight className="hidden h-[14px] w-[14px] shrink-0 sm:inline" aria-hidden />
+                <span
+                  className={cn(
+                    'hidden min-w-0 truncate',
+                    i === 0 && partes.length > 2 ? 'min-[1600px]:inline' : 'sm:inline',
+                  )}
+                >
+                  {parte}
+                </span>
+                <ChevronRight
+                  className={cn(
+                    'hidden h-[14px] w-[14px] shrink-0',
+                    i === 0 && partes.length > 2 ? 'min-[1600px]:inline' : 'sm:inline',
+                  )}
+                  aria-hidden
+                />
               </Fragment>
             ),
           )}
@@ -235,7 +254,9 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                 <div
                   role="group"
                   aria-labelledby="rotulo-do-tema"
-                  className="grid grid-cols-3 gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-s1"
+                  // CADA ESCOLHA DO TAMANHO DO NOME (revisão UX, 09/10/2026): em três
+                  // terços iguais, "Do sistema" encostava na borda do trilho.
+                  className="flex gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-s1"
                 >
                   {OPCOES_DE_TEMA.map((o) => (
                     <button
@@ -244,7 +265,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                       aria-pressed={preferencia === o.chave}
                       onClick={() => escolher(o.chave)}
                       className={cn(
-                        'h-[30px] whitespace-nowrap rounded-controle px-s1 text-sm font-semibold transition-colors [@media(pointer:coarse)]:h-[36px]',
+                        'h-[30px] flex-auto whitespace-nowrap rounded-controle px-s2 text-sm font-semibold transition-colors [@media(pointer:coarse)]:h-[36px]',
                         preferencia === o.chave
                           ? 'bg-superficie text-marca-texto shadow-nivel-1'
                           : 'text-texto-2 hover:text-texto',

@@ -44,6 +44,17 @@ interface SkillAssistente {
   criado_em: string
 }
 
+/** O estado da skill: o mesmo selo na coluna (computador) e sob o nome (celular). */
+function SeloDaSkill({ ativo }: { ativo: boolean }) {
+  return ativo ? (
+    <Selo tom="ok" icone={IconeOk}>
+      Ativa
+    </Selo>
+  ) : (
+    <Selo tom="neutro">Desativada</Selo>
+  )
+}
+
 /**
  * Pacotes de Agent Skills da Anthropic (feitos no Claude) que o assistente
  * pode usar. O pacote em si fica hospedado na Anthropic — aqui só se decide
@@ -189,7 +200,7 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                 <THead>
                   <tr>
                     <TH>Nome</TH>
-                    <TH>Status</TH>
+                    <TH className="max-sm:hidden">Status</TH>
                     <TH className="w-[1%] text-right">
                       <span className="sr-only">Ações</span>
                     </TH>
@@ -198,18 +209,18 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                 <TBody>
                   {data.map((s) => (
                     <TR key={s.id}>
+                      {/* NO CELULAR, O ESTADO DESCE PARA BAIXO DO NOME (revisão UX,
+                          09/10/2026): com três colunas em 343px, o nome da skill
+                          ficava numa faixa de 90px, uma palavra por linha. */}
                       <TD>
                         <p className="font-semibold text-texto">{s.nome}</p>
                         {s.descricao && <p className="text-xs text-texto-3">{s.descricao}</p>}
+                        <div className="mt-s1.5 sm:hidden">
+                          <SeloDaSkill ativo={s.ativo} />
+                        </div>
                       </TD>
-                      <TD>
-                        {s.ativo ? (
-                          <Selo tom="ok" icone={IconeOk}>
-                            Ativa
-                          </Selo>
-                        ) : (
-                          <Selo tom="neutro">Desativada</Selo>
-                        )}
+                      <TD className="max-sm:hidden">
+                        <SeloDaSkill ativo={s.ativo} />
                       </TD>
                       {/* O LIGA-DESLIGA COMO EM USUÁRIOS (revisão visual 2): o selo só
                           diz o estado, e o botão diz o que o clique faz. Antes o

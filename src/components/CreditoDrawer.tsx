@@ -109,7 +109,7 @@ export function CreditoDrawer({
           <div className="space-y-s5">
             <div className="space-y-s3">
               <BotaoPastaDrive processo={processo} />
-              <div className="grid gap-s3 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-s2 sm:gap-s3">
                 <CartaoDeValor rotulo="Capital investido" valor={valor(processo.capital_investido)} />
                 <CartaoDeValor rotulo="Valor de face" valor={valor(processo.valor_face)} />
                 {/* Mesma regra do formulário: já recebido e complementar só

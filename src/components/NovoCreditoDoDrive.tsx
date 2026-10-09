@@ -21,7 +21,7 @@ import {
   listarPastasDeCredito,
   type PastaCredito,
 } from '@/lib/creditoDoDrive'
-import { formatCNJ } from '@/lib/format'
+import { contar, formatCNJ } from '@/lib/format'
 import { invokeFunction } from '@/lib/functions'
 import type { Processo } from '@/lib/types'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
@@ -242,7 +242,7 @@ export function NovoCreditoDoDrive({
         setExtracao({ ignorados: leitura.ignorados, observacoes: [], lidos: [] })
         return
       }
-      setPasso(`Lendo ${leitura.documentos.length} documento(s) com a IA…`)
+      setPasso(`Lendo ${contar(leitura.documentos.length, 'documento', 'documentos')} com a IA…`)
       const r = await invokeFunction<RespostaExtracao>('extrair-credito', {
         documentos: leitura.documentos,
         contexto,
@@ -350,7 +350,7 @@ export function NovoCreditoDoDrive({
       {!!extracao?.lidos?.length && (
         <div className="rounded-campo bg-superficie-2 p-s4 text-corpo text-texto-2">
           <p className="font-display mb-s1 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
-            Lido pela IA · {extracao.lidos.length} arquivo(s)
+            Lido pela IA · {contar(extracao.lidos.length, 'arquivo', 'arquivos')}
           </p>
           <ul className="list-disc space-y-s0.5 pl-s5">
             {extracao.lidos.map((nome) => {

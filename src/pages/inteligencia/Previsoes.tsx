@@ -225,9 +225,12 @@ export default function Previsoes() {
         >
           {forecast.blocos.length > 0 && (
           <div className="border-t border-borda">
+            {/* NO CELULAR, O "POR QUE" DESCE PARA A LINHA DE BAIXO (revisão UX,
+                09/10/2026): numa coluna estreita à direita, a frase quebrava
+                palavra por palavra e cada linha da tabela passava de 180px. */}
             <Table className={TABELA_NO_PAINEL}>
               <THead>
-                <tr>
+                <tr className="max-sm:hidden">
                   <TH>Bloco</TH>
                   <TH className="text-right">Operações</TH>
                   <TH className="text-right">Valor</TH>
@@ -236,11 +239,14 @@ export default function Previsoes() {
               </THead>
               <TBody>
                 {forecast.blocos.map((b) => (
-                  <TR key={b.rotulo}>
-                    <TD>
+                  <TR
+                    key={b.rotulo}
+                    className="max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)] max-sm:items-center"
+                  >
+                    <TD className="max-sm:col-span-2 max-sm:pb-s1">
                       <SeloDoBloco rotulo={b.rotulo} />
                     </TD>
-                    <TD className="text-right">
+                    <TD className="text-right max-sm:py-0 max-sm:pl-s5 max-sm:text-left">
                       <BotaoVer
                         aberto={aberto === b.rotulo}
                         onClick={() => setAberto(aberto === b.rotulo ? null : b.rotulo)}
@@ -248,8 +254,8 @@ export default function Previsoes() {
                         {b.operacoes}
                       </BotaoVer>
                     </TD>
-                    <TD className="whitespace-nowrap text-right tabular-nums">{brl(b.valor)}</TD>
-                    <TD className="text-texto-3">{b.motivo}</TD>
+                    <TD className="whitespace-nowrap text-right tabular-nums max-sm:py-0 max-sm:pr-s5">{brl(b.valor)}</TD>
+                    <TD className="text-texto-3 max-sm:col-span-2 max-sm:pl-s5 max-sm:pt-s1">{b.motivo}</TD>
                   </TR>
                 ))}
               </TBody>
@@ -308,7 +314,10 @@ export default function Previsoes() {
           titulo="Estimativa ajustada pelo histórico"
           apoio="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
         >
-          <Metricas className="pb-s2">
+          {/* NA LARGURA DE UM PAINEL INTEIRO, A LISTA NÃO ESTICA (revisão UX, 09/10/2026):
+              o rótulo à esquerda e o número a mais de 1000px dele, no outro canto,
+              não se liam como par. 640px, como os painéis de meia largura. */}
+          <Metricas className="max-w-[640px] pb-s2">
             <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
             <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
           </Metricas>
@@ -329,7 +338,10 @@ export default function Previsoes() {
             />
           }
         >
-          <Metricas>
+          {/* NA LARGURA DE UM PAINEL INTEIRO, A LISTA NÃO ESTICA (revisão UX, 09/10/2026):
+              o rótulo à esquerda e o número a mais de 1000px dele, no outro canto,
+              não se liam como par. 640px, como os painéis de meia largura. */}
+          <Metricas className="max-w-[640px]">
             <LinhaMetrica rotulo="Desvio mediano" valor={dias(aderencia.desvioDias.mediana)} explicacao={EXPLICA.mediana} destaque />
             <LinhaMetrica rotulo="Desvio médio" valor={dias(aderencia.desvioDias.media)} explicacao={EXPLICA.media} />
             <LinhaMetrica rotulo="Mais adiantado" valor={dias(aderencia.desvioDias.minimo)} />

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { usePreferencia, umaDas } from '@/lib/preferencias'
 import { Pencil } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { usePistaLateral } from '@/lib/rolagemLateral'
 import { formatBRL } from '@/lib/format'
 import type { ConfigKommo } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -241,6 +242,8 @@ function MenuDasSecoes({
   // "ADVBOX · Kommo · Anthropic" — a aba aberta ficava fora da tela. Só mexe na
   // rolagem DA FILEIRA (nunca na da página), e só quando ela rola.
   const fileira = useRef<HTMLElement>(null)
+  // No celular, a borda que esconde seção esmaece (lib/rolagemLateral.ts).
+  const pista = usePistaLateral(fileira)
   useEffect(() => {
     const nav = fileira.current
     if (!nav || nav.scrollWidth <= nav.clientWidth) return
@@ -277,6 +280,7 @@ function MenuDasSecoes({
       ref={fileira}
       aria-label="Seções das configurações"
       onKeyDown={andarComSetas}
+      onScroll={pista.aoRolar}
       // NO CELULAR, A FILEIRA QUE ROLA DE LADO:
       // - `scrollbar-thin`, a barra fina da casa. Sem ela aparecia a barra NATIVA
       //   do Windows, com as setinhas, embaixo das seções — no escuro, um
@@ -285,7 +289,10 @@ function MenuDasSecoes({
       //   configurado)" de cada item) se medirem por esta fileira, e não pelo
       //   <main>. O do último item, fora da vista, alargava a página e a tela
       //   inteira rolava de lado.
-      className="relative flex gap-s0.5 overflow-x-auto p-s1 scrollbar-thin min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0"
+      className={cn(
+        'relative flex gap-s0.5 overflow-x-auto p-s1 scrollbar-thin min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0',
+        pista.classe,
+      )}
     >
       {GRUPOS_DO_MENU.map((g, gi) => (
         <div key={g.titulo} className="contents">
