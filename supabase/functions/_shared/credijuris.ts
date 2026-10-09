@@ -40,6 +40,7 @@ export interface DriveFile {
 // depende dela — as listas suspensas da planilha, entre outros — fica alcançável
 // pelos testes. Este arquivo importa o SDK do Supabase e barrava todos eles.
 import { normalizarParaComparar as normalizar } from './nucleo/texto.ts'
+import { pastaQueFica } from './pastaDuplicada.ts'
 export { normalizar }
 
 export function escapeDriveQuery(s: string): string {
@@ -158,10 +159,43 @@ export async function driveCreateFolder(token: string, name: string, parentId: s
   return data.id
 }
 
+/** As pastas de nome `name` dentro de `parentId`, com a data de criação. */
+async function pastasDeMesmoNome(token: string, name: string, parentId: string): Promise<{ id: string; createdTime?: string }[]> {
+  const params = new URLSearchParams({
+    q: `name = '${escapeDriveQuery(name)}' and '${parentId}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
+    fields: 'files(id,createdTime)',
+    includeItemsFromAllDrives: 'true',
+    supportsAllDrives: 'true',
+    pageSize: '100',
+  })
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, { headers: { Authorization: 'Bearer ' + token } })
+  if (!res.ok) throw new Error(`Drive list (${res.status}): ${(await res.text()).slice(0, 200)}`)
+  return ((await res.json()).files ?? []) as { id: string; createdTime?: string }[]
+}
+
+/**
+ * Acha ou cria a pasta — e, se dois pedidos simultâneos criaram duas, todos
+ * ficam com a MESMA (a mais antiga), e a sobra vai para a lixeira. Ver
+ * _shared/pastaDuplicada.ts (auditoria de bugs, 09/10/2026).
+ */
 export async function driveFindOrCreateFolder(token: string, name: string, parentId: string): Promise<string> {
-  const existing = await driveFindChild(token, name, parentId, FOLDER_MIME)
-  if (existing) return existing.id
-  return driveCreateFolder(token, name, parentId)
+  const existentes = await pastasDeMesmoNome(token, name, parentId)
+  const ja = pastaQueFica(existentes)
+  if (ja) return ja.id
+  const criada = await driveCreateFolder(token, name, parentId)
+  try {
+    const fica = pastaQueFica(await pastasDeMesmoNome(token, name, parentId))
+    if (fica && fica.id !== criada) {
+      // A minha sobrou: recém-criada e vazia — para a lixeira (recuperável).
+      await fetch(`https://www.googleapis.com/drive/v3/files/${criada}?supportsAllDrives=true`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+        body: JSON.stringify({ trashed: true }),
+      }).catch(() => null)
+      return fica.id
+    }
+  } catch { /* sem a releitura, fica a que criei — como antes */ }
+  return criada
 }
 
 /**

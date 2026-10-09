@@ -25,11 +25,13 @@ import {
 // Cliente compartilhado com throttle + retry/backoff: a API do ADVBOX responde
 // 429/503 sob carga e sem retry isso vira erro na tela do usuário.
 import {
+  enviarJson,
   fetchAll,
   getAdvboxCtx,
   getJson,
   type AdvboxCtx,
 } from '../_shared/advbox.ts'
+import { dataDoAdvbox } from '../_shared/dataDoAdvbox.ts'
 
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 
@@ -74,20 +76,9 @@ async function usuarioAdvboxPorNome(
 
 /**
  * Normaliza uma data do ADVBOX para YYYY-MM-DD (coluna `date` do Postgres).
- * Defensivo: o campo chega ora ISO, ora só a data, ora em dd/mm/aaaa.
+ * Mora em _shared/dataDoAdvbox.ts (testada) — lá o defeito do "Z" duplicado.
  */
-function dataDia(v: unknown): string | null {
-  if (v == null || v === '') return null
-  const s = String(v).trim()
-  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
-  if (br) return `${br[3]}-${br[2]}-${br[1]}`
-  // "2026-02-15 10:00:00" (formato do /history) não é ISO: o espaço faz o
-  // parser tratar como hora local. Normaliza para ISO com Z antes de converter.
-  const iso = s.length <= 10 ? `${s}T00:00:00Z` : `${s.replace(' ', 'T')}Z`
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return null
-  return d.toISOString().slice(0, 10)
-}
+const dataDia = dataDoAdvbox
 
 // Hash estável (djb2) em base36 — o /history não devolve id por tarefa, então
 // a chave do cache é derivada do conteúdo (mesma solução de advbox-movimentacoes).
@@ -346,18 +337,16 @@ Deno.serve(async (req: Request) => {
         important: body.important ? 1 : 0,
         urgent: body.urgent ? 1 : 0,
       }
-      const res = await fetch(`${ctx.base}/posts`, {
-        method: 'POST',
-        headers: { ...ctx.headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const msg =
-          data?.message ||
-          (data?.errors ? Object.values(data.errors).flat().join(' ') : '') ||
-          `HTTP ${res.status}`
-        return jsonResponse({ error: `ADVBOX: ${msg}` }, 400)
+      // PELO enviarJson (auditoria de bugs, 09/10/2026): era um `fetch` cru que
+      // só olhava `res.ok` — e o ADVBOX, atrás do Cloudflare, devolve o corpo de
+      // erro de limite de taxa com HTTP 200: a tela dizia "ok" e a tarefa não
+      // existia. O enviarJson reconhece esse corpo, repete o que foi RECUSADO
+      // (429/403/Cloudflare) e não repete 5xx (POST pode ter criado).
+      let data: unknown
+      try {
+        data = await enviarJson(ctx, 'POST', '/posts', payload)
+      } catch (e) {
+        return jsonResponse({ error: `ADVBOX: ${(e as Error).message}` }, 400)
       }
       return jsonResponse({ ok: true, data })
     }

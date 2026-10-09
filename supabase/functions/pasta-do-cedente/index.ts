@@ -9,7 +9,7 @@
 // análise tem casa antes de existir.
 //
 // O MESMO CAMINHO DA PLANILHA: A. Análises de crédito / Precatórios /
-// {originador} / {cedente}, pela mesma função (`garantirPastaDoCedente`). Dois
+// {originador} / {cedente}, pela mesma função (`pastaDaAnaliseDoCard`). Dois
 // cálculos do caminho abririam duas pastas para o mesmo cedente, e a planilha
 // cairia na que o link não aponta.
 //
@@ -17,7 +17,9 @@
 //   -> { pasta_id, drive_folder_url }
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
-import { garantirPastaDoCedente, ligarPastaAoCard } from '../_shared/planilhaJuridica.ts'
+import { ligarPastaAoCard } from '../_shared/planilhaJuridica.ts'
+import { pastaDaAnaliseDoCard } from '../_shared/pastaDoCard.ts'
+import { driveExistePasta } from '../_shared/credijuris.ts'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -48,11 +50,23 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, pasta_id: null, ignorado: 'precatorio-externo' })
     }
 
-    const { pastaId } = await garantirPastaDoCedente({
-      originador: body.originador,
-      cedente: body.cedente,
-    })
-    await ligarPastaAoCard(svc, leadId, pastaId)
+    // A PASTA QUE O CARD JÁ TEM FICA (auditoria de bugs, 09/10/2026). Era
+    // recalculada pelo nome e gravada no card SEM CONDIÇÃO: com a lista da tela
+    // desatualizada (a guarda era só dela) e o título mudado, o card passava a
+    // apontar para uma pasta nova e vazia, e a planilha e as certidões seguintes
+    // iam para ela — os arquivos divididos em duas pastas. Agora é a mesma regra
+    // das certidões e da planilha (`pastaDaAnaliseDoCard`): a gravada, se ainda
+    // existe; senão o caminho calculado, gravado só se o card estava sem pasta.
+    const analise = await pastaDaAnaliseDoCard(svc, leadId, { originador: body.originador, cedente: body.cedente })
+    let pastaId = analise.pastaId
+    if (analise.origem === 'calculada' && !analise.gravadaNoCard) {
+      // O card tinha uma pasta que sumiu (lixeira) — ou outra aba acabou de
+      // gravar a dela. Esta vence só se a do card não existe mais.
+      const { data: agora } = await svc.from('kommo_leads').select('drive_pasta_id').eq('kommo_lead_id', leadId).maybeSingle()
+      const doCard = String((agora as { drive_pasta_id?: string | null } | null)?.drive_pasta_id ?? '').trim()
+      if (doCard && doCard !== pastaId && (await driveExistePasta(analise.token, doCard)) !== false) pastaId = doCard
+      else await ligarPastaAoCard(svc, leadId, pastaId)
+    }
     return jsonResponse({
       ok: true,
       pasta_id: pastaId,

@@ -498,3 +498,23 @@ export function notaDaJuntadaQueFalhou(o: {
     : ' Nenhum PDF deste processo subiu ao card.'
   return `⚠️ Não consegui juntar os autos do processo ${o.cnj}${papel}: ${o.motivo}.${feitas} Anexe o que faltar à mão.`
 }
+
+/**
+ * Quanto tempo uma tentativa de download pode durar, dado o prazo final (ms
+ * absolutos): o teto de uma tentativa ou o que resta até o prazo, o menor. Com
+ * menos que o mínimo, nem tenta: null.
+ *
+ * O PRAZO FINAL (auditoria de bugs, 09/10/2026): cada tentativa de baixar um
+ * documento do Escavador podia durar 90 s, e eram três — num Escavador lento, a
+ * segunda começava perto dos 115 s e a invocação morria nos ~150 s no meio dela.
+ * Morrendo, a tentativa da parte já contada em `antesDaParte` nunca era
+ * devolvida como passageira: a cada duas mortes a parte encolhia à metade, e na
+ * nona volta a junção DESISTIA ("nem partes de 4 MB…") por uma lentidão de
+ * passagem. Com o prazo, a tentativa termina antes, e o fim do prazo é falha
+ * passageira, dita a tempo de ser gravada.
+ */
+export function tempoDaTentativa(prazoFinal: number, agora: number, teto: number, minimo = 3_000): number | null {
+  const resta = prazoFinal - agora
+  if (!(resta >= minimo)) return null
+  return Math.min(teto, Math.floor(resta))
+}

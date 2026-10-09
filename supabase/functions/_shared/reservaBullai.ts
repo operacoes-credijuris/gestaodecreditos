@@ -122,3 +122,45 @@ export function pedidosSemRegistro(itens: ItemDoChecklist[], registrados: Set<st
   }
   return [...porJob.values()]
 }
+
+/**
+ * O PEDIDO COBRE ESTA RESERVA? (auditoria de bugs, 09/10/2026)
+ *
+ * A limpeza da reserva vencida pula o item que um pedido registrado cobre — é o
+ * caso do job que saiu e foi registrado, mas cujo item não chegou a ser ligado
+ * a ele. ERA "qualquer pedido do card que tenha o item", e o item que já tinha
+ * estado num pedido ANTERIOR (falhou, foi pedido de novo, e a função morreu
+ * entre reservar e pedir) ficava coberto pelo pedido velho: EM_EMISSAO para
+ * sempre, nem pedível nem liberado. Só cobre o pedido criado DEPOIS da reserva
+ * (com folga para a diferença de relógio entre a função e o banco).
+ */
+export function pedidoCobreAReserva(
+  pedido: { portais?: Record<string, string[]> | null; criado_em?: string | null },
+  item: Pick<ItemDoChecklist, 'id' | 'atualizado_em'>,
+  folgaMs = 60_000,
+): boolean {
+  const temOItem = Object.values(pedido.portais ?? {}).some((ids) => (ids ?? []).includes(item.id))
+  if (!temOItem) return false
+  const criado = Date.parse(String(pedido.criado_em ?? ''))
+  const reservado = Date.parse(String(item.atualizado_em ?? ''))
+  // Sem uma das datas, fica a regra antiga (cobre): soltar um item que um pedido
+  // pago cobre seria pagar de novo.
+  if (!Number.isFinite(criado) || !Number.isFinite(reservado)) return true
+  return criado >= reservado - folgaMs
+}
+
+/**
+ * O RESULTADO DESTE PEDIDO AINDA É DO ITEM? (auditoria de bugs, 09/10/2026)
+ *
+ * Um pedido antigo continua aberto enquanto algum portal dele espera (às vezes
+ * dias). Se o item já foi pedido de novo em OUTRO job, cada atualização do velho
+ * regravava o item com o resultado velho — por cima da certidão OBTIDA pelo
+ * novo, que voltava a FALHA e a ser pedível (e paga outra vez). O item é do
+ * pedido quando não tem job, tem este job, ou ainda tem só o token da reserva
+ * (o job saiu e não foi ligado a ele).
+ */
+export function itemEDoPedido(itemJobId: string | null | undefined, jobId: string): boolean {
+  if (!itemJobId) return true
+  if (ehReserva(itemJobId)) return true
+  return itemJobId === String(jobId)
+}

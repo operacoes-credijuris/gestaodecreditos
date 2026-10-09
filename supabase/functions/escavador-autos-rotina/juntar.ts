@@ -41,6 +41,7 @@ import {
   type PartePlanejada,
   proximoPasso,
   registrarParte,
+  tempoDaTentativa,
 } from '../_shared/autosJuntos.ts'
 import { ehPdf, erroPassageiro, falhaPassageira, MAX_BYTES_NA_MEMORIA, semAcessoAoKommo } from '../_shared/falhasDosAutos.ts'
 
@@ -97,16 +98,23 @@ export function tempoDaParte(bytes: number, bpsSubida: number | null): number {
 
 type Download = { ok: true; bytes: Uint8Array } | { ok: false; motivo: string }
 
-/** Um documento do Escavador. Recusa definitiva volta como motivo; a passageira lança. */
-async function baixar(chave: string, cnj: string, d: DocDaJuntada): Promise<Download> {
+/**
+ * Um documento do Escavador. Recusa definitiva volta como motivo; a passageira lança.
+ *
+ * NUNCA PASSA DO `prazoFinal` (ver `tempoDaTentativa` em autosJuntos.ts): a
+ * tentativa que levaria a invocação à morte vira falha passageira antes.
+ */
+async function baixar(chave: string, cnj: string, d: DocDaJuntada, prazoFinal = Infinity): Promise<Download> {
   let ultimo = ''
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     if (tentativa) await dormir(1500 * tentativa)
+    const tempo = tempoDaTentativa(prazoFinal, Date.now(), TEMPO_DOWNLOAD_MS)
+    if (tempo === null) throw new Passageira(ultimo || 'o tempo da volta acabou antes do download')
     let res: Response
     try {
       res = await fetch(`${BASE_ESCAVADOR}/processos/numero_cnj/${cnj}/documentos/${d.chave}`, {
         headers: { Authorization: `Bearer ${chave}` },
-        signal: AbortSignal.timeout(TEMPO_DOWNLOAD_MS),
+        signal: AbortSignal.timeout(tempo),
       })
     } catch (e) {
       ultimo = `o Escavador não respondeu ao download (${(e as Error)?.message ?? e})`
@@ -426,12 +434,15 @@ async function montarEEnviar(
   let bytes: Uint8Array | null = null
   let paginas = 0
   const juntados: DocDaJuntada[] = []
+  // O PRAZO DOS DOWNLOADS é o fim do orçamento da volta: nenhuma tentativa
+  // começa ou dura além dele (ver `baixar`).
+  const prazoDosDownloads = Date.now() + o.resta()
   try {
     if (daParte.length === 1) {
       // UM DOCUMENTO SÓ (o grande, que não cabe com outros): sobe como veio, sem
       // passar pelo pdf-lib — metade da memória, e o PDF cifrado não se perde.
       const d = daParte[0]
-      const r = await baixar(o.chave, cnj, d)
+      const r = await baixar(o.chave, cnj, d, prazoDosDownloads)
       if (r.ok) {
         bytes = r.bytes
         paginas = d.paginas
@@ -448,7 +459,7 @@ async function montarEEnviar(
         while (fila.length && emVoo.length < PARALELOS && (emVoo.length === 0 || naJanela + (fila[0].bytes ?? 0) <= JANELA_BYTES)) {
           const d = fila.shift()!
           naJanela += d.bytes ?? 0
-          const pr = baixar(o.chave, cnj, d)
+          const pr = baixar(o.chave, cnj, d, prazoDosDownloads)
           pr.catch(() => {}) // a rejeição é lida na vez dele
           emVoo.push({ d, p: pr })
         }

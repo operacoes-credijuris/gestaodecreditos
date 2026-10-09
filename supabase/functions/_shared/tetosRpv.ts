@@ -219,8 +219,27 @@ export async function consultarTeto(
     if (proprio?.status === 'pesquisando') {
       // Viva: outra análise (ou outra aba) já está pesquisando. Morta: o worker
       // caiu no meio, e reabrir é o único jeito de destravar.
+      //
+      // A PESQUISA MORTA CONTA COMO FALHA (auditoria de bugs, 09/10/2026): era
+      // reaberta na hora, sem somar `falhas` e sem teto — a pesquisa que sempre
+      // passa do tempo da função (buscas web, PDFs, esforço alto) era refeita, e
+      // paga, a cada consulta 5 minutos depois da anterior, para sempre. Agora a
+      // morte vira 'falhou' com a falha contada, e o repouso crescente (30 min,
+      // 3 h, 1 dia) decide quando tentar de novo. Condicional à linha lida: de
+      // duas consultas ao mesmo tempo, só uma conta.
       if (minutosDesde(proprio.pesquisa_desde) >= TRAVA_MINUTOS) {
-        if (await reabrir(svc, chave, esfera, ano, mun, 'pesquisando')) dispararPesquisa(chave, esfera, ano, mun)
+        const motivo = 'a pesquisa anterior parou no meio (o tempo da função acabou); tento de novo depois do repouso'
+        let marcar = svc.from('rpv_tetos').update({
+          status: 'falhou', motivo, falhas: Number(proprio.falhas ?? 0) + 1,
+          pesquisa_desde: new Date().toISOString(),
+          atualizado_em: new Date().toISOString(), atualizado_por: 'consultarTeto',
+        }).eq('uf', chave).eq('esfera', esfera).eq('ano', ano)
+          .eq('municipio_chave', chaveDoMunicipio(mun)).eq('status', 'pesquisando')
+        marcar = proprio.pesquisa_desde ? marcar.eq('pesquisa_desde', proprio.pesquisa_desde) : marcar.is('pesquisa_desde', null)
+        await marcar
+        const ref = await referenciaDaCapital(svc, chave, esfera, ano, mun)
+        if (ref) return ref
+        return { ...vazio(ano, 'falhou', motivo), origem: proprio.origem }
       }
       return await enquantoPesquisa(svc, chave, esfera, ano, mun)
     }
@@ -491,15 +510,22 @@ type EsferaOuTexto = EsferaTeto | string
 async function gravarFalha(
   svc: SupabaseClient, uf: string, esfera: EsferaTeto, ano: number, municipio: string, motivo: string,
 ): Promise<void> {
+  // A LINHA DO MUNICÍPIO, e só ela (auditoria de bugs, 09/10/2026): sem o
+  // `municipio_chave`, a falha de UM município derrubava para 'falhou' TODAS as
+  // linhas municipais daquela UF no ano — inclusive as prontas e a da capital —,
+  // e o `maybeSingle` com várias linhas dava erro (ignorado), então o contador
+  // ficava sempre em 1 e o repouso nunca passava de 30 minutos.
+  const chaveMun = chaveDoMunicipio(municipio)
   try {
-    const { data } = await svc.from('rpv_tetos').select('falhas')
-      .eq('uf', uf).eq('esfera', esfera).eq('ano', ano).maybeSingle()
+    const { data, error } = await svc.from('rpv_tetos').select('falhas')
+      .eq('uf', uf).eq('esfera', esfera).eq('ano', ano).eq('municipio_chave', chaveMun).maybeSingle()
+    if (error) throw error
     const falhas = Number((data as { falhas?: number } | null)?.falhas ?? 0) + 1
     await svc.from('rpv_tetos').update({
       status: 'falhou', motivo, falhas,
       // O repouso conta da FALHA, não do começo da pesquisa.
       pesquisa_desde: new Date().toISOString(),
       atualizado_em: new Date().toISOString(), atualizado_por: 'teto_passo',
-    }).eq('uf', uf).eq('esfera', esfera).eq('ano', ano)
+    }).eq('uf', uf).eq('esfera', esfera).eq('ano', ano).eq('municipio_chave', chaveMun)
   } catch (_) { /* a análise não para por causa disto */ }
 }

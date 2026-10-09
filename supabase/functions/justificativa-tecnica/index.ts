@@ -462,7 +462,12 @@ async function planejar(svc: SupabaseClient, leadId: number, tentativa: string):
           system: SISTEMA_PLANEJAMENTO,
           messages: [{ role: 'user', content: pedidoDoPlanejamento(estado.instrucao, blocoDoCard(valores)) }],
         } satisfies NoFormatoDoOpus<Anthropic.MessageCreateParamsNonStreaming>,
-        { signal: AbortSignal.timeout(150_000) },
+        // NO ORÇAMENTO DA INVOCAÇÃO (auditoria de bugs, 09/10/2026): eram 150 s
+        // contados daqui, e a invocação morre por volta dos 150 s contados do
+        // começo — o teto nunca disparava antes dela, o `catch` da frente única
+        // nunca rodava, e a geração ficava em 'planejando' sem ninguém para
+        // relançá-la (o vigia só relança frentes). Agora cabe no orçamento.
+        { signal: AbortSignal.timeout(Math.max(10_000, restante(r))) },
       )
       consumo = somarConsumo(consumo, resposta.usage)
       const lida = lerSaidaEstruturada(resposta)

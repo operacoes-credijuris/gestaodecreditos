@@ -263,9 +263,16 @@ Deno.serve(async (req) => {
     // linha deixaria no Storage as páginas de todo processo já analisado, sem
     // ninguém para apagá-las depois — o caminho delas morre com a linha.
     const agora = new Date().toISOString();
+    //
+    // SÓ SAI A LINHA CUJAS IMAGENS SAÍRAM (auditoria de bugs, 09/10/2026): as
+    // imagens eram removidas de 50 linhas vencidas e o delete apagava TODAS as
+    // vencidas — da 51ª em diante, as páginas ficavam no balde para sempre, sem
+    // linha que apontasse para elas. E a remoção que falhasse apagava a linha do
+    // mesmo jeito. Agora o delete é pelos códigos lidos, e só se o balde limpou;
+    // o resto sai nos próximos usos.
     const { data: vencidos } = await db
       .from("analise_externa_autos")
-      .select("arquivos")
+      .select("codigo, arquivos")
       .lt("expira_em", agora)
       .limit(50);
     const caminhos = (vencidos ?? []).flatMap((v: any) =>
@@ -273,8 +280,12 @@ Deno.serve(async (req) => {
         (Array.isArray(x?.imagens) ? x.imagens : []).map((i: any) => String(i?.caminho ?? "")),
       ),
     ).filter((c: string) => c.length > 0);
-    if (caminhos.length > 0) await db.storage.from(BALDE).remove(caminhos);
-    await db.from("analise_externa_autos").delete().lt("expira_em", agora);
+    const limpou = caminhos.length === 0 ||
+      !(await db.storage.from(BALDE).remove(caminhos)).error;
+    const codigosVencidos = (vencidos ?? []).map((v: any) => String(v?.codigo ?? "")).filter(Boolean);
+    if (limpou && codigosVencidos.length > 0) {
+      await db.from("analise_externa_autos").delete().in("codigo", codigosVencidos);
+    }
 
     const deposito: {
       codigo: string;

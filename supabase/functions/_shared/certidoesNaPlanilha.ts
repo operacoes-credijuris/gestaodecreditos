@@ -71,6 +71,19 @@ const dataBR = (iso: string | null | undefined) => {
 const semAcento = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 
+/**
+ * O NOME DA CIDADE, sem a UF que vier junto ("Goiânia/GO", "Goiânia (GO)",
+ * "Goiânia - GO", "Goiânia-GO"), em minúsculas e sem acento.
+ *
+ * O HÍFEN DO NOME FICA (auditoria de bugs, 09/10/2026): cortava-se em todo "-",
+ * e "Ji-Paraná", "Embu-Guaçu" e "Xique-Xique" viravam "ji", "embu", "xique" — a
+ * CND da cidade atual caía como residência ANTERIOR. Só o hífen que separa a UF
+ * (duas letras no fim) sai.
+ */
+export function cidadeSemUf(s: string): string {
+  return semAcento(s.split(/[/(]/)[0]).replace(/\s*-\s*[a-z]{2}$/, '').trim()
+}
+
 const linkDo = (i: ItemDaPlanilha) =>
   i.drive_link || (i.arquivos ?? []).find((a) => a?.drive_link)?.drive_link || null
 
@@ -226,8 +239,7 @@ const PADRAO_RESIDENCIA = {
 function daResidenciaAtual(i: ItemDaPlanilha, s: SujeitoDaPlanilha): boolean {
   const p = i.parametros ?? {}
   if (i.certidao_codigo === 'MUN.CND') {
-    const cidade = semAcento(String(p.municipio ?? '')).split(/[/(-]/)[0].trim()
-    return !!s.municipio_atual && cidade === semAcento(s.municipio_atual)
+    return !!s.municipio_atual && cidadeSemUf(String(p.municipio ?? '')) === cidadeSemUf(s.municipio_atual)
   }
   return !!s.uf_atual && String(p.uf ?? '').toUpperCase() === s.uf_atual.toUpperCase()
 }

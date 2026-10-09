@@ -42,6 +42,7 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
+import { sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from '../_shared/respostaDoClaude.ts'
 // O QUESTIONÁRIO, AS REGRAS E A GRAVAÇÃO moram nos módulos compartilhados
@@ -119,6 +120,12 @@ function cortarTexto(t: string): { texto: string; cortou: boolean } {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  // O TETO DA INVOCAÇÃO (auditoria de bugs, 09/10/2026): o Opus com esforço
+  // alto, buscas web e até quatro retomadas pode passar dos ~150 s, e a função
+  // morria sem resposta. As chamadas levam um sinal que as interrompe antes, com
+  // folga para o Drive, e a tela recebe o motivo.
+  const inicio = Date.now()
+  const sinal = sinalAteOTeto(inicio, { folgaMs: 25_000 })
   try {
     const svc = serviceClient()
     const caller = await getCallerAtivo(req, svc)
@@ -212,7 +219,7 @@ Deno.serve(async (req: Request) => {
             { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
           ],
           messages: mensagens,
-        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>, { signal: sinal })
         .finalMessage()
 
       // O laço de amostragem do servidor tem teto próprio; ao bater nele a
@@ -238,11 +245,28 @@ Deno.serve(async (req: Request) => {
               { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
             ],
             messages: mensagens,
-          } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+          } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>, { signal: sinal })
           .finalMessage()
       }
       return atual
     })()
+
+    // CORTADA OU RECUSADA NÃO É QUESTIONÁRIO (auditoria de bugs, 09/10/2026). O
+    // SDK monta o `input` da ferramenta com um leitor tolerante: cortada no
+    // `max_tokens`, a chamada chegava como objeto PARCIAL — respostas faltando, a
+    // última pela metade, a ficha vazia — e a planilha ia ao Drive por cima da
+    // boa, com `ok`. Agora volta erro, e nada é gravado.
+    if (resposta.stop_reason === 'max_tokens' || resposta.stop_reason === 'refusal') {
+      return jsonResponse(
+        {
+          error:
+            resposta.stop_reason === 'max_tokens'
+              ? 'A resposta do modelo foi cortada no limite de tamanho antes de terminar o questionário. Nada foi gravado; tente de novo.'
+              : 'O modelo se recusou a responder. Nada foi gravado.',
+        },
+        502,
+      )
+    }
 
     const uso = resposta.content.find(
       (c) => c.type === 'tool_use' && c.name === FERRAMENTA.name,
@@ -306,6 +330,12 @@ Deno.serve(async (req: Request) => {
       pasta_id: drive.pasta_id,
     })
   } catch (e) {
+    if (sinal.aborted) {
+      return jsonResponse(
+        { error: 'A análise passou do tempo de uma chamada (~2 min) e foi interrompida. Nada foi gravado; tente de novo.' },
+        504,
+      )
+    }
     return jsonResponse(
       { error: 'Falha na análise jurídica: ' + (e instanceof Error ? e.message : String(e)) },
       500,

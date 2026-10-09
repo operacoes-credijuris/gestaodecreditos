@@ -6,6 +6,7 @@
 // erro na tela do usuário ("/lawsuits → HTTP 503"). Toda função que fala com
 // o ADVBOX deve usar getJson/fetchAll daqui — nunca fetch() direto.
 import { serviceClient } from './auth.ts'
+import { paginarAdvbox } from './paginacaoAdvbox.ts'
 
 export interface AdvboxCtx {
   base: string
@@ -188,10 +189,19 @@ export async function enviarJson(
       continue
     }
     if (!res.ok) {
+      // Os erros por campo (o `errors` do Laravel) vão junto: "The given data
+      // was invalid." sozinho não diz o que corrigir.
+      const porCampo = (j as { errors?: Record<string, unknown> } | null)?.errors
+      const campos = porCampo && typeof porCampo === 'object'
+        ? Object.values(porCampo).flat().map(String).join(' ')
+        : ''
       const detalhe =
-        (j as { message?: string; error?: string } | null)?.message ??
-        (j as { error?: string } | null)?.error ??
-        texto.slice(0, 300)
+        [
+          (j as { message?: string; error?: string } | null)?.message ??
+            (j as { error?: string } | null)?.error ??
+            (campos ? '' : texto.slice(0, 300)),
+          campos,
+        ].filter(Boolean).join(' ')
       throw new Error(`HTTP ${res.status}${detalhe ? ` — ${detalhe}` : ''}`)
     }
     return j
@@ -205,17 +215,11 @@ export async function fetchAll(
   path: string,
   cap = 8000,
 ): Promise<Record<string, unknown>[]> {
-  const out: Record<string, unknown>[] = []
-  const limit = 200
-  let offset = 0
-  for (let i = 0; i < 60; i++) {
-    const sep = path.includes('?') ? '&' : '?'
-    const j = await getJson(ctx, `${path}${sep}limit=${limit}&offset=${offset}`)
-    const data = pickArray(j)
-    out.push(...data)
-    const total = Number((j as { totalCount?: number }).totalCount ?? out.length)
-    offset += limit
-    if (data.length === 0 || out.length >= total || out.length >= cap) break
-  }
-  return out
+  // A paginação mora em paginacaoAdvbox.ts (pura, testada) — ver lá os três
+  // defeitos do laço antigo (auditoria de bugs, 09/10/2026).
+  const sep = path.includes('?') ? '&' : '?'
+  return paginarAdvbox(
+    (offset, limit) => getJson(ctx, `${path}${sep}limit=${limit}&offset=${offset}`),
+    { cap, rotulo: path },
+  )
 }

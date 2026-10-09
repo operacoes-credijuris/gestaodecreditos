@@ -285,6 +285,13 @@ Deno.serve(async (req: Request) => {
     // chamada da cadeia. O processamento é feito em lotes pequenos que se
     // auto-encadeiam, para não estourar o limite de recursos do edge function.
     const primeira = !Array.isArray((body as { fila?: unknown }).fila)
+    // A FILA É SÓ DO ENCADEAMENTO (auditoria de bugs, 09/10/2026), como na
+    // advbox-tarefas: aceita de qualquer usuário logado, um corpo
+    // {fila:[{lid:<processo A>, numero:<processo B>}]} gravava os andamentos de
+    // A carimbados com o número de B, e o status de B com a data de A.
+    if (!primeira && !autorizadoPorCron) {
+      return jsonResponse({ error: 'Fila interna: apenas o encadeamento por cron.' }, 403)
+    }
     let fila: { lid: string; numero: string }[]
     // Diagnóstico da seleção — só existe na primeira chamada da cadeia, e vai na
     // resposta: sincronização que pula processos precisa dizer quantos pulou, senão

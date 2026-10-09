@@ -116,12 +116,17 @@ export async function checklistEmTexto(
   svc: Servico,
   leadId: number,
 ): Promise<{ texto: string; temChecklist: boolean }> {
-  const { data: sujeitos } = await svc
+  // LEITURA QUE FALHA É ERRO, não "nada cadastrado" (auditoria de bugs,
+  // 09/10/2026): o `error` era ignorado, e uma falha passageira do banco virava
+  // "NENHUM SUJEITO CADASTRADO" no prompt e uma planilha com o bloco do cedente
+  // em branco — salva no Drive por cima da boa. Agora a análise para com o motivo.
+  const { data: sujeitos, error: eSujeitos } = await svc
     .from('dd_sujeito')
     .select(
       'id, papel, tipo_pessoa, nome, documento, uf_atual, municipio_atual, ufs_anteriores, municipios_anteriores, residencia_levantada',
     )
     .eq('kommo_lead_id', leadId)
+  if (eSujeitos) throw new Error(`não consegui ler os sujeitos da due diligence: ${eSujeitos.message}`)
   const suj = (sujeitos ?? []) as Sujeito[]
   if (suj.length === 0) {
     return {
@@ -134,7 +139,8 @@ export async function checklistEmTexto(
 
   // `*`: `resultado` é da migração 0071, e coluna pedida pelo nome antes dela
   // derrubaria a leitura inteira.
-  const { data: itens } = await svc.from('dd_certidao').select('*').eq('kommo_lead_id', leadId)
+  const { data: itens, error: eItens } = await svc.from('dd_certidao').select('*').eq('kommo_lead_id', leadId)
+  if (eItens) throw new Error(`não consegui ler o checklist de certidões: ${eItens.message}`)
   const { data: catalogo } = await svc.from('certidao_catalogo').select('codigo, nome_curto')
   const nomeDaCertidao = new Map(
     ((catalogo ?? []) as { codigo: string; nome_curto: string }[]).map((c) => [c.codigo, c.nome_curto]),
@@ -195,10 +201,14 @@ export async function preencherCertidoesDoChecklist(
   ws: AbaDaPlanilha,
   linhas: LinhaQuestionario[],
 ): Promise<{ escritas: number; avisos: string[] }> {
-  const [{ data: sujeitos }, { data: itens }] = await Promise.all([
+  const [{ data: sujeitos, error: eSujeitos }, { data: itens, error: eItens }] = await Promise.all([
     svc.from('dd_sujeito').select('*').eq('kommo_lead_id', leadId),
     svc.from('dd_certidao').select('*').eq('kommo_lead_id', leadId),
   ])
+  // Falha de leitura não é "sem checklist": ver `checklistEmTexto`.
+  if (eSujeitos || eItens) {
+    throw new Error(`não consegui ler o checklist de certidões: ${(eSujeitos ?? eItens)!.message}`)
+  }
   if (!sujeitos?.length) return { escritas: 0, avisos: [] }
   // HOJE NO FUSO DE BRASÍLIA: é contra ele que se vê se a certidão venceu.
   const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })

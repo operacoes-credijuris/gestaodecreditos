@@ -25,11 +25,14 @@
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
-import { chaveKommo } from "../_shared/segredos.ts";
+import { contaKommo } from "../_shared/segredos.ts";
+import { kommoFetch } from "../_shared/kommoFetch.ts";
 import { previaPequena } from "../_shared/previaDoDrive.ts";
 
 const CORS = corsHeaders;
-const KOMMO_SUBDOMAIN = "contatocredijuriscom";
+// O SUBDOMÍNIO VEM DE integracao_kommo_secret, pelo contaKommo() — como nas
+// outras funções do Kommo (auditoria de bugs, 09/10/2026). Era fixo aqui: trocar
+// a conta pela tela consertava o resto e deixava o anexo batendo na antiga.
 
 function json(o: unknown, s = 200) {
   return new Response(JSON.stringify(o), {
@@ -54,18 +57,20 @@ const UUID = /^[0-9a-f-]{20,64}$/i;
  * seguintes pegam de graça. Uma hora de validade protege do caso raro de a conta
  * mudar de drive sem ninguém avisar.
  */
-let driveDaConta: { url: string; em: number } | null = null;
+let driveDaConta: { url: string; em: number; subdominio: string } | null = null;
 const VALIDADE_DRIVE_MS = 60 * 60 * 1000;
 
-async function urlDoDrive(auth: Record<string, string>): Promise<string | null> {
-  if (driveDaConta && Date.now() - driveDaConta.em < VALIDADE_DRIVE_MS) return driveDaConta.url;
-  const res = await fetch(
-    `https://${KOMMO_SUBDOMAIN}.kommo.com/api/v4/account?with=drive_url`,
+async function urlDoDrive(auth: Record<string, string>, subdominio: string): Promise<string | null> {
+  if (driveDaConta && driveDaConta.subdominio === subdominio && Date.now() - driveDaConta.em < VALIDADE_DRIVE_MS) {
+    return driveDaConta.url;
+  }
+  const res = await kommoFetch(
+    `https://${subdominio}.kommo.com/api/v4/account?with=drive_url`,
     { headers: auth },
   );
   const url = ((await res.json().catch(() => ({}))) as any)?.drive_url;
   if (!url) return null;
-  driveDaConta = { url: String(url), em: Date.now() };
+  driveDaConta = { url: String(url), em: Date.now(), subdominio };
   return driveDaConta.url;
 }
 
@@ -81,14 +86,14 @@ Deno.serve(async (req) => {
     const uuid = String((body as any).file_uuid ?? "").trim();
     if (!UUID.test(uuid)) return json({ erro: "file_uuid inválido." }, 400);
 
-    const token = await chaveKommo();
-    if (!token) return json({ erro: "Token da Kommo não configurado." }, 500);
-    const auth = { Authorization: `Bearer ${token}` };
+    const conta = await contaKommo();
+    if (!conta) return json({ erro: "Token ou subdomínio da Kommo não configurado." }, 500);
+    const auth = { Authorization: `Bearer ${conta.token}` };
 
-    const drive = await urlDoDrive(auth);
+    const drive = await urlDoDrive(auth, conta.subdominio);
     if (!drive) return json({ erro: "Não consegui descobrir a drive_url da conta Kommo." }, 502);
 
-    const mRes = await fetch(`${drive}/v1.0/files/${uuid}`, { headers: auth });
+    const mRes = await kommoFetch(`${drive}/v1.0/files/${uuid}`, { headers: auth });
     if (!mRes.ok) {
       // 404 AQUI É ARQUIVO APAGADO no Kommo, e é uma resposta útil: a anotação
       // continua no espelho dizendo que ele existiu.

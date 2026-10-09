@@ -23,7 +23,8 @@ describe('pasta do Drive no Precatório Externo', () => {
     const f = ler('supabase/functions/pasta-do-cedente/index.ts')
     const guarda = f.indexOf("ignorado: 'precatorio-externo'")
     expect(guarda).toBeGreaterThan(0)
-    expect(guarda).toBeLessThan(f.indexOf('await garantirPastaDoCedente('))
+    // A criação passou a ser pela pasta do card (auditoria de bugs, 09/10/2026).
+    expect(guarda).toBeLessThan(f.indexOf('await pastaDaAnaliseDoCard('))
     expect(f).toContain(String(FUNIL_PRECATORIO_EXTERNO))
   })
 

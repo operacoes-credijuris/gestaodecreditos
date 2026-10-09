@@ -41,6 +41,7 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import {
   ESFORCO_PADRAO_DO_OPUS,
   semCercaDeMarkdown,
@@ -101,6 +102,7 @@ Responda APENAS com JSON válido, sem markdown e sem texto em volta:
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const inicio = Date.now()
 
   try {
     const svc = serviceClient()
@@ -170,7 +172,13 @@ Deno.serve(async (req: Request) => {
       `AUTOS:\n${recorte}\n\n` +
       'Identifique os titulares pedidos.'
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // O TETO DA INVOCAÇÃO (auditoria de bugs, 09/10/2026): até 360 mil
+    // caracteres de autos com esforço alto podem passar dos ~150 s, e a função
+    // morria sem resposta. A chamada é interrompida antes, e a tela recebe o motivo.
+    let res: Response
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+      signal: sinalAteOTeto(inicio),
       method: 'POST',
       headers: {
         'x-api-key': chave,
@@ -187,7 +195,14 @@ Deno.serve(async (req: Request) => {
         system: SISTEMA,
         messages: [{ role: 'user', content: pedido }],
       } satisfies PedidoAoOpus),
-    })
+      })
+    } catch (e) {
+      if (!estourouOTempo(e)) throw e
+      return jsonResponse(
+        { erro: 'A leitura da IA passou do tempo de uma chamada e foi interrompida. Tente de novo.' },
+        504,
+      )
+    }
     const resposta = await res.json().catch(() => null)
     if (!res.ok) {
       return jsonResponse(
@@ -196,6 +211,9 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    if (resposta?.stop_reason === 'max_tokens') {
+      return jsonResponse({ erro: 'A resposta da IA foi cortada no limite de tamanho; tente de novo.' }, 502)
+    }
     const bruto = semCercaDeMarkdown(textoDaResposta(resposta?.content))
 
     let lido: { titulares?: unknown; titular_do_oficio?: unknown; aviso?: unknown }
