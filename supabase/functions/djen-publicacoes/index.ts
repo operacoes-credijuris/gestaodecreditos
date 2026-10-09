@@ -50,7 +50,14 @@ async function fetchPagina(
           'Accept-Language': 'pt-BR,pt;q=0.9',
         },
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        // A MANUTENÇÃO DO DJEN DIZ O QUE É (09/10/2026): de 08/10 em diante o CNJ
+        // respondeu 503 "Sistema em manutencao" a toda consulta, e a tela só
+        // dizia "a busca falhou". Com o motivo, ela avisa que o DJEN está fora.
+        const corpo = await res.text().catch(() => '')
+        if (/manuten/i.test(corpo)) throw new Error(`DJEN em manutenção (HTTP ${res.status})`)
+        throw new Error(`HTTP ${res.status}`)
+      }
       const j = await res.json()
       return {
         items: (j?.items ?? []) as Record<string, unknown>[],
@@ -375,6 +382,8 @@ Deno.serve(async (req: Request) => {
       comunicacoes_por_oab: porOab,
       buscas_falharam: falhas.length,
       exemplos_de_falha: falhas,
+      /** O DJEN respondeu "em manutenção": o problema é do CNJ, não da plataforma. */
+      djen_em_manutencao: falhas.some((f) => /manuten/i.test(f.erro)),
       comunicacoes_recebidas: porId.size,
       descartadas_nao_intimacao: naoIntimacao,
       descartadas_processo_nao_cadastrado: processoNaoCadastrado,

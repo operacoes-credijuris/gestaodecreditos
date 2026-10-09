@@ -37,6 +37,7 @@ import {
 import {
   formatCNJ,
   formatDate,
+  formatDateTime,
   normalizarBusca,
   onlyDigits as dig,
   tempoDecorrido,
@@ -107,6 +108,7 @@ interface DjenRow {
   tipo_comunicacao: string | null
   raw: Record<string, unknown>
   tratada: boolean
+  sincronizado_em?: string | null
 }
 
 // Resolução do processo da publicação contra os cadastros.
@@ -276,7 +278,22 @@ interface RespostaSync {
     oabs_ativas?: string[]
     oabs_ilegiveis?: string[]
     buscas_falharam: number
+    /** O DJEN respondeu "em manutenção" (09/10/2026). */
+    djen_em_manutencao?: boolean
   }
+}
+
+/**
+ * O DJEN ESTÁ FORA DO AR? (09/10/2026) — ele disse "em manutenção", ou a busca
+ * falhou em TODAS as OABs. Foi o que aconteceu de 08/10 em diante: o CNJ
+ * respondia 503 a toda consulta, nada novo chegava, e a tela só soltava um aviso
+ * vermelho que sumia em segundos — a equipe achou que as intimações tinham
+ * parado de vir sem saber por quê.
+ */
+export function djenForaDoAr(d: RespostaSync['diagnostico'] | null | undefined): boolean {
+  if (!d) return false
+  const oabs = d.oabs_ativas?.length ?? 0
+  return !!d.djen_em_manutencao || (oabs > 0 && d.buscas_falharam >= oabs)
 }
 
 // ----------------------- Publicações (DJEN) -----------------------
@@ -325,6 +342,8 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
       qc.invalidateQueries({ queryKey: ['djen_publicacoes'] })
       const d = r?.diagnostico
       if (!d) return
+      // O DJEN FORA DO AR não vira aviso que some: vira a faixa fixa da tela (abaixo).
+      if (djenForaDoAr(d)) return
       // Um aviso por vez, do mais grave ao menos: dois toques vermelhos juntos
       // viram ruído e ninguém lê o segundo.
       //
@@ -464,6 +483,11 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
   // real, e não com o limite pedido, é o que faz o aviso valer qualquer que seja
   // o max-rows do servidor.
   const truncou = total.data != null && (lista.data?.length ?? 0) < total.data
+  // A ÚLTIMA VEZ QUE ALGUMA INTIMAÇÃO FOI GRAVADA (toda busca bem-sucedida regrava as da janela).
+  const ultimaCaptura = (lista.data ?? []).reduce<string | null>(
+    (m, p) => (p.sincronizado_em && (!m || p.sincronizado_em > m) ? p.sincronizado_em : m),
+    null,
+  )
   const card = (p: DjenRow) => (
     <PublicacaoCard
       key={p.id}
@@ -489,6 +513,27 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
           label="atualizando do DJEN…"
         />
       </LinhaDeResumo>
+
+      {/* O DJEN FORA DO AR, À VISTA E FIXO (09/10/2026): enquanto a última busca
+          disser que ele está fora, a faixa fica — com a última captura e o que
+          acontece quando ele voltar. */}
+      {djenForaDoAr(sync.data?.diagnostico) && (
+        <Aviso tom="perigo" papel="alert">
+          <p className="font-semibold">
+            O DJEN (Comunica PJe, do CNJ) está fora do ar
+            {sync.data?.diagnostico?.djen_em_manutencao ? ', em manutenção' : ''} — as intimações novas não estão
+            chegando.
+          </p>
+          <p className="text-texto-2">
+            {ultimaCaptura ? `Última captura: ${formatDateTime(ultimaCaptura)}. ` : ''}
+            Nada se perde: quando ele voltar, a plataforma busca os últimos 30 dias e as intimações deste intervalo
+            entram sozinhas. Até lá, confira as intimações no ADVBOX.
+          </p>
+          <Button size="sm" variant="secondary" className="mt-s1" onClick={() => sync.mutate()} loading={sync.isPending}>
+            Tentar de novo
+          </Button>
+        </Aviso>
+      )}
 
       {truncou && (
         <Aviso tom="aviso">
