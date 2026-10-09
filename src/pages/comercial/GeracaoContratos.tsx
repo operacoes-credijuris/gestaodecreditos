@@ -171,7 +171,9 @@ function GerarPanel() {
   // precatório não troca o padrão de RPV a cada visita. O ORIGINADOR NÃO É
   // LEMBRADO, de propósito: ele aponta a pasta do Drive onde a análise é lida, e
   // um valor de outra geração passaria sem ninguém olhar.
-  const [categoria, setCategoria] = useEscolhaLembrada(
+  // `ajustarCategoria`: troca SEM LEMBRAR — o preenchimento pelo card RPV não é
+  // escolha da pessoa e não pode virar a categoria de abertura das próximas vezes.
+  const [categoria, setCategoria, ajustarCategoria] = useEscolhaLembrada(
     LEMBRAR.contratosCategoria,
     CATEGORIAS,
     CATEGORIAS[0],
@@ -281,7 +283,7 @@ function GerarPanel() {
         // SÓ O RPV TEM O BOTÃO, e só ele é preenchido: num card de outro funil a
         // tela diz isso e não adivinha categoria nem pasta.
         if (!p.ehRpv) return
-        setCategoria(CATEGORIA_RPV)
+        ajustarCategoria(CATEGORIA_RPV)
         if (p.numero) setNumeroProcesso(p.numero)
       })
     return () => {
@@ -453,12 +455,16 @@ function GerarPanel() {
                 {[
                   'categoria',
                   doCard.numero && 'processo',
-                  originadorDoCard ? 'originador' : null,
+                  // SÓ SE AINDA ESTÁ NO CAMPO: trocar de categoria zera o
+                  // originador, e o aviso dizia "já preenchido" com o campo vazio.
+                  originadorDoCard && originador === originadorDoCard ? 'originador' : null,
                 ]
                   .filter(Boolean)
                   .join(', ')
                   .replace(/, ([^,]*)$/, ' e $1')}{' '}
-                {doCard.numero || originadorDoCard ? 'já preenchidos.' : 'já preenchida.'}
+                {doCard.numero || (originadorDoCard && originador === originadorDoCard)
+                  ? 'já preenchidos.'
+                  : 'já preenchida.'}
                 {!doCard.numero && (
                   <>
                     {' '}

@@ -214,11 +214,16 @@ export default function Previsoes() {
         )}
       </Painel>
 
-      {forecast.blocos.length > 0 && (
+      {/* TAMBÉM SÓ COM INCALCULÁVEIS: a carteira em que todo crédito aberto tem
+          previsão futura não tem bloco nenhum, e o aviso das operações sem valor
+          projetado — que ficam fora do "Total a receber" — sumia junto com o
+          painel. */}
+      {(forecast.blocos.length > 0 || incalculaveis.length > 0) && (
         <Painel
           titulo="Valores sem mês atribuível"
           apoio="Ficam fora do gráfico de propósito. Clique no número de operações para ver quais são."
         >
+          {forecast.blocos.length > 0 && (
           <div className="border-t border-borda">
             <Table className={TABELA_NO_PAINEL}>
               <THead>
@@ -250,6 +255,7 @@ export default function Previsoes() {
               </TBody>
             </Table>
           </div>
+          )}
 
           {blocoAberto && (
             <div className="pt-s2">

@@ -61,6 +61,10 @@ describe('ufCidadeDoCnpj', () => {
   it('município da Receita fora da lista do IBGE deixa a cidade em branco', () => {
     expect(
       ufCidadeDoCnpj({ uf: '', cidade: '' }, { uf: 'GO', cidade: 'INEXISTENTE' }, MUNICIPIOS),
-    ).toEqual({ uf: 'GO', cidade: '', aviso: null })
+    ).toMatchObject({ uf: 'GO', cidade: '' })
+    // E DIZ POR QUÊ (auditoria de bugs, 09/10/2026): antes ficava calada.
+    expect(
+      ufCidadeDoCnpj({ uf: '', cidade: '' }, { uf: 'GO', cidade: 'INEXISTENTE' }, MUNICIPIOS).aviso,
+    ).toMatch(/INEXISTENTE/)
   })
 })

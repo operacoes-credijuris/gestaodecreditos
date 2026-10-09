@@ -53,8 +53,13 @@ export function juntarAviso<T extends AvisoNaPilha>(
   max: number = MAX_AVISOS,
 ): { pilha: T[]; repetido: T | null } {
   const repetido = pilha.find((a) => a.type === novo.type && a.message === novo.message) ?? null
-  if (repetido) return { pilha: [...pilha], repetido }
-  const junta = [...pilha, novo]
+  // AVISO COM AÇÃO NÃO SE JUNTA AO ANTERIOR: o texto pode ser igual ("Publicação
+  // marcada como tratada.") e a ação ser de OUTRO item. Juntar deixava na tela o
+  // "Desfazer" do primeiro — e desfazer a publicação B devolvia a A. O antigo sai
+  // e o novo entra, com a ação dele.
+  const temAcao = (a: T) => !!(a as { action?: unknown }).action
+  if (repetido && !temAcao(novo) && !temAcao(repetido)) return { pilha: [...pilha], repetido }
+  const junta = [...pilha.filter((a) => a !== repetido), novo]
   while (junta.length > max) {
     const i = junta.findIndex((a) => a.type !== 'error')
     // Só erros na pilha: sai o mais antigo deles (nunca o que acabou de chegar).

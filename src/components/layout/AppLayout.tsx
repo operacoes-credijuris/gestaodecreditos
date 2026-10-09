@@ -1,4 +1,4 @@
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -13,9 +13,31 @@ import { AjudaDaTela } from './AjudaDaTela'
 import { LimiteDeErro } from './LimiteDeErro'
 import { AvisoDeVersaoNova } from './AvisoDeVersaoNova'
 
+/** A largura do `lg` do Tailwind: dali para cima o menu é fixo, sem gaveta. */
+const LARGURA_DO_MENU_FIXO = '(min-width: 1024px)'
+
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
+
+  // A GAVETA DO MENU FECHA QUANDO A TELA MUDA POR FORA DELA (o Voltar do
+  // navegador ou do Android) e QUANDO A JANELA PASSA A SER DE COMPUTADOR (o
+  // tablet que gira, a janela maximizada): escondida pelo `lg:hidden`, ela
+  // continuava "aberta" — corpo travado, atalhos e Escape mudos, o Tab preso num
+  // painel invisível.
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
+  useEffect(() => {
+    if (!mobileOpen || typeof window.matchMedia !== 'function') return
+    const computador = window.matchMedia(LARGURA_DO_MENU_FIXO)
+    const fecharSeCouber = () => {
+      if (computador.matches) setMobileOpen(false)
+    }
+    fecharSeCouber()
+    computador.addEventListener?.('change', fecharSeCouber)
+    return () => computador.removeEventListener?.('change', fecharSeCouber)
+  }, [mobileOpen])
 
   // O TÍTULO DA ABA DO NAVEGADOR mora acima das rotas (TituloDaAba, no App):
   // aqui ele só aparecia depois da sessão e ficava velho na tela de Entrar.

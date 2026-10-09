@@ -155,7 +155,13 @@ export function NovoCreditoDoDrive({
   const [erro, setErro] = useState<string | null>(null)
   /** null = ainda não procurou. Lista vazia = procurou e não achou nada. */
   const [candidatas, setCandidatas] = useState<PastaCredito[] | null>(null)
-  const [escolhida, setEscolhida] = useState<number | null>(null)
+  /**
+   * A pasta escolhida, PELO ID DO DRIVE — e não pela posição na lista. O
+   * "Procurar novamente" refaz a lista, e uma pasta criada ou cadastrada nesse
+   * meio-tempo mudava as posições: o campo passava a mostrar OUTRA pasta, com o
+   * formulário ainda preenchido pela primeira.
+   */
+  const [escolhidaId, setEscolhidaId] = useState<string | null>(null)
 
   /** Passo da leitura, para a tela não ficar parada sem dizer nada. */
   const [passo, setPasso] = useState<string | null>(null)
@@ -201,6 +207,15 @@ export function NovoCreditoDoDrive({
    * nova — capital, cessionário e datas de um crédito no cadastro de outro.
    */
   const escolhaAtual = useRef(0)
+  // A ABA "Pela pasta" DESMONTA ao ir para "Manual". A leitura em voo de lá não
+  // pode escrever depois: voltando à aba (outro componente, outra contagem) e
+  // escolhendo outra pasta, a resposta antiga se misturava ao cadastro da nova.
+  useEffect(
+    () => () => {
+      escolhaAtual.current++
+    },
+    [],
+  )
 
   async function usarPasta(c: PastaCredito) {
     const minha = ++escolhaAtual.current
@@ -255,6 +270,9 @@ export function NovoCreditoDoDrive({
     [candidatas],
   )
 
+  const posicao = escolhidaId === null ? -1 : (candidatas ?? []).findIndex((c) => c.id === escolhidaId)
+  const escolhidaNaLista = posicao >= 0 ? posicao : null
+
   if (!driveConfigurado) {
     return (
       <EmptyState
@@ -273,10 +291,10 @@ export function NovoCreditoDoDrive({
         <div className="min-w-0 flex-1">
           <Combobox
             opcoes={opcoes}
-            valor={escolhida}
+            valor={escolhidaNaLista}
             onChange={(id) => {
-              setEscolhida(id)
               const c = id === null ? null : candidatas?.[id]
+              setEscolhidaId(c?.id ?? null)
               if (c) void usarPasta(c)
             }}
             placeholder={

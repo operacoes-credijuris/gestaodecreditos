@@ -96,8 +96,17 @@ export async function textoDeXlsx(bytes: ArrayBuffer): Promise<string> {
         if (v == null || v === '') return
         let texto: string
         if (v instanceof Date) texto = v.toISOString().slice(0, 10)
-        else if (typeof v === 'object' && 'result' in v)
-          texto = String((v as { result?: unknown }).result ?? '') // fórmula: o valor
+        else if (typeof v === 'object' && 'result' in v) {
+          // Fórmula: o valor. O de uma fórmula de DATA (=HOJE(), =A1+30) o
+          // ExcelJS também entrega como Date à meia-noite UTC — e String(Date) em
+          // Brasília dava "Tue Aug 11 2026 21:00 GMT-0300" para 12/08: o dia
+          // anterior, que a IA lia como a data.
+          const r = (v as { result?: unknown }).result
+          texto =
+            r instanceof Date && !Number.isNaN(r.getTime())
+              ? r.toISOString().slice(0, 10)
+              : String(r ?? '')
+        }
         else if (typeof v === 'object' && 'richText' in v)
           texto = (v as { richText: { text: string }[] }).richText
             .map((r) => r.text)

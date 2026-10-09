@@ -186,8 +186,11 @@ export default function Performance() {
         </Metrica>
       </div>
 
+      {/* SÓ COM MEDIANA POSITIVA: com ela zero ou negativa, "o dobro" deixa de
+          querer dizer "muitas vezes maior" (média −3% > 2 × −5%) e o aviso
+          aparecia numa carteira sem distorção nenhuma. */}
       {carteira.tir.media !== null && carteira.tir.mediana !== null &&
-        carteira.tir.media > carteira.tir.mediana * 2 && (
+        carteira.tir.mediana > 0 && carteira.tir.media > carteira.tir.mediana * 2 && (
         <Ressalva>
           A média da rentabilidade anualizada ({pct(carteira.tir.media, 0)}) é muitas vezes
           maior que a mediana ({pct(carteira.tir.mediana)}). Isso não significa que a carteira
@@ -243,11 +246,21 @@ export default function Performance() {
         )}
 
         {lista.length === 0 ? (
-          <EmptyState
-            embutido
-            title="Nenhuma operação encerrada"
-            description="A performance realizada só considera operações com status encerrado e capital, valor recebido e datas preenchidos."
-          />
+          // "SÓ OS EXTREMOS" LEMBRADO e nenhum extremo: a lista vazia não quer
+          // dizer que não há operação encerrada (há `carteira.n`).
+          visao === 'extremos' && carteira.n > 0 ? (
+            <EmptyState
+              embutido
+              title="Nenhuma operação extrema"
+              description="Nenhuma operação encerrada tem a rentabilidade anualizada fora da curva. Veja todas na outra visão."
+            />
+          ) : (
+            <EmptyState
+              embutido
+              title="Nenhuma operação encerrada"
+              description="A performance realizada só considera operações com status encerrado e capital, valor recebido e datas preenchidos."
+            />
+          )
         ) : (
           <div className="border-t border-borda">
             <TabelaQueRola colunaFixa>

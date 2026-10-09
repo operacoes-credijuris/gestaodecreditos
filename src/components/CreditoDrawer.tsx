@@ -35,7 +35,8 @@ import {
   INDICE_ATUALIZACAO,
   ESPECIE_REQUISITORIO,
 } from '@/lib/labels'
-import { formatBRL, formatCNJ, formatDate, hojeISO, mesesDepois } from '@/lib/format'
+import { formatBRL, formatCNJ, formatDate, mesesDepois } from '@/lib/format'
+import { useHojeQueAnda } from '@/lib/hojeQueAnda'
 import { emLiquidacao } from '@/lib/regrasDoCredito'
 import { MESES_ALERTA_EXPECTATIVA } from '@/lib/numerosDosCreditos'
 import type { Processo } from '@/lib/types'
@@ -65,7 +66,8 @@ export function CreditoDrawer({
   // lê a MESMA lista em cache da tabela — gravar aqui atualiza lá.
   const apensos = useApensosManager('processo_id')
 
-  const hoje = useMemo(() => hojeISO(), [])
+  // ANDA COM O DIA (lib/hojeQueAnda.ts): a ficha fica montada em Créditos.
+  const hoje = useHojeQueAnda()
   const limiteAlerta = useMemo(() => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA), [hoje])
 
   const st = processo ? getLabel(STATUS_PROCESSO, processo.status) : null

@@ -269,6 +269,18 @@ export function Combobox({
           setBusca('')
           setAberto(true)
         }}
+        // Clicar no campo que já tem o foco (depois de escolher com o mouse) não
+        // dispara o onFocus: sem isto a lista não reabria.
+        onClick={() => {
+          if (aberto) return
+          setBusca('')
+          setAberto(true)
+        }}
+        // FECHA AO SAIR DO CAMPO, como o ComboboxTexto: passando pelo Tab, a lista
+        // ficava aberta por cima dos campos de baixo e o campo aparecia VAZIO
+        // (aberto mostra a busca, não o escolhido). A opção usa mousedown com
+        // preventDefault, então escolher com o mouse não passa por este blur.
+        onBlur={() => setAberto(false)}
         onKeyDown={onKeyDown}
       />
       {selecionada?.subtitulo && !aberto && (
@@ -415,7 +427,16 @@ export function ComboboxTexto({
           const existente = opcoes.find((o) => normalizarNome(o) === chave)
           if (existente && existente !== q) onChange(existente)
         }}
-        onKeyDown={onKeyDown}
+        onKeyDown={(e) => {
+          // LISTA ABERTA MAS FORA DA VISTA (nada a mostrar, abaixo): o Escape é
+          // da janela. Antes o combobox o consumia para fechar uma lista que
+          // ninguém via, e só o segundo Escape fechava o formulário.
+          if (e.key === 'Escape' && !(filtradas.length > 0 || consulta)) {
+            setAberto(false)
+            return
+          }
+          onKeyDown(e)
+        }}
       />
       {/* Sem nada digitado e sem nada a mostrar, não abre: no primeiro
           originador da plataforma a lista está vazia, e um balão dizendo
@@ -514,6 +535,8 @@ export function MultiCombobox({
           setAberto(true)
         }}
         onFocus={() => setAberto(true)}
+        // Fecha ao sair do campo (Tab), como os outros dois: ver Combobox.
+        onBlur={() => setAberto(false)}
         onKeyDown={(e) => {
           // Backspace no campo vazio remove a última ficha — atalho esperado
           // em campos de ficha.

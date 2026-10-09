@@ -16,6 +16,8 @@ import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } 
 import { formatCNJ, formatDate } from '@/lib/format'
 import type { Processo } from '@/lib/types'
 import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
+import { aplicarSituacao, dataIncompleta, type PedidoDeSituacao } from '@/lib/situacaoDaFase'
+import { isoDiasAtras } from '@/lib/contadoresDoMenu'
 
 /** Selo de texto longo que quebra em vez de vazar da tela (ver a lista de movimentações). */
 const SELO_QUE_QUEBRA = 'h-auto min-h-[20px] max-w-full whitespace-normal py-s0.5'
@@ -150,6 +152,36 @@ function useSituacaoMutations() {
 }
 
 /**
+ * Grava a Situação e a Data da situação de um crédito (lista e gaveta).
+ *
+ * A função grava OS DOIS CAMPOS JUNTOS (ver lib/situacaoDaFase.ts). Por isso o
+ * pedido entra no cache na hora — o próximo pedido, do outro campo, já parte do
+ * valor novo, e não do que estava no último carregamento — e os pedidos vão EM
+ * FILA (`scope`): um não chega ao servidor antes do anterior. Antes, digitar a
+ * data e escolher a situação em seguida desfazia a data.
+ */
+function useDefinirSituacao() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    scope: { id: 'definir_situacao' },
+    mutationFn: (vars: PedidoDeSituacao) =>
+      invokeFunction('fase-processual', { acao: 'definir_situacao', ...vars }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['processos_fase'] })
+      qc.setQueryData<FaseRow[]>(['processos_fase'], (linhas) => (linhas ? aplicarSituacao(linhas, vars) : linhas))
+      qc.setQueryData<FaseRow | null>(['processos_fase', vars.processo_id], (linha) =>
+        linha ? aplicarSituacao([linha], vars)[0] : linha,
+      )
+    },
+    onError: (e) => toast.error((e as Error).message),
+    // Chave geral, não só ['processos_fase', processo.id]: a lista e a gaveta
+    // leem por chaves diferentes. No erro também: o cache volta ao do servidor.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['processos_fase'], refetchType: 'all' }),
+  })
+}
+
+/**
  * Últimos 7 dias de movimentação, resolvidos ao crédito pela MESMA fonte e
  * MESMA lógica da aba Publicações e Movimentações (advbox_movimentacoes +
  * apensos, casamento por dígito) — não um recorte independente. É a aba que
@@ -169,15 +201,31 @@ function useMovimentacoesRecentes(processos: Processo[]) {
   const movs = useQuery({
     queryKey: ['advbox_movimentacoes_recentes'],
     queryFn: async () => {
-      const desde = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10)
-      const { data, error } = await supabase
-        .from('advbox_movimentacoes')
-        .select('numero_processo, data, conteudo')
-        .gte('data', desde)
-        .order('data', { ascending: false })
-        .limit(3000)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as MovRecenteRow[]
+      // DATA LOCAL, e não UTC: depois das 21h de Brasília o toISOString() já é o
+      // dia seguinte, e o 7º dia da janela sumia das movimentações recentes.
+      const desde = isoDiasAtras(7)
+      // PAGINADO: o `.limit(3000)` de antes não passava do teto de 1000 linhas
+      // por resposta do servidor (ver PublicacoesMovimentacoes), e o corte era
+      // calado — os andamentos mais antigos da semana sumiam, e os créditos deles
+      // saíam da lista. Ordem estável (data e id) para as páginas não se
+      // repetirem nem pularem linha.
+      const POR_PAGINA = 1000
+      const todas: MovRecenteRow[] = []
+      for (let pagina = 0; pagina < 10; pagina++) {
+        const de = pagina * POR_PAGINA
+        const { data, error } = await supabase
+          .from('advbox_movimentacoes')
+          .select('numero_processo, data, conteudo')
+          .gte('data', desde)
+          .order('data', { ascending: false })
+          .order('id', { ascending: true })
+          .range(de, de + POR_PAGINA - 1)
+        if (error) throw new Error(error.message)
+        const lote = (data ?? []) as MovRecenteRow[]
+        todas.push(...lote)
+        if (lote.length < POR_PAGINA) break
+      }
+      return todas
     },
   })
 
@@ -543,6 +591,21 @@ function DataDaSituacao({
     })
   }
 
+  /**
+   * DATA PELA METADE NÃO APAGA A GRAVADA. Com o dia ou o mês incompleto, o campo
+   * de data do navegador devolve '' — o mesmo que o campo limpo de propósito — e
+   * sair dele gravava null por cima da data que estava lá. O navegador marca o
+   * caso (`badInput`): aí o campo volta ao que está gravado.
+   */
+  const gravarSeCompleta = (campo: HTMLInputElement) => {
+    if (dataIncompleta(campo.value, campo.validity?.badInput)) {
+      emUso.current = false
+      setTexto(gravado.current)
+      return
+    }
+    gravar(campo.value)
+  }
+
   return (
     <input
       type="date"
@@ -554,9 +617,9 @@ function DataDaSituacao({
         emUso.current = true
       }}
       onChange={(e) => setTexto(e.target.value)}
-      onBlur={(e) => gravar(e.target.value)}
+      onBlur={(e) => gravarSeCompleta(e.target)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') gravar(e.currentTarget.value)
+        if (e.key === 'Enter') gravarSeCompleta(e.currentTarget)
       }}
     />
   )
@@ -634,12 +697,7 @@ export function FaseProcessual({
 
   const { criarSituacao, editarSituacao, excluirSituacao } = useSituacaoMutations()
 
-  const definirSituacao = useMutation({
-    mutationFn: (vars: { processo_id: string; situacao_id: string | null; situacao_data: string | null }) =>
-      invokeFunction('fase-processual', { acao: 'definir_situacao', ...vars }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['processos_fase'], refetchType: 'all' }),
-    onError: (e) => toast.error((e as Error).message),
-  })
+  const definirSituacao = useDefinirSituacao()
 
   const faseDe = useMemo(() => {
     const m = new Map<string, FaseRow>()
@@ -1095,15 +1153,7 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
 
   const { criarSituacao, editarSituacao, excluirSituacao } = useSituacaoMutations()
 
-  const definirSituacao = useMutation({
-    mutationFn: (vars: { situacao_id: string | null; situacao_data: string | null }) =>
-      invokeFunction('fase-processual', { acao: 'definir_situacao', processo_id: processo.id, ...vars }),
-    // Chave geral, não só ['processos_fase', processo.id]: a tabela de Fase
-    // Processual lê pela chave geral, e sem isto a Situação mudava na gaveta
-    // mas a coluna da tabela ficava com o valor antigo até um F5.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['processos_fase'], refetchType: 'all' }),
-    onError: (e) => toast.error((e as Error).message),
-  })
+  const definirSituacao = useDefinirSituacao()
 
   if (!ehFase) return null
 
@@ -1157,7 +1207,11 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
                 criando={criarSituacao.isPending}
                 onCriar={(nome, cor) => criarSituacao.mutateAsync({ fase_codigo: r.fase_codigo, nome, cor })}
                 onDefinir={(situacaoId) =>
-                  definirSituacao.mutate({ situacao_id: situacaoId, situacao_data: r.situacao_data })
+                  definirSituacao.mutate({
+                    processo_id: processo.id,
+                    situacao_id: situacaoId,
+                    situacao_data: r.situacao_data,
+                  })
                 }
                 onEditar={(id, nome, cor) => editarSituacao.mutate({ id, nome, cor })}
                 onExcluir={(id) => excluirSituacao.mutate(id)}

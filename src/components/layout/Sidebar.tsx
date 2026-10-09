@@ -413,7 +413,10 @@ export function Sidebar({
       {/* A GAVETA DO CELULAR: 280px, itens de 44px (alvo de toque), sem o
           "Recolher". Na camada das janelas (z-janela): o botão do assistente
           ficava por cima dela. */}
-      {rendered && (
+      {/* `mobileOpen` também desenha (sem esperar o `rendered`, um render
+          depois): o foco preso procura o painel no primeiro render aberto — ver
+          ui/Drawer. */}
+      {(rendered || mobileOpen) && (
         <div
           className="fixed inset-0 z-janela lg:hidden"
           role="dialog"

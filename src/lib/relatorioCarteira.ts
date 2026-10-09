@@ -255,7 +255,7 @@ interface Evolucao {
  * hoje, não no mês em que venceu: o dinheiro não entrou, e lançá-lo no passado
  * faria a linha projetada nascer acima da recebida.
  */
-function evolucao(c: CarteiraCalculada): Evolucao | null {
+export function evolucao(c: CarteiraCalculada): Evolucao | null {
   const datas: string[] = [c.hoje]
   for (const l of c.linhas) {
     for (const d of [l.p.data_aquisicao, l.p.data_liquidacao, l.p.expectativa_liquidacao]) {
@@ -297,6 +297,12 @@ function evolucao(c: CarteiraCalculada): Evolucao | null {
   const capital: number[] = []
   const recebido: number[] = []
   const projetado: (number | null)[] = []
+  // A SAÍDA DE UMA OPERAÇÃO EM ABERTO COM EXPECTATIVA VENCIDA é o primeiro dia
+  // depois do mês de hoje — o mesmo mês em que a linha projetada a recebe.
+  // Antes saía na expectativa vencida: entre ela e hoje o capital sumia do
+  // gráfico sem ter entrado no recebido (dinheiro desaparecido no relatório
+  // que vai ao investidor).
+  const depoisDeHoje = `${mesSeguinte(c.hoje.slice(0, 7))}-01`
 
   for (let i = 0; i < meses.length; i++) {
     // Corte exclusivo: primeiro dia do mês seguinte. Comparar ISO como texto
@@ -310,7 +316,7 @@ function evolucao(c: CarteiraCalculada): Evolucao | null {
       const liq = (l.p.data_liquidacao ?? '').slice(0, 10)
       const exp = (l.p.expectativa_liquidacao ?? '').slice(0, 10)
       const valorCap = l.p.capital_investido
-      const saida = l.pago ? liq : exp
+      const saida = l.pago ? liq : exp && exp <= c.hoje ? depoisDeHoje : exp
       if (typeof valorCap === 'number' && aq && aq < corte) {
         // Sem data de saída a operação nunca deixa o comprometido — é o que
         // acontece com crédito em aberto e sem expectativa cadastrada.

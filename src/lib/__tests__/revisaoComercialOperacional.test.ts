@@ -141,7 +141,9 @@ describe('Novo crédito pela pasta do Drive: uma pasta não se mistura com a out
 
   it('a primeira onda de outra pasta recomeça do formulário vazio', () => {
     expect(corpo(drive, 'usarPasta')).toMatch(/onPreencher\(contexto, \{ novaPasta: true \}\)/)
-    expect(corpo(modal, 'preencherDoDrive')).toMatch(/opts\?\.novaPasta \? inicial : atual/)
+    // (09/10/2026) As ondas seguintes mesclam sem apagar a correção feita à mão:
+    // ver mesclarOndaDaPasta, em auditoriaDeBugsGeral.test.ts.
+    expect(corpo(modal, 'preencherDoDrive')).toMatch(/opts\?\.novaPasta\s*\?\s*\{ \.\.\.inicial, \.\.\.dados \}/)
   })
 })
 

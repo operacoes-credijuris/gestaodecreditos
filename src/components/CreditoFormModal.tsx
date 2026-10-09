@@ -22,6 +22,7 @@ import {
   type PreenchimentoDoDrive,
 } from '@/components/NovoCreditoDoDrive'
 import { SecaoDoFormulario } from '@/components/operacional/Pecas'
+import { mesclarOndaDaPasta } from '@/lib/ondasDaPasta'
 import type {
   Processo,
   StatusProcesso,
@@ -176,6 +177,11 @@ export function CreditoFormModal({
    */
   const [formManual, setFormManual] = useState<Partial<Processo>>(inicial)
   const [formAuto, setFormAuto] = useState<Partial<Processo>>(inicial)
+  /** O rascunho da pasta agora, para o preenchimento que chega depois (async). */
+  const formAutoRef = useRef(formAuto)
+  formAutoRef.current = formAuto
+  /** O rascunho da pasta como a última onda o deixou (ver mesclarOndaDaPasta). */
+  const depoisDaOnda = useRef<Partial<Processo> | null>(null)
   const naAuto = abaForm === 'auto'
   const editing = naAuto ? formAuto : formManual
   const setEditing = naAuto ? setFormAuto : setFormManual
@@ -202,7 +208,19 @@ export function CreditoFormModal({
     // vazio: somar sobre a anterior deixava no rascunho o que a nova não trouxe
     // (o capital, o cessionário, a data de aquisição do OUTRO crédito), e o
     // Salvar gravava a mistura dos dois.
-    setFormAuto((atual) => ({ ...(opts?.novaPasta ? inicial : atual), ...dados }))
+    //
+    // E O QUE A PESSOA CORRIGIU ENTRE UMA ONDA E OUTRA FICA (mesclarOndaDaPasta):
+    // a segunda onda, a da IA, chega segundos depois e sobrescrevia em silêncio o
+    // tribunal ou o capital que já tinham sido corrigidos à mão.
+    const atual = formAutoRef.current
+    const novo = opts?.novaPasta
+      ? { ...inicial, ...dados }
+      : depoisDaOnda.current
+        ? mesclarOndaDaPasta(atual, depoisDaOnda.current, dados)
+        : { ...atual, ...dados }
+    depoisDaOnda.current = novo
+    formAutoRef.current = novo
+    setFormAuto(novo)
     setErros({})
     setAutoPreenchido(true)
     // Só a onda final avisa. Avisar na primeira era pedir conferência de um

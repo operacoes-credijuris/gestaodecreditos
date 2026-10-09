@@ -26,6 +26,7 @@ import {
 } from './comum'
 import { configuradoDe, useIntegracao, type ConsultaIntegracao } from './consultas'
 import { TRAVA_LEITURA } from '@/lib/menuDasConfiguracoes'
+import { lerOabGravada } from '@/lib/formulariosDasConfiguracoes'
 
 /** Liga e desliga o lápis de "não salvo" da seção no menu. */
 export type Pendencia = (sim: boolean) => void
@@ -586,6 +587,8 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
   const qc = useQueryClient()
   const toast = useToast()
   const [itens, setItens] = useState<OabItem[]>([])
+  /** O que está gravado e não deu para ler: volta ao banco como está no Salvar. */
+  const [ilegiveis, setIlegiveis] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const lista = useRef<HTMLDivElement>(null)
   // A OAB INCLUÍDA GANHA O FOCO: quem clicou em "Adicionar OAB" vai digitar o
@@ -594,13 +597,18 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
 
   useEffect(() => {
     const cfg = (data?.config as ConfigDjen) ?? {}
-    const parsed = (cfg.oabs ?? [])
-      .map((s) => {
-        const m = String(s).match(/(\d+)\s*\/?\s*([A-Za-z]{2})?/)
-        return { numero: m?.[1] ?? '', uf: (m?.[2] ?? 'GO').toUpperCase() }
-      })
-      .filter((o) => o.numero)
-    setItens(parsed)
+    // A MESMA LEITURA DO SERVIDOR (lerOabGravada): a expressão antiga fazia de
+    // "54.162/GO" a OAB 54/GO e de "SP/54162" a 54162/GO, e o Salvar seguinte
+    // regravava a errada.
+    const lidas: OabItem[] = []
+    const naoLidas: string[] = []
+    for (const s of cfg.oabs ?? []) {
+      const o = lerOabGravada(s)
+      if (o) lidas.push(o)
+      else if (String(s ?? '').trim()) naoLidas.push(String(s))
+    }
+    setItens(lidas)
+    setIlegiveis(naoLidas)
   }, [data])
 
   useEffect(() => {
@@ -635,6 +643,8 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
         .map((o) => ({ uf: o.uf, numero: o.numero.replace(/\D/g, '') }))
         .filter((o) => o.numero)
         .map((o) => `${o.numero}/${o.uf}`)
+        // O que não deu para ler volta como estava, em vez de sumir no Salvar.
+        .concat(ilegiveis)
       // Janela fixa de 30 dias.
       const cfg: ConfigDjen = { oabs, dias_retroativos: 30 }
       const { error } = await supabase
@@ -664,8 +674,18 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
         <>
           {!naoLido && (
             <div ref={lista} className="space-y-[8px]">
-              {itens.length === 0 && (
+              {itens.length === 0 && ilegiveis.length === 0 && (
                 <p className="text-corpo text-texto-2">Nenhuma OAB cadastrada.</p>
+              )}
+              {ilegiveis.length > 0 && (
+                <p className="text-sm text-aviso">
+                  Não consegui ler {ilegiveis.length === 1 ? 'esta OAB gravada' : 'estas OABs gravadas'}:{' '}
+                  {ilegiveis.map((o) => `"${o}"`).join(', ')}.{' '}
+                  {ilegiveis.length === 1
+                    ? 'Ela continua gravada como está, e o DJEN a ignora'
+                    : 'Elas continuam gravadas como estão, e o DJEN as ignora'}
+                  : inclua de novo abaixo, com UF e número.
+                </p>
               )}
               {itens.map((o, i) => (
                 // 120px, não menos: o <select> reserva pr-8 para a setinha, e com

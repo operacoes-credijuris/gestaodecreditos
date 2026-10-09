@@ -37,3 +37,26 @@ export function chaveDoRascunho(userId: string | null | undefined): string | nul
 
 /** O rascunho é grande demais para guardar? (Um texto colado de 50 páginas não vai para o armazenamento.) */
 export const LIMITE_DO_RASCUNHO = 20_000
+
+/**
+ * PARA ONDE VAI A RESPOSTA QUE CHEGOU (auditoria de bugs, 09/10/2026).
+ *
+ * A resposta do assistente demora de segundos a um minuto, e nesse tempo o
+ * histórico continua aberto: dá para clicar em "Nova" ou abrir outra conversa.
+ * Antes, a resposta que chegava depois disso era desenhada por cima da conversa
+ * aberta, e a conversa aberta continuava com o id dela — a pergunta seguinte
+ * gravava as mensagens da conversa A POR CIMA da conversa B, que se perdia.
+ *
+ * Agora cada troca de conversa muda uma marca. A resposta:
+ * - SEMPRE é gravada na conversa em que a pergunta foi feita (`idNoEnvio`; null
+ *   = a conversa ainda não existia e nasce agora);
+ * - só vai para a TELA (e só adota o id novo) se a conversa na tela ainda é
+ *   aquela.
+ */
+export function destinoDaResposta(
+  marcaNoEnvio: number,
+  marcaAgora: number,
+  idNoEnvio: string | null,
+): { naTela: boolean; gravarEm: string | null } {
+  return { naTela: marcaNoEnvio === marcaAgora, gravarEm: idNoEnvio }
+}

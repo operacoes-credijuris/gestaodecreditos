@@ -24,7 +24,12 @@ import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { BotaoCopiar, useCopiarTexto } from '@/components/ui/BotaoCopiar'
 import { gravarPreferencia, lerPreferenciaValida } from '@/lib/preferencias'
-import { chaveDoRascunho, LIMITE_DO_RASCUNHO, textoDaConversa } from '@/lib/conversaDoAssistente'
+import {
+  chaveDoRascunho,
+  destinoDaResposta,
+  LIMITE_DO_RASCUNHO,
+  textoDaConversa,
+} from '@/lib/conversaDoAssistente'
 import { formatDateTime } from '@/lib/format'
 import { haDialogoAberto } from '@/lib/dialogo'
 import { pecaSobDemanda } from '@/lib/telaSobDemanda'
@@ -212,6 +217,8 @@ export function Assistente({
   // Histórico de conversas
   const [historicoAberto, setHistoricoAberto] = useState(false)
   const [conversaAtualId, setConversaAtualId] = useState<string | null>(null)
+  /** Muda a cada troca de conversa ("Nova", abrir outra): ver destinoDaResposta. */
+  const marcaDaConversa = useRef(0)
   const [excluirId, setExcluirId] = useState<string | null>(null)
 
   // Ação proposta confirmada: abre a mesma tela de revisão da tela de Execução.
@@ -404,10 +411,10 @@ export function Assistente({
    * aqui não pode derrubar a conversa que a pessoa está tendo — o histórico é
    * conveniência, não o produto principal do assistente.
    */
-  async function salvarConversa(msgs: Mensagem[]) {
+  async function salvarConversa(msgs: Mensagem[], idDaConversa: string | null, marca: number) {
     if (!user) return
     try {
-      if (conversaAtualId) {
+      if (idDaConversa) {
         await supabase
           .from('assistente_conversas')
           .update({
@@ -415,7 +422,7 @@ export function Assistente({
             modelo,
             atualizado_em: new Date().toISOString(),
           })
-          .eq('id', conversaAtualId)
+          .eq('id', idDaConversa)
       } else {
         const primeira = msgs.find((m) => m.role === 'user')?.content ?? 'Conversa'
         const titulo = primeira.length > 60 ? `${primeira.slice(0, 60)}…` : primeira
@@ -424,7 +431,8 @@ export function Assistente({
           .insert({ user_id: user.id, titulo, mensagens: msgs, modelo })
           .select('id')
           .single()
-        if (data) setConversaAtualId(data.id as string)
+        // Só adota o id se a conversa na tela ainda é a que nasceu agora.
+        if (data && marcaDaConversa.current === marca) setConversaAtualId(data.id as string)
       }
       qc.invalidateQueries({ queryKey: ['assistente_conversas', user.id] })
     } catch {
@@ -433,6 +441,7 @@ export function Assistente({
   }
 
   function novaConversa() {
+    marcaDaConversa.current += 1
     setMensagens([])
     setConversaAtualId(null)
     setErro(null)
@@ -440,6 +449,7 @@ export function Assistente({
   }
 
   function carregarConversa(c: ConversaSalva) {
+    marcaDaConversa.current += 1
     setMensagens(c.mensagens ?? [])
     setConversaAtualId(c.id)
     setErro(null)
@@ -519,6 +529,10 @@ export function Assistente({
     setCarregando(true)
     const anexos = arquivos
     const skillsArray = [...skillsSelecionadas]
+    // A conversa em que a pergunta foi feita: a resposta volta para ELA, mesmo
+    // que a pessoa abra outra enquanto espera (destinoDaResposta).
+    const marca = marcaDaConversa.current
+    const idNoEnvio = conversaAtualId
     try {
       let respostaFn: RespostaAssistente
       if (anexos.length > 0) {
@@ -556,13 +570,15 @@ export function Assistente({
           contatoSugerido: contato_sugerido,
         },
       ]
-      setMensagens(comResposta)
-      setArquivos([])
-      salvarConversa(comResposta)
+      const destino = destinoDaResposta(marca, marcaDaConversa.current, idNoEnvio)
+      if (destino.naTela) setMensagens(comResposta)
+      // Só os anexos que foram COM esta pergunta saem do campo.
+      setArquivos((atual) => atual.filter((f) => !anexos.includes(f)))
+      void salvarConversa(comResposta, destino.gravarEm, marca)
     } catch (e) {
       // A pergunta continua na tela; o erro aparece embaixo. Recolher a
       // pergunta obrigaria a pessoa a digitar tudo de novo para tentar.
-      setErro((e as Error).message)
+      if (marca === marcaDaConversa.current) setErro((e as Error).message)
     } finally {
       setCarregando(false)
     }
