@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { falhaDaAnthropic } from '../../supabase/functions/_shared/falhaDaAnthropic.ts'
 
 /** Erro de Edge Function que veio com um código, além da mensagem. */
 export interface ErroDeFuncao extends Error {
@@ -89,6 +90,15 @@ export async function erroDaFuncao(error: { message: string }): Promise<ErroDeFu
     }
   } catch {
     /* corpo ilegível: sobra o status, que já separa 401 de 500 */
+  }
+  // A FALHA DA ANTHROPIC EM PORTUGUÊS (19/10/2026): sem créditos, chave recusada,
+  // limite ou sobrecarga viram o que fazer — e não o JSON cru em inglês, que foi
+  // o que a análise de RPV mostrou quando o saldo da conta acabou.
+  const daAnthropic = falhaDaAnthropic(detalhe || error.message)
+  if (daAnthropic) {
+    const f: ErroDeFuncao = new Error(daAnthropic.mensagem)
+    f.codigo = `anthropic-${daAnthropic.tipo}`
+    return f
   }
   const falha: ErroDeFuncao = new Error(`${detalhe || error.message}${status}`)
   if (codigo) falha.codigo = codigo

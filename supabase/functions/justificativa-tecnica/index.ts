@@ -52,6 +52,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { ESFORCO_PADRAO_DO_OPUS, lerSaidaEstruturada, type NoFormatoDoOpus } from '../_shared/respostaDoClaude.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+import { falhaDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, contaKommo } from '../_shared/segredos.ts'
 import { postarNotas } from '../_shared/anotarNoKommo.ts'
@@ -340,6 +341,10 @@ async function vigiar(req: Request, svc: SupabaseClient, body: Record<string, un
 
 /** A mensagem que a pessoa lê quando a IA falha — sem pilha, sem inglês cru. */
 function mensagemDaFalha(e: unknown): string {
+  // SEM CRÉDITOS NA CONTA (19/10/2026) e as outras falhas conhecidas: o texto
+  // que a janela mostra sai do tradutor comum (ver _shared/falhaDaAnthropic.ts).
+  const conhecida = falhaDaAnthropic((e as Error)?.message ?? String(e))
+  if (conhecida) return conhecida.mensagem
   if (e instanceof Anthropic.RateLimitError) {
     return 'A Anthropic recusou por limite de uso (muitas chamadas ao mesmo tempo). Tente de novo em alguns minutos.'
   }

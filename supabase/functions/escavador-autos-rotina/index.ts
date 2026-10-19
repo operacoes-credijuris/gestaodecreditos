@@ -50,6 +50,7 @@ import { encodeBase64 } from 'jsr:@std/encoding@1.0.11/base64'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, chaveEscavador, contaKommo } from '../_shared/segredos.ts'
+import { falhaDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
 import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
 import { cnjDoCard, digitosDoCnj } from '../_shared/nucleo/cnj.ts'
 import { assinarNota } from '../_shared/notaCredijuris.ts'
@@ -462,7 +463,8 @@ async function fontesDoCard(kommo: Kommo, lead: any) {
  * pagar quatro vezes pelo mesmo erro.
  */
 class FalhaDaLeitura extends Error {
-  constructor(mensagem: string, readonly passageira: boolean) {
+  /** `daConta`: a falha é da conta da Anthropic (sem créditos, chave) — não gasta leitura do card. */
+  constructor(mensagem: string, readonly passageira: boolean, readonly daConta = false) {
     super(mensagem)
   }
 }
@@ -483,6 +485,7 @@ async function perguntarAIA(
   ]
   let ultimoErro = ''
   let passageira = false
+  let daConta = false
   for (const pdfs of tentativas) {
     const conteudo: unknown[] = [
       {
@@ -526,6 +529,16 @@ async function perguntarAIA(
     if (!res.ok) {
       ultimoErro = `HTTP ${res.status}: ${String(j?.error?.message ?? '').slice(0, 200)}`
       passageira = falhaPassageira(res.status)
+      // SEM CRÉDITOS NA CONTA (19/10/2026) — e chave recusada, limite, sobrecarga:
+      // não é o documento, é a conta. O 400 do saldo zerado era tratado como
+      // "documento grande", a leitura encolhia, falhava de novo e o card ficava
+      // LIDO só com o número do título, sem nunca ser relido depois da recarga.
+      // Agora é passageira: o card volta para a fila e é lido quando a conta voltar.
+      if (falhaDaAnthropic(`${j?.error?.type ?? ''} ${j?.error?.message ?? ''}`)) {
+        passageira = true
+        daConta = true
+        break
+      }
       // SÓ O 400 SE RESOLVE ENCOLHENDO. Chave errada, limite de uso, fora do ar:
       // tentar de novo com menos documentos não muda nada.
       if (res.status === 400 && pdfs.length > 0) continue
@@ -550,7 +563,7 @@ async function perguntarAIA(
       break
     }
   }
-  throw new FalhaDaLeitura(`a leitura pela IA falhou (${ultimoErro})`, passageira)
+  throw new FalhaDaLeitura(`a leitura pela IA falhou (${ultimoErro})`, passageira, daConta)
 }
 
 async function lerCards(
@@ -609,7 +622,7 @@ async function lerCards(
     feitas++
 
     const rpv = Number(l.pipeline_id) === FUNIL_RPV
-    const leituras = (linha?.leituras ?? 0) + 1
+    let leituras = (linha?.leituras ?? 0) + 1
     // SÓ O TÍTULO. O `processo_cnj` do espelho, quando o título não tem número, é
     // o primeiro CNJ das ANOTAÇÕES — e entrava à força como "do título", mesmo
     // que a IA o tivesse descartado (processo só citado, dívida do titular): um
@@ -637,7 +650,10 @@ async function lerCards(
       // Falha do Kommo ao juntar as fontes conta como passageira; a da IA diz
       // se é (ver FalhaDaLeitura).
       const passa = e instanceof FalhaDaLeitura ? e.passageira : true
-      lerDeNovo = !!chaveIA && leituras < MAX_LEITURAS && passa
+      // A FALHA DA CONTA (sem créditos, chave) não gasta leitura: o card volta
+      // para a fila com o contador de antes, e é lido quando a conta voltar.
+      if (e instanceof FalhaDaLeitura && e.daConta) leituras = linha?.leituras ?? 0
+      lerDeNovo = !!chaveIA && passa && (leituras < MAX_LEITURAS || (e instanceof FalhaDaLeitura && e.daConta))
       achados = normalizarProcessos({ processos: [] }, { titulo: String(l.nome ?? ''), anotacoes: '', cnjDoTitulo }).processos
     }
 
