@@ -131,6 +131,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Textarea } from '@/components/ui/Field'
+import { CorpoDaNota } from '@/components/analise/CorpoDaNota'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
 import { Chip } from '@/components/ui/Chip'
@@ -2948,6 +2949,7 @@ function CardCredito({
   onEditarCotacao,
   etiquetaEmVoo,
   onAnotar,
+  onEditarNota,
   onEscolherProposta,
   onSemProposta,
   verPropostas = false,
@@ -3026,6 +3028,8 @@ function CardCredito({
   etiquetaEmVoo: string | null
   /** Escreve uma anotação no card do Kommo — ver `BotaoDeAnotacao`. */
   onAnotar?: (l: KommoLead, texto: string) => Promise<void>
+  /** Edita o texto de uma nota do histórico, no Kommo (ver `CorpoDaNota`). LANÇA com a mensagem. */
+  onEditarNota?: (l: KommoLead, n: KommoNota, texto: string) => Promise<void>
   /**
    * Escolhe o fundo com que seguir e move o card para a Produção de Proposta.
    * Só na aba que declara `escolhaDeProposta` (Em precificação do Externo).
@@ -3852,15 +3856,15 @@ function CardCredito({
                         de quem cadastrou o card. */}
                     {selo && <Selo>{selo}</Selo>}
                   </div>
+                  {/* O LÁPIS DA NOTA (20/10/2026): edita o texto no Kommo, na mesma nota. */}
                   {corpo && (
-                    <pre
-                      className={cn(
-                        'mt-0.5 whitespace-pre-wrap break-words font-sans text-corpo',
-                        n.automatica ? 'text-texto-3' : 'text-texto-2',
-                      )}
+                    <CorpoDaNota
+                      nota={n}
+                      corpo={corpo}
+                      onEditar={onEditarNota ? (nota, texto) => onEditarNota(lead, nota, texto) : undefined}
                     >
                       <TextoComLinks texto={corpo} />
-                    </pre>
+                    </CorpoDaNota>
                   )}
                   {outros.length > 0 && (
                     <div className="mt-1 flex flex-wrap items-start gap-1.5">
@@ -5565,6 +5569,27 @@ export default function AnaliseCredito() {
    * quem acabou de escrever procuraria a nota e não a veria.
    * A sincronização seguinte troca esta cópia pela do Kommo.
    */
+  /**
+   * EDITA UMA NOTA DO HISTÓRICO (20/10/2026, pedido do dono): o texto muda no
+   * Kommo, na mesma nota, e o rodapé registra quem editou. A cópia da tela troca
+   * na hora pelo texto que a função gravou; a sincronização seguinte confirma.
+   * LANÇA com a mensagem — a caixa de edição a mostra e fica aberta.
+   */
+  async function editarNotaDoCard(lead: KommoLead, nota: KommoNota, texto: string) {
+    const r = await invokeFunction<{ texto: string; aviso: string | null }>('kommo-editar-nota', {
+      lead_id: lead.kommo_lead_id, nota_id: nota.id, texto, autor: analistaNome,
+    })
+    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      antes?.map((l) =>
+        l.kommo_lead_id !== lead.kommo_lead_id
+          ? l
+          : { ...l, notas: (l.notas ?? []).map((x) => (x.id === nota.id ? { ...x, texto: r?.texto ?? texto } : x)) },
+      ),
+    )
+    if (r?.aviso) toast.error(r.aviso)
+    else toast.success('Nota editada no Kommo.')
+  }
+
   async function anotarNoCard(lead: KommoLead, texto: string) {
     try {
       await invokeFunction('kommo-anotar', {
@@ -6473,6 +6498,8 @@ export default function AnaliseCredito() {
                   etiquetaEmVoo={etiquetaEmVoo[l.kommo_lead_id] ?? null}
                   // A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026).
                   onAnotar={anotarNoCard}
+                  // O LÁPIS DAS NOTAS DO HISTÓRICO (20/10/2026).
+                  onEditarNota={editarNotaDoCard}
                   // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
                   // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                   onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
