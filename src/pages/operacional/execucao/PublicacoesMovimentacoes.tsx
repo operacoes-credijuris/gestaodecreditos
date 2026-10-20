@@ -603,15 +603,33 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
       {filtradas.length === 0 && busca.trim() ? (
         <SemResultado texto="Nenhuma publicação com essa busca" rotuloLimpar="Limpar a busca" onLimpar={onLimparBusca} />
       ) : filtradas.length === 0 ? (
+        // O VAZIO DIZ O PORQUÊ (revisão UX em equipe, 20/10/2026): sem frase, quem
+        // chegava não sabia se era falta de publicação ou falha.
         <EmptyState
           title="Nenhuma publicação"
           description={
-            sincronizando ? 'Sincronizando… pode levar ~1 min.' : undefined
+            sincronizando
+              ? 'Sincronizando… pode levar ~1 min.'
+              : 'Nada saiu no DJEN nos últimos 30 dias para os processos da carteira. A lista se atualiza sozinha ao abrir a aba.'
           }
         />
       ) : (
         <>
-          <Secao titulo="Novas" qtd={novas.length}>
+          {/* O GESTO DA TELA, ESCRITO (revisão UX em equipe, 20/10/2026): a caixa
+              antes do número não tinha rótulo à vista, e quem chegava não sabia
+              que era ela que tirava a publicação de Novas. Uma linha só, e só
+              enquanto há o que marcar. */}
+          <Secao
+            titulo="Novas"
+            qtd={novas.length}
+            extra={
+              novas.length > 0 ? (
+                <p className="-mt-s1 mb-s3 text-sm text-texto-3">
+                  Marque a caixa quando tratar: a publicação desce para Tratadas.
+                </p>
+              ) : null
+            }
+          >
             {novas.length ? (
               novas.map(card)
             ) : (
@@ -1080,14 +1098,16 @@ function Movimentacoes({ busca }: { busca: string }) {
           nenhuma movimentação nova cairia no cartão de "nada aqui", que é
           conclusão, e não o que aconteceu. */}
       {vazio && !status.isError ? (
-        <Card>
-          <EmptyState
-            title="Nenhuma movimentação"
-            description={
-              sincronizando ? 'Sincronizando… pode levar ~1 min.' : undefined
-            }
-          />
-        </Card>
+        // SEM O CARTÃO EM VOLTA (§0.10): o vazio tracejado dentro de um cartão
+        // sólido era moldura dupla. E COM O PORQUÊ, como em Publicações.
+        <EmptyState
+          title="Nenhuma movimentação"
+          description={
+            sincronizando
+              ? 'Sincronizando… pode levar ~1 min.'
+              : 'Nenhum andamento no ADVBOX nos últimos 20 dias para os processos da carteira. A lista se atualiza sozinha ao abrir a aba.'
+          }
+        />
       ) : (
         <>
           <Secao titulo="Novas" qtd={novas.length}>

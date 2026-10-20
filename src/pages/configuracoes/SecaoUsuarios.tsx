@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { IconButton } from '@/components/ui/IconButton'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Table, THead, TH, TBody, TR, TD, Loading, ErrorState, Truncado } from '@/components/ui/Table'
 import { CartaoNoCelular, ListaNoCelular } from '@/components/operacional/Pecas'
 import { useToast } from '@/components/ui/Toast'
@@ -135,7 +136,20 @@ export function SecaoUsuarios() {
     setEditando(null)
   }
 
+  // DESATIVAR PERGUNTA ANTES, E TODA TROCA DIZ QUE FOI FEITA (revisão UX em
+  // equipe, 20/10/2026): desativar corta o acesso de um colega na hora, e era um
+  // clique sem pergunta nem aviso — o único sinal era o selo mudar na linha.
+  // Ativar devolve o acesso e não tira nada de ninguém: vai direto, com aviso.
+  const [aDesativar, setADesativar] = useState<Profile | null>(null)
+  const [trocando, setTrocando] = useState(false)
+
+  function pedirTroca(p: Profile) {
+    if (p.ativo) setADesativar(p)
+    else void toggleAtivo(p)
+  }
+
   async function toggleAtivo(p: Profile) {
+    setTrocando(true)
     try {
       const { error } = await supabase
         .from('profiles')
@@ -143,8 +157,13 @@ export function SecaoUsuarios() {
         .eq('id', p.id)
       if (error) throw new Error(error.message)
       await qc.invalidateQueries({ queryKey: ['profiles'] })
+      const quem = p.nome || p.email
+      toast.success(p.ativo ? `${quem} desativado. O acesso foi cortado.` : `${quem} ativado. O acesso voltou.`)
+      setADesativar(null)
     } catch (err) {
       toast.error((err as Error).message)
+    } finally {
+      setTrocando(false)
     }
   }
 
@@ -190,7 +209,7 @@ export function SecaoUsuarios() {
                     { rotulo: 'Editar', icone: <Pencil />, onSelecionar: () => abrirEdicao(p) },
                     ...(admin
                       ? []
-                      : [{ rotulo: p.ativo ? 'Desativar' : 'Ativar', onSelecionar: () => toggleAtivo(p) }]),
+                      : [{ rotulo: p.ativo ? 'Desativar' : 'Ativar', onSelecionar: () => pedirTroca(p) }]),
                   ]}
                 />
               )
@@ -259,7 +278,7 @@ export function SecaoUsuarios() {
                     <TD className="whitespace-nowrap text-right align-middle">
                       <div className="flex items-center justify-end gap-s1">
                         {!admin && (
-                          <Button size="sm" variant="ghost" onClick={() => toggleAtivo(p)}>
+                          <Button size="sm" variant="ghost" onClick={() => pedirTroca(p)}>
                             {p.ativo ? 'Desativar' : 'Ativar'}
                           </Button>
                         )}
@@ -286,7 +305,7 @@ export function SecaoUsuarios() {
         title="Editar usuário"
         footer={
           <>
-            <Button variant="outline" onClick={() => void cancelarEdicao()}>
+            <Button variant="ghost" onClick={() => void cancelarEdicao()}>
               Cancelar
             </Button>
             <Button onClick={salvarEdicao} loading={saving}>
@@ -337,7 +356,7 @@ export function SecaoUsuarios() {
         title="Novo usuário"
         footer={
           <>
-            <Button variant="outline" onClick={() => void cancelarNovo()}>
+            <Button variant="ghost" onClick={() => void cancelarNovo()}>
               Cancelar
             </Button>
             {/* "CRIANDO…" COM O ÍCONE GIRANDO enquanto a função responde (a
@@ -386,6 +405,23 @@ export function SecaoUsuarios() {
           </Field>
         </GradeCampos>
       </Modal>
+
+      <ConfirmDialog
+        open={!!aDesativar}
+        title="Desativar usuário"
+        message={
+          <>
+            Desativar <strong>{aDesativar?.nome || aDesativar?.email}</strong>? A pessoa perde o acesso à plataforma
+            agora. Nada do que ela fez é apagado, e dá para ativar de novo depois.
+          </>
+        }
+        confirmLabel="Desativar"
+        iconeDoBotao={null}
+        danger
+        loading={trocando}
+        onConfirm={() => aDesativar && void toggleAtivo(aDesativar)}
+        onClose={() => setADesativar(null)}
+      />
     </>
   )
 }

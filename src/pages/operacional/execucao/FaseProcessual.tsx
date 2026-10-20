@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Segmented } from '@/components/ui/Segmented'
 import { IconButton } from '@/components/ui/IconButton'
+import { Button } from '@/components/ui/Button'
 import { Select, Input } from '@/components/ui/Field'
 import { CaixaSuave, TituloDaSecao, TituloDoGrupo } from '@/components/operacional/Pecas'
 import { EmptyState, ErrorState, Loading, Table, THead, TH, TBody, TR, TD } from '@/components/ui/Table'
@@ -144,6 +145,9 @@ function useSituacaoMutations() {
       // Créditos que estavam com essa situação selecionada ficam com
       // situacao_id nulo (on delete set null) — refletir isso na tela.
       qc.invalidateQueries({ queryKey: ['processos_fase'], refetchType: 'all' })
+      // O RETORNO DA AÇÃO (revisão UX em equipe, 20/10/2026): a situação some da
+      // lista de toda a equipe, e quem excluiu precisa saber que foi feito.
+      toast.success('Situação excluída.')
     },
     onError: (e) => toast.error((e as Error).message),
   })
@@ -296,6 +300,12 @@ function SituacaoSelect({
   const [novoNome, setNovoNome] = useState('')
   const [novaCor, setNovaCor] = useState(PALETA_SITUACAO[1].chave)
   const [editandoId, setEditandoId] = useState<string | null>(null)
+  // EXCLUIR PEDE CONFIRMAÇÃO (revisão UX em equipe, 20/10/2026): a situação é do
+  // catálogo da fase, compartilhado pela equipe, e excluí-la tira a situação de
+  // TODOS os créditos que a usam (on delete set null), sem volta. Era um clique
+  // numa lixeira de 28px. A confirmação fica NA PRÓPRIA LINHA do menu: uma
+  // janela por cima fecharia o menu e levaria o contexto junto.
+  const [excluindoId, setExcluindoId] = useState<string | null>(null)
   const [nomeEditado, setNomeEditado] = useState('')
   const [corEditada, setCorEditada] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -312,6 +322,7 @@ function SituacaoSelect({
         setAberto(false)
         setNovoAberto(false)
         setEditandoId(null)
+        setExcluindoId(null)
       }
     }
     document.addEventListener('mousedown', onDoc)
@@ -389,7 +400,48 @@ function SituacaoSelect({
           </button>
 
           {opcoes.map((o) =>
-            editandoId === o.id ? (
+            excluindoId === o.id ? (
+              <div
+                key={o.id}
+                role="group"
+                aria-label={`Excluir ${o.nome}`}
+                className="space-y-s1.5 border-y border-perigo-borda bg-perigo-fundo px-s3 py-s2"
+              >
+                <p className="text-xs text-texto">
+                  Excluir <strong className="font-semibold">"{o.nome}"</strong>? Os créditos com esta situação ficam
+                  sem situação. Não dá para desfazer.
+                </p>
+                <div className="flex items-center gap-s1.5">
+                  <button
+                    type="button"
+                    autoFocus
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onExcluir(o.id)
+                      setExcluindoId(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setExcluindoId(null)
+                    }}
+                    className="inline-flex h-controle-sm items-center gap-s1 rounded-controle bg-perigo-cheio px-s2 text-sm font-semibold text-white hover:brightness-105"
+                  >
+                    <Trash2 className="h-[14px] w-[14px]" aria-hidden />
+                    Excluir
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setExcluindoId(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setExcluindoId(null)
+                    }}
+                    className="inline-flex h-controle-sm items-center rounded-controle px-s2 text-sm text-texto-2 hover:bg-superficie-3"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : editandoId === o.id ? (
               <div key={o.id} className="space-y-s1.5 border-t border-borda px-s3 py-s2">
                 <input
                   autoFocus
@@ -481,7 +533,10 @@ function SituacaoSelect({
                   type="button"
                   title="Excluir"
                   aria-label={`Excluir ${o.nome}`}
-                  onClick={() => onExcluir(o.id)}
+                  onClick={() => {
+                    setEditandoId(null)
+                    setExcluindoId(o.id)
+                  }}
                   className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 opacity-60 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="h-[16px] w-[16px]" />
@@ -829,7 +884,10 @@ export function FaseProcessual({
               <Input
                 className="w-full"
                 aria-label="Localizar processo pelo número"
-                placeholder="Localizar processo pelo número"
+                // O ENTER É QUE PROCURA (revisão UX em equipe, 20/10/2026): não é
+                // filtro que age ao digitar, e quem chegava esperava a lista
+                // mudar. O texto diz o gesto e o resultado.
+                placeholder="Nº do processo e Enter — abre a ficha"
                 enterKeyHint="search"
                 value={buscaProcesso}
                 onChange={(e) => setBuscaProcesso(e.target.value)}
@@ -838,13 +896,20 @@ export function FaseProcessual({
                 }}
               />
             </div>
-            <IconButton
-              label="Atualizar fases (só quem teve movimentação nova)"
+            {/* COM NOME, E NÃO SÓ O ↻ (revisão UX em equipe, 20/10/2026): ao lado
+                da busca, o ícone sozinho se lia como "recarregar a busca", e o
+                aviso de rodada incompleta manda clicar em "Atualizar fases" —
+                um nome que não aparecia em lugar nenhum. No celular, só o ícone. */}
+            <Button
+              variant="secondary"
               disabled={gerar.isPending}
               onClick={() => gerar.mutate({})}
-              icon={<RefreshCw className={gerar.isPending ? 'h-[16px] w-[16px] animate-spin' : 'h-[16px] w-[16px]'} />}
-              className="grid h-controle w-controle shrink-0 place-items-center border border-borda-forte bg-superficie p-0"
-            />
+              title="Reclassifica a fase dos créditos que tiveram movimentação nova"
+              icon={<RefreshCw className={gerar.isPending ? 'h-[16px] w-[16px] animate-spin' : 'h-[16px] w-[16px]'} aria-hidden />}
+              className="shrink-0 max-sm:w-controle max-sm:px-0"
+            >
+              <span className="max-sm:sr-only">{gerar.isPending ? 'Atualizando…' : 'Atualizar fases'}</span>
+            </Button>
           </div>
       </div>
 
@@ -934,7 +999,16 @@ export function FaseProcessual({
                 // lê como "nenhuma situação definida", e não como "não consegui ler".
                 <ErrorState message={(situacoes.error as Error)?.message} onRetry={() => situacoes.refetch()} />
               ) : listaFiltrada.length === 0 ? (
-                <EmptyState title="Nada aqui" description="Nenhum crédito nesta seleção." />
+                // O VAZIO DIZ O QUE É (revisão UX em equipe, 20/10/2026): "Nada
+                // aqui" não dizia se a fase estava vazia nem o que fazer.
+                <EmptyState
+                  title={filtro.tipo === 'concluso' ? 'Nenhum crédito concluso' : 'Nenhum crédito nesta fase'}
+                  description={
+                    filtro.tipo === 'concluso'
+                      ? 'Quando uma movimentação indicar que o processo foi concluso, o crédito aparece aqui.'
+                      : 'Quando a classificação puser um crédito nesta fase, ele aparece aqui. Escolha outra fase nos quadros acima.'
+                  }
+                />
               ) : (
                 // NO CELULAR, CADA LINHA EMPILHA (revisão UX, 09/10/2026): o
                 // processo em cima, e a Situação e a Data lado a lado embaixo. Em
@@ -1046,6 +1120,12 @@ export function FaseProcessual({
             ) : recentes.porCredito.size === 0 ? (
               <p className="text-corpo text-texto-2">Nenhuma movimentação nos últimos 7 dias.</p>
             ) : (
+              <>
+              {/* O QUE A CAIXA FAZ, À VISTA (revisão UX em equipe, 20/10/2026),
+                  como em Publicações: sem isto, só o leitor de tela sabia. */}
+              <p className="mb-s2 text-sm text-texto-3">
+                Os últimos 7 dias de andamento de cada crédito. Marque a caixa quando já tiver conferido.
+              </p>
               <ul className="space-y-s2">
                 {daTrilha
                   .map((p) => ({ p, mov: recentes.porCredito.get(p.id), r: faseDe.get(p.id) }))
@@ -1139,6 +1219,7 @@ export function FaseProcessual({
                     )
                   })}
               </ul>
+              </>
                 )}
               </div>
             )}

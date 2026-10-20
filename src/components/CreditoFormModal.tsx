@@ -335,7 +335,7 @@ export function CreditoFormModal({
       dirty={dirty}
       footer={
         <>
-          <Button variant="outline" onClick={fecharForm}>
+          <Button variant="ghost" onClick={fecharForm}>
             Cancelar
           </Button>
           {/* Na aba da pasta o Salvar só aparece depois de uma pasta preencher

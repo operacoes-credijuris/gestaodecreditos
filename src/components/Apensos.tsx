@@ -186,12 +186,17 @@ export function useApensosManager(parentField: ParentField) {
         }}
         aria-expanded={aberto}
         aria-label={`${count} apenso${count > 1 ? 's' : ''} — ${aberto ? 'ocultar' : 'ver'}`}
-        title={`${count} apenso${count > 1 ? 's' : ''}`}
+        title={aberto ? 'Ocultar os apensos' : 'Ver os apensos deste processo'}
         // A pílula neutra da amostra (`.pill-btn`), com os 24px de alvo: é o
         // único jeito de abrir a lista de apensos na tabela.
-        className="inline-flex min-h-[24px] shrink-0 items-center gap-s0.5 rounded-full bg-superficie-3 px-s2 text-xs font-semibold text-texto-2 ring-1 ring-inset ring-borda transition-colors hover:text-marca-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+        className="inline-flex min-h-[24px] shrink-0 items-center gap-s0.5 whitespace-nowrap rounded-full bg-superficie-3 px-s2 text-xs font-semibold text-texto-2 ring-1 ring-inset ring-borda transition-colors hover:text-marca-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
       >
-        <span className="tabular-nums">{count}</span>
+        {/* O NOME AO LADO DO NÚMERO (revisão UX em equipe, 20/10/2026): só "1 ⌄"
+            não dizia o que contava, e quem chegava não sabia que dali abria a
+            lista de apensos. */}
+        <span className="tabular-nums">
+          {count} {count > 1 ? 'apensos' : 'apenso'}
+        </span>
         <ChevronDown
           className={cn('h-[12px] w-[12px] transition-transform', aberto && 'rotate-180')}
           aria-hidden="true"
@@ -320,7 +325,7 @@ export function useApensosManager(parentField: ParentField) {
           footer={
             <>
               <Button
-                variant="outline"
+                variant="ghost"
                 onClick={async () => {
                   // Botão próprio não passa pela confirmação do Modal — checa dirty aqui.
                   if (dirty && !(await perguntarDescarte())) return

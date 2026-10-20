@@ -258,8 +258,11 @@ export function SecaoAdvbox({
               Cadastro de créditos no ADVBOX
             </label>
             <p className="mb-s2 mt-s1 text-xs text-texto-3">
+              {/* O QUE É FIXO, DITO (revisão UX em equipe, 20/10/2026): as duas
+                  caixas travadas ainda têm a seta de lista, e quem chega tenta
+                  abri-las. */}
               Todo crédito, requerimento ou apenso novo vira um processo no ADVBOX, com o
-              cliente e a fase abaixo.
+              cliente e a fase abaixo, que são fixos. Só o responsável se escolhe.
             </p>
 
             {/* TRÊS CAIXAS LADO A LADO, e as duas primeiras desabilitadas.

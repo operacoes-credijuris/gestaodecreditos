@@ -23,7 +23,16 @@ export default function NotFound() {
         <p className="mx-auto mt-s1 max-w-[420px] text-corpo text-texto-2">
           O endereço acessado não existe ou foi movido. Confira o link ou volte para o início.
         </p>
-        <div className="mt-s4">
+        {/* "VOLTAR" AO LADO DO INÍCIO (revisão UX em equipe, 20/10/2026): quem
+            chega por um link quebrado vindo de outra tela quer, quase sempre,
+            voltar para onde estava — e não recomeçar da Análise. Sem página
+            anterior (link aberto numa aba nova), só o início. */}
+        <div className="mt-s4 flex flex-wrap justify-center gap-s2">
+          {window.history.length > 1 && (
+            <Button variant="secondary" onClick={() => navigate(-1)}>
+              Voltar
+            </Button>
+          )}
           <Button onClick={() => navigate(INICIO)}>Ir para o início</Button>
         </div>
       </div>

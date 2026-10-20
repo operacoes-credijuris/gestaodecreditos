@@ -311,7 +311,7 @@ export default function Requerimentos() {
           ) : (
             <EmptyState
               title="Nenhum requerimento"
-              description="Cadastre o primeiro requerimento."
+              description="Aqui ficam os pedidos feitos fora do processo, como habilitação, preferência e retificação. Cadastre o primeiro pelo botão abaixo."
               action={
                 <Button icon={<Plus className="h-[16px] w-[16px]" />} onClick={() => abrirForm({ ...VAZIO })}>
                   Novo requerimento
@@ -479,7 +479,7 @@ export default function Requerimentos() {
         dirty={dirty}
         footer={
           <>
-            <Button variant="secondary" onClick={fecharForm}>
+            <Button variant="ghost" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button

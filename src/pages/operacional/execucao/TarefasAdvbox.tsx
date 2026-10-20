@@ -875,7 +875,7 @@ export function NovaTarefaModal({
       dirty={dirty}
       footer={
         <>
-          <Button variant="secondary" onClick={fechar}>
+          <Button variant="ghost" onClick={fechar}>
             Cancelar
           </Button>
           <Button

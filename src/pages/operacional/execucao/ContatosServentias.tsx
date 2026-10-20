@@ -493,7 +493,7 @@ export default function ContatosServentias() {
     if (!toDelete) return
     try {
       await remove.mutateAsync(toDelete.id)
-      toast.success('Contato auxiliar removido.')
+      toast.success('Contato auxiliar excluído.')
       setToDelete(null)
     } catch (err) {
       toast.error((err as Error).message)
@@ -609,7 +609,7 @@ export default function ContatosServentias() {
           ) : (
             <EmptyState
               title="Nenhum órgão"
-              description="Cadastre créditos/requerimentos ou um contato auxiliar."
+              description="Os órgãos julgadores entram sozinhos, a partir dos créditos e requerimentos cadastrados. Órgãos auxiliares, como procuradorias e cartórios, você cadastra aqui."
               action={
                 <Button
                   icon={<Plus className="h-[16px] w-[16px]" />}
@@ -728,7 +728,7 @@ export default function ContatosServentias() {
         dirty={dirty}
         footer={
           <>
-            <Button variant="secondary" onClick={fecharForm}>
+            <Button variant="ghost" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button
