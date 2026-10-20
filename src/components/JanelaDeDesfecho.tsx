@@ -18,7 +18,7 @@ import { cn } from '@/lib/cn'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Field'
-import { CaixaDeAviso, DicaDeAviso, IdentificacaoDoCard, icSelo } from '@/components/analise/Pecas'
+import { AvisoDoMovimento, CaixaDeAviso, DicaDeAviso, IdentificacaoDoCard, icSelo } from '@/components/analise/Pecas'
 import { perguntarDescarte } from '@/lib/descarte'
 import type { AcaoTela } from '@/lib/kommo'
 import type { GrauRisco } from '../../supabase/functions/_shared/graus.ts'
@@ -121,8 +121,16 @@ export function JanelaDeDesfecho({
   onGruposMarcados,
   rotuloConfirmar,
   subtitulo,
+  destino,
 }: {
   acao: AcaoTela
+  /**
+   * A coluna aonde confirmar leva o card, para o aviso de que ele se move
+   * (`AvisoDoMovimento`, revisão de UX de 20/10/2026). `null`: confirmar NÃO
+   * move (a recusa só de uma verba, na due diligence) — sem aviso. Indefinido:
+   * move, mas a tela não sabe o nome da coluna — o aviso fica genérico.
+   */
+  destino?: string | null
   /** O título do card, sob o título da janela (opcional). */
   subtitulo?: string
   /** Os achados da análise, para marcar em vez de redigitar. */
@@ -316,13 +324,19 @@ export function JanelaDeDesfecho({
           <Button variant="ghost" onClick={() => void cancelar()} disabled={enviando || redigindo}>
             Cancelar
           </Button>
+          {/* "CONFIRMAR E MOVER" (revisão de UX de 20/10/2026), o verbo das
+              outras janelas que movem o card; quem não move diz o que faz em
+              `rotuloConfirmar`. */}
           <Button variant={acao.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
-            {rotuloConfirmar ?? 'Confirmar'}
+            {rotuloConfirmar ?? 'Confirmar e mover'}
           </Button>
         </>
       }
     >
       <div className="space-y-5">
+        {/* PARA ONDE VAI, ANTES DE TUDO (revisão de UX de 20/10/2026): o mesmo
+            aviso de toda janela que move o card. */}
+        {destino !== null && <AvisoDoMovimento destinos={[{ coluna: destino }]} />}
         {/* OS ACHADOS DA PRÓPRIA ANÁLISE, para marcar em vez de redigitar.
             Eles estão na tela de trás, já graduados e fundamentados; obrigar a
             pessoa a copiá-los à mão é pedir que reescreva o que a máquina
@@ -460,6 +474,13 @@ export function JanelaDeDesfecho({
           <CaixaDeAviso tom="perigo" role="alert">
             {erro}
           </CaixaDeAviso>
+        )}
+        {/* POR QUE O CONFIRMAR ESTÁ APAGADO, antes de a pessoa tentar (revisão
+            de UX de 20/10/2026) — a mesma frase da janela do card. */}
+        {motivoObrigatorio && motivo.trim().length === 0 && (
+          <p className="text-sm text-texto-3">
+            O botão libera com a anotação escrita ({MINIMO_DO_MOTIVO} caracteres ou mais).
+          </p>
         )}
         {motivoObrigatorio && motivo.trim().length > 0 && motivo.trim().length < MINIMO_DO_MOTIVO && (
           <DicaDeAviso>

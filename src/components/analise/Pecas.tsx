@@ -9,7 +9,7 @@
 //
 // SÓ APRESENTAÇÃO: nenhuma regra mora aqui.
 import type { ReactNode } from 'react'
-import { AlertTriangle, CheckCircle2, Info, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Info, XCircle } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { camposDoTitulo } from '@/lib/quadroDaAnalise'
 
@@ -165,6 +165,67 @@ export function RotuloDeSecao({ children, className }: { children: ReactNode; cl
     >
       {children}
     </h4>
+  )
+}
+
+/** Uma saída de uma janela que move o card: o rótulo do botão e a coluna aonde ela leva. */
+export interface DestinoDoMovimento {
+  /** O rótulo do botão da saída ("Aprovar crédito"); omitido com uma saída só. */
+  rotulo?: string
+  /** A coluna de destino como a tela a mostra; omitida quando a tela não a conhece. */
+  coluna?: string
+}
+
+/**
+ * O AVISO DE QUE CONFIRMAR MOVE O CARD (revisão de UX de 20/10/2026, uso em
+ * equipe): o mesmo texto em toda janela que move — para onde vai e o que isso
+ * dispara. Antes só o "Sem proposta" dizia isso; as janelas do Concluir e dos
+ * desfechos confirmavam sem nomear a coluna, e quem chega novo não sabia que o
+ * Kommo roda as automações da coluna na hora.
+ *
+ * NEUTRO, E NÃO ÂMBAR: é o caminho normal da etapa, não um perigo. Uma linha
+ * com uma saída; com várias, cada botão e a coluna dele.
+ */
+export function AvisoDoMovimento({ destinos, className }: { destinos: DestinoDoMovimento[]; className?: string }) {
+  if (destinos.length === 0) return null
+  const comColuna = destinos.filter((d) => d.coluna)
+  return (
+    <div
+      role="note"
+      className={cn('flex items-start gap-s2 rounded-campo bg-superficie-2 px-s3 py-s2 text-sm text-texto-2', className)}
+    >
+      <ArrowRight className="mt-s0.5 h-[16px] w-[16px] flex-none text-texto-3" aria-hidden />
+      <div className="min-w-0">
+        {destinos.length === 1 || comColuna.length === 0 ? (
+          <p>
+            {destinos.length === 1 && destinos[0].coluna ? (
+              <>
+                Ao confirmar, o card vai para <strong className="font-semibold text-texto">{destinos[0].coluna}</strong>{' '}
+                no Kommo.
+              </>
+            ) : (
+              'Ao confirmar, o card muda de coluna no Kommo.'
+            )}
+          </p>
+        ) : (
+          <>
+            <p>Cada saída move o card no Kommo:</p>
+            <ul className="m-0 mt-s1 flex list-none flex-wrap gap-x-s4 gap-y-s1 p-0">
+              {comColuna.map((d) => (
+                <li key={`${d.rotulo}-${d.coluna}`} className="whitespace-nowrap">
+                  {d.rotulo} <span aria-hidden>→</span>
+                  <span className="sr-only">leva para</span>{' '}
+                  <strong className="font-semibold text-texto">{d.coluna}</strong>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <p className="mt-s0.5 text-xs text-texto-3">
+          As automações da coluna disparam na hora; para desfazer, só movendo o card de novo.
+        </p>
+      </div>
+    </div>
   )
 }
 

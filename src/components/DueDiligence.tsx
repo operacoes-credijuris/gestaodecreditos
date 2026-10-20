@@ -60,6 +60,7 @@ export function DueDiligence({
   acaoReprovar,
   onMover,
   onSeguir,
+  nomeDaColuna,
 }: {
   leadId: number
   /** O título do card: é dele que sai QUAIS verbas estão sendo cedidas. */
@@ -105,6 +106,8 @@ export function DueDiligence({
    * fecha, que continua sendo uma decisão inteira.
    */
   onSeguir?: () => void
+  /** O nome da coluna de um status, para o aviso de que o desfecho move o card. */
+  nomeDaColuna?: (statusId: number) => string | undefined
 }) {
   const [aba, setAba] = useState<Aba>(comCertidoes ? 'certidoes' : 'processos')
   // Reportado PELO painel: só ele sabe que há formulário mexido e não salvo, e
@@ -327,7 +330,13 @@ export function DueDiligence({
               decididos com a análise à frente. Aqui a pergunta é outra — os
               processos que a diligência achou impedem a cessão? —, e a
               resposta "não impedem" é o que destrava o trabalho seguinte. */}
-          <Button onClick={seguir} loading={seguindo}>
+          {/* O QUE O "SEGUIR" FAZ, no passar do mouse (revisão de UX de
+              20/10/2026): quem chega novo lia "seguir" como mover o card. */}
+          <Button
+            onClick={seguir}
+            loading={seguindo}
+            title="Libera a diligência (os processos apurados não impedem a cessão) e segue para o próximo passo — não move o card"
+          >
             Seguir
           </Button>
         </>
@@ -392,6 +401,8 @@ export function DueDiligence({
           rotuloConfirmar={
             recusaParcial ? `Recusar ${sobra.recusada.toLowerCase()} e seguir` : undefined
           }
+          // A RECUSA SÓ DE UMA VERBA NÃO MOVE O CARD: sem o aviso do movimento.
+          destino={recusaParcial ? null : nomeDaColuna?.(desfecho.statusId)}
           onMover={async (statusId, comentario) => {
             if (recusaParcial) {
               await recusarVerba(comentario)

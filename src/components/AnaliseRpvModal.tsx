@@ -1208,6 +1208,7 @@ export function AnaliseRpvModal({
   onSalvo,
   acoes,
   onMover,
+  nomeDaColuna,
 }: {
   open: boolean
   onClose: () => void
@@ -1230,6 +1231,8 @@ export function AnaliseRpvModal({
   acoes: AcaoTela[]
   /** Move o card e anota o motivo. Resolve quando o Kommo confirmou. */
   onMover: (statusId: number, comentario: string) => Promise<void>
+  /** O nome da coluna de um status, para o aviso de que o desfecho move o card. */
+  nomeDaColuna?: (statusId: number) => string | undefined
 }) {
   const [passo, setPasso] = useState<string | null>('Lendo os anexos do card…')
   const [erro, setErro] = useState<string | null>(null)
@@ -2427,6 +2430,7 @@ export function AnaliseRpvModal({
           achados={achadosDoDesfecho}
           onRedigir={redigirDesfecho}
           onMover={onMover}
+          destino={nomeDaColuna?.(desfechoAberto.statusId)}
           onFechar={() => setDesfechoAberto(null)}
           // A RAZÃO DO PORTÃO 1 JÁ NO CAMPO: ela é o motivo, e redigitá-la
           // seria copiar o que está escrito acima na mesma tela.

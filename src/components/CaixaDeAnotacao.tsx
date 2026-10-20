@@ -21,7 +21,7 @@
 // celular, embaixo dele); clicando, o visualizador da plataforma. O endereço é
 // local (`blob:`) e é revogado quando a imagem sai da lista — tirada ou enviada.
 // Os outros arquivos continuam na lista.
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { AlertTriangle, FileText, Image as ImageIcon, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Tecla } from '@/components/ui/Tecla'
@@ -374,6 +374,7 @@ export function CaixaDeAnotacao({
   onFechar?: () => void
 }) {
   const entrada = useRef<HTMLInputElement>(null)
+  const idDoTexto = useId()
   const [arrastando, setArrastando] = useState(false)
   const pode = !a.enviando && (a.texto.trim().length > 0 || a.anexos.length > 0)
   const imagens = a.anexos.filter(ehImagemLocal)
@@ -426,16 +427,22 @@ export function CaixaDeAnotacao({
 
   return (
     <div className="relative" onDragEnter={sobre} onDragOver={sobre} onDragLeave={saiu} onDrop={soltou}>
+      {/* O NOME DO CAMPO, O MESMO DAS JANELAS QUE MOVEM ("Anotação no card"),
+          e o que ele NÃO faz (revisão de UX de 20/10/2026): quem chegava novo
+          não sabia se anotar mudava o card de coluna. */}
+      <label htmlFor={idDoTexto} className="mb-s1.5 block text-sm font-semibold text-texto">
+        Anotação no card <span className="font-normal text-texto-3">— vai para o Kommo, sem mover o card</span>
+      </label>
       {/* O TEXTO E, À DIREITA, A COLUNA DAS IMAGENS. A coluna não dá altura à
           linha (fica `absolute` numa faixa de 64px): quem manda é o texto, que
           cresce para caber duas miniaturas; da terceira em diante, a coluna
           rola. No celular, as miniaturas descem para baixo do texto. */}
       <div className="flex flex-col gap-s2 sm:flex-row">
       <textarea
+        id={idDoTexto}
         autoFocus
         rows={4}
         value={a.texto}
-        aria-label="Anotação"
         disabled={a.enviando}
         onChange={(e) => a.setTexto(e.target.value)}
         onPaste={colou}

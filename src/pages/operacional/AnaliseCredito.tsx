@@ -137,7 +137,15 @@ import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/T
 import { Chip } from '@/components/ui/Chip'
 import { CampoDeBusca } from '@/components/ui/CampoDeBusca'
 import { useToast } from '@/components/ui/Toast'
-import { CaixaDeAviso, DicaDeAviso, IdentificacaoDoCard, Selo, icSelo } from '@/components/analise/Pecas'
+import {
+  AvisoDoMovimento,
+  CaixaDeAviso,
+  DicaDeAviso,
+  IdentificacaoDoCard,
+  Selo,
+  icSelo,
+} from '@/components/analise/Pecas'
+import { DescricaoDaEtapa } from '@/components/analise/DescricaoDaEtapa'
 import { haDialogoAberto } from '@/lib/dialogo'
 import { estaDigitando } from '@/lib/atalhos'
 import { gravarPreferencia, lerPreferencia } from '@/lib/preferencias'
@@ -206,6 +214,7 @@ import {
   notasDoDesfecho,
   MOTIVOS_NAO_FECHOU,
   motivoSuficiente,
+  MINIMO_DO_MOTIVO,
   notaDoFechado,
   notaDoNaoFechou,
   type TipoDeNaoFechou,
@@ -772,6 +781,29 @@ const PERIGO_CONTORNADO = 'border-perigo-borda bg-superficie text-perigo hover:b
 const ACAO_DA_ETAPA = 'text-marca-texto hover:bg-marca-leve hover:text-marca-texto'
 
 /**
+ * O QUE CADA BOTÃO DO CARD FAZ, no passar do mouse (revisão de UX de 20/10/2026,
+ * uso em equipe): quem chega novo não sabia que "Due diligence" só abre uma
+ * janela e que "Concluir" muda o card de coluna no Kommo. UMA FRASE, NUM LUGAR
+ * SÓ, com a mesma fórmula no fim — "não move o card" ou "move o card…, com
+ * confirmação" —, para o mesmo botão dizer o mesmo em toda etapa.
+ */
+const DICA = {
+  dueDiligence: 'Abre a apuração de processos judiciais do cedente (e as certidões, no Interno) — não move o card',
+  analiseRpv: 'Abre a análise: lê os autos, qualifica e precifica o crédito (deságio, prazo e preço)',
+  analiseExterna: 'Abre uma conversa com o Claude, que busca os autos deste card pelo conector — não move o card',
+  certidoes: 'Abre o painel das certidões do cedente — não move o card',
+  concluir: 'Escolha o desfecho da etapa e escreva o motivo — move o card no Kommo, com confirmação',
+  semProposta: 'Nenhum fundo propôs: tira as etiquetas e move o card para Reprovados — com confirmação',
+  naoFechou: 'O cedente recusou ou sumiu: escreva o motivo — move o card no Kommo, com confirmação',
+  fechado: 'O cedente aceitou a proposta — move o card no Kommo, com confirmação',
+  escolherProposta: 'Compare as cotações e siga com a de um fundo — move o card no Kommo, com confirmação',
+} as const
+
+/** A dica de um botão que move o card para uma coluna conhecida (ou só "no Kommo"). */
+const dicaDoMovimento = (coluna: string | undefined) =>
+  `Move o card para ${coluna ?? 'outra coluna'} no Kommo, com confirmação`
+
+/**
  * Fecha uma caixa flutuante ao clicar fora e no Esc.
  *
  * Sem isto, a lista de trinta cards ficaria com um painel aberto atrás do outro
@@ -906,7 +938,7 @@ function JanelaDaPlanilha({
         <div className="flex w-full flex-wrap items-center gap-2">
           <button
             type="button"
-            className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:cursor-not-allowed disabled:opacity-50"
+            className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-left text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:cursor-not-allowed disabled:opacity-50"
             // GRAVANDO O BLOCO, A RESERVA NÃO VALE (09/10/2026): o clique fechava a
             // janela no meio da gravação — o erro dela ficava sem onde aparecer —
             // e pagava uma segunda leitura dos autos, com duas planilhas e duas
@@ -921,6 +953,21 @@ function JanelaDaPlanilha({
             Não tenho o bloco — usar a análise jurídica antiga
           </button>
           <span className="flex-1" />
+          {/* O CANCELAR DE TODA JANELA (revisão de UX de 20/10/2026): esta era a
+              única do card sem ele — fechava só pelo X. Fantasma, ao lado do
+              primário, como no rodapé da casa (§0.6). */}
+          <Button
+            variant="ghost"
+            className={BTN}
+            // PERGUNTA COMO O X: o bloco colado iria embora com um clique.
+            onClick={async () => {
+              if (colado.trim() && !(await perguntarDescarte())) return
+              onFechar()
+            }}
+            disabled={enviando}
+          >
+            Cancelar
+          </Button>
           <Button
             className={BTN}
             onClick={async () => {
@@ -974,6 +1021,7 @@ function JanelaDeMensagem({
   resumo = null,
   ocupado,
   jaMovido,
+  destinoDe,
   onConfirmar,
   onFechar,
 }: {
@@ -1003,6 +1051,11 @@ function JanelaDeMensagem({
    * saída moveria o card de novo, para outra coluna. Indefinido: nada trava.
    */
   jaMovido?: (statusId: number) => boolean
+  /**
+   * O nome da coluna aonde cada saída leva, para o aviso de que confirmar move o
+   * card (`AvisoDoMovimento`). Indefinido, ou sem a coluna, o aviso fica genérico.
+   */
+  destinoDe?: (statusId: number) => string | undefined
   /** As notas, na ordem do feed: ao aprovar com o resumo, o resumo e depois a mensagem. */
   onConfirmar: (acao: AcaoTela, notas: string[]) => Promise<void>
   onFechar: () => void
@@ -1054,6 +1107,11 @@ function JanelaDeMensagem({
   /** Qual saída está em curso — as outras ficam travadas enquanto isso. */
   const [emCurso, setEmCurso] = useState<number | null>(null)
   const exigeMotivo = acoes.some(exigeMotivoDe)
+  /** "Exigir diligência e Reprovar crédito": as saídas que pedem o motivo escrito. */
+  const nomesQueExigemMotivo = acoes
+    .filter(exigeMotivoDe)
+    .map((a) => a.label)
+    .join(' e ')
   // APROVAR SEM RESUMO É UM CARD SEM ANÁLISE SALVA.
   //
   // O resumo da oportunidade é gravado no card pelo 'salvar' da análise. Sem
@@ -1137,10 +1195,12 @@ function JanelaDeMensagem({
       // solto, os demais pareceriam estar enviando também.
       loading={emCurso === acao.statusId || (acoes.length === 1 && trabalhando)}
     >
-      {/* COM UMA SAÍDA SÓ, "Confirmar": o botão do card já disse o que
-          vai acontecer, e repetir o rótulo aqui é redundância. Com
-          várias, cada uma precisa dizer para onde leva. */}
-      {varias ? acao.label : 'Confirmar'}
+      {/* COM UMA SAÍDA SÓ, "Confirmar e mover" (revisão de UX de
+          20/10/2026): o rótulo da saída já está no título da janela, e o
+          verbo diz o que o clique faz — o mesmo do "Escolher proposta".
+          Depois de a nota falhar com o card já movido, o clique só anota.
+          Com várias, cada uma precisa dizer para onde leva. */}
+      {varias ? acao.label : movida ? 'Enviar a nota de novo' : 'Confirmar e mover'}
     </Button>
   )
 
@@ -1170,6 +1230,13 @@ function JanelaDeMensagem({
       }
     >
       {recuperado.maisNovo && <AvisoDoRascunho rascunho={recuperado.maisNovo} onDescartar={descartarRascunho} />}
+      {/* PARA ONDE VAI, ANTES DE ESCREVER (revisão de UX de 20/10/2026): a
+          janela confirmava sem nomear a coluna, e com três saídas nenhuma dizia
+          aonde levava. O mesmo aviso das outras janelas que movem. */}
+      <AvisoDoMovimento
+        className="mb-s3"
+        destinos={acoes.map((a) => ({ rotulo: a.label, coluna: destinoDe?.(a.statusId) }))}
+      />
       {semResumo && (
         <CaixaDeAviso tom="aviso" className="mb-3">
           {comResumo
@@ -1218,17 +1285,29 @@ function JanelaDeMensagem({
           09/10/2026): eram dois campos de texto empilhados e só um deles dizia o
           que era. Aprovar deixa DUAS notas — o resumo e esta mensagem —, e o
           rótulo diz isso onde se escreve. */}
-      {comResumo && (
-        <label
-          htmlFor={idDaMensagem}
-          className="mb-s1.5 flex flex-wrap items-baseline gap-x-2 gap-y-s0.5 text-corpo font-semibold text-texto"
-        >
-          Mensagem
-          <span className="text-sm font-normal text-texto-3">
-            — vai para o card em qualquer saída; ao aprovar, numa nota depois do resumo
-          </span>
-        </label>
-      )}
+      {/* O CAMPO COM NOME EM TODA JANELA (revisão de UX de 20/10/2026): sem o
+          resumo, era uma caixa grande sem rótulo, e só o texto de exemplo dizia
+          para que servia — e ele some com a primeira letra. */}
+      <label
+        htmlFor={idDaMensagem}
+        className="mb-s1.5 flex flex-wrap items-baseline gap-x-2 gap-y-s0.5 text-corpo font-semibold text-texto"
+      >
+        {/* "ANOTAÇÃO NO CARD", O NOME DO MESMO CAMPO na janela do desfecho da
+            análise e da due diligence (JanelaDeDesfecho): a mesma coisa com o
+            mesmo nome em toda janela. */}
+        Anotação no card
+        <span className="text-sm font-normal text-texto-3">
+          {/* SEM REPETIR A REGRA DO MOTIVO: com várias saídas, quem diz quais
+              pedem o texto é a linha embaixo do campo. */}
+          {comResumo
+            ? '— vai em qualquer saída; ao aprovar, numa nota depois do resumo'
+            : !exigeMotivo
+              ? '— opcional'
+              : varias
+                ? '— vai para o card com a saída escolhida'
+                : '— obrigatória'}
+        </span>
+      </label>
       <textarea
         id={idDaMensagem}
         className={cn(
@@ -1241,7 +1320,6 @@ function JanelaDeMensagem({
         )}
         value={mensagem}
         disabled={trabalhando}
-        aria-label="Mensagem"
         placeholder={
           exigeMotivo
             ? 'Por que o card está sendo movido. Quem lê não tem a análise à mão.'
@@ -1251,6 +1329,19 @@ function JanelaDeMensagem({
       />
       {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
         <DicaDeAviso>Escreva a razão por extenso — ela fica no card como registro da decisão.</DicaDeAviso>
+      )}
+      {/* POR QUE O BOTÃO ESTÁ APAGADO, dito antes de a pessoa tentar (revisão de
+          UX de 20/10/2026): "Exigir diligência" e "Reprovar" abriam a janela
+          desligados, sem uma palavra sobre o que os liga. */}
+      {exigeMotivo && mensagem.trim().length === 0 && (
+        <p className="mt-s2 text-sm text-texto-3">
+          {!varias
+            ? 'O botão libera'
+            : acoes.filter(exigeMotivoDe).length > 1
+              ? `${nomesQueExigemMotivo} liberam`
+              : `${nomesQueExigemMotivo} libera`}{' '}
+          com o motivo escrito (10 caracteres ou mais).
+        </p>
       )}
       {erro && (
         <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
@@ -1469,8 +1560,10 @@ function SeletorDeEtiquetas({
 
   return (
     <div className="relative" ref={caixa}>
-      {/* SÓ O ÍCONE, num selo tracejado (amostra `.tag-edit`): é ferramenta, não
-          informação — discreto ao lado das etiquetas, e o título o explica. */}
+      {/* NUM SELO TRACEJADO (amostra `.tag-edit`): é ferramenta, não
+          informação — discreto ao lado das etiquetas. COM A PALAVRA (revisão
+          de UX de 20/10/2026): só o ícone, quem chegava novo não achava onde se
+          marca "Cotado"/"Reprovado" — e o título não aparece no toque. */}
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
@@ -1485,6 +1578,7 @@ function SeletorDeEtiquetas({
         )}
       >
         <Tag className="h-[14px] w-[14px]" aria-hidden />
+        <span aria-hidden>Etiquetas</span>
       </button>
 
       {aberto && (
@@ -1650,12 +1744,15 @@ function BotaoEscolherProposta({
   lead,
   ocupado,
   carregando,
+  destino,
   onEscolher,
   onDesistir,
 }: {
   lead: KommoLead
   ocupado: boolean
   carregando: boolean
+  /** A coluna aonde a escolha leva o card, como a tela a mostra (para o aviso do passo 2). */
+  destino?: string
   onEscolher: (fundo: string) => Promise<void>
   /** A caixa fechou ou sumiu: o movimento que ficou sem nota é esquecido. */
   onDesistir?: () => void
@@ -1721,6 +1818,7 @@ function BotaoEscolherProposta({
         loading={carregando}
         disabled={ocupado}
         aria-expanded={aberto}
+        title={DICA.escolherProposta}
       >
         Escolher proposta
         <ChevronDown className="h-[14px] w-[14px]" aria-hidden />
@@ -1751,6 +1849,9 @@ function BotaoEscolherProposta({
                   <ValoresDaCotacao cotacao={cotacaoDe(fundo)} />
                 </div>
               )}
+              {/* PARA ONDE VAI E O QUE DISPARA (revisão de UX de 20/10/2026), como
+                  em toda janela que move — ver `AvisoDoMovimento`. */}
+              <AvisoDoMovimento className="mx-s3 mt-s2" destinos={[{ coluna: destino }]} />
               {/* O "VOLTAR" EM FANTASMA, como no "Fechado!": é o cancelar da caixa. */}
               <div className="flex justify-end gap-s2 p-s2">
                 <Button size="sm" variant="ghost" className={BTN} onClick={() => irAoPasso(null)} disabled={carregando}>
@@ -2053,6 +2154,7 @@ function ChecksDosFundos({
           onClick={onMover}
           loading={movendo}
           disabled={ocupado}
+          title="Os fundos responderam: move o card para Em precificação no Kommo"
         >
           Mover para Em precificação
         </Button>
@@ -2417,11 +2519,14 @@ type AndamentoDoAnexo = ProgressoDoEnvio | { fase: 'movendo' }
 function BotaoAnexarEMover({
   rotulo,
   soMover,
+  destino,
   ocupado,
   onEnviar,
 }: {
   rotulo: string
   soMover: boolean
+  /** A coluna aonde o card vai, como a tela a mostra (para a dica do botão). */
+  destino?: string
   ocupado: boolean
   onEnviar: (arquivo: File | null, onAndamento: (p: AndamentoDoAnexo) => void) => Promise<void>
 }) {
@@ -2481,7 +2586,13 @@ function BotaoAnexarEMover({
           icon={soMover ? <ArrowRight className={IC} aria-hidden /> : <Upload className={IC} aria-hidden />}
           onClick={() => (soMover ? void enviar(null) : entrada.current?.click())}
           disabled={ocupado}
-          title={soMover ? 'O arquivo já está no card — falta só mover' : 'Escolher o arquivo no computador'}
+          // ESCOLHER O ARQUIVO JÁ É A CONFIRMAÇÃO (ver acima): a dica diz isso
+          // antes do clique (revisão de UX de 20/10/2026).
+          title={
+            soMover
+              ? `O arquivo já está no card — falta só mover para ${destino ?? 'a próxima coluna'}`
+              : `Escolha o arquivo no computador: ele sobe ao card e o card vai para ${destino ?? 'a próxima coluna'} no Kommo, sem outra confirmação`
+          }
         >
           {soMover ? 'Tentar mover de novo' : rotulo}
         </Button>
@@ -2629,6 +2740,7 @@ function BotaoFechado({
         }}
         disabled={ocupado && !aberto}
         aria-expanded={aberto}
+        title={DICA.fechado}
       >
         {acao.label}
       </Button>
@@ -2653,8 +2765,11 @@ function BotaoFechado({
           </span>
           <p className="font-display text-corpo font-bold text-texto">O cedente aceitou a proposta?</p>
           <p className="mt-1 text-corpo text-texto-2">
-            {cedente} vai para <strong className="text-texto">{destino}</strong>.
+            {cedente} vai para <strong className="text-texto">{destino}</strong> no Kommo.
           </p>
+          {/* O QUE O MOVIMENTO DISPARA, como em toda janela que move (ver
+              `AvisoDoMovimento`): numa linha, que a caixa é pequena. */}
+          <p className="mt-s1 text-xs text-texto-3">As automações da coluna disparam na hora.</p>
           <input
             value={anotacao}
             disabled={enviando}
@@ -2672,8 +2787,11 @@ function BotaoFechado({
             </CaixaDeAviso>
           )}
           <div className="mt-3 flex justify-center gap-2">
+            {/* "CANCELAR", e não "Voltar" (revisão de UX de 20/10/2026): fecha a
+                caixa sem mover, como o Cancelar das janelas. O "Voltar" fica
+                para quem volta a um passo anterior (a lista do "Escolher proposta"). */}
             <Button size="sm" variant="ghost" className={BTN} onClick={() => setAberto(false)} disabled={enviando}>
-              Voltar
+              Cancelar
             </Button>
             <Button
               // O FOCO NO CONFIRMAR ao abrir (amostra): é a ação que se procura.
@@ -2857,7 +2975,16 @@ function JanelaNaoFechou({
           )
         })}
       </div>
-      <div role="group" aria-label="Motivos mais comuns" className="mt-4 flex flex-wrap items-center gap-1.5">
+      {/* O CAMPO COM NOME (revisão de UX de 20/10/2026): era só "aria-label",
+          e o que se lia na tela era o texto de exemplo, que some ao digitar.
+          Em cima dos motivos comuns, que escrevem nele. */}
+      <label
+        htmlFor={`nf-${lead.kommo_lead_id}-motivo`}
+        className="mt-4 block text-corpo font-semibold text-texto"
+      >
+        Anotação no card <span className="text-sm font-normal text-texto-3">— o motivo, obrigatório</span>
+      </label>
+      <div role="group" aria-label="Motivos mais comuns" className="mt-s2 flex flex-wrap items-center gap-1.5">
         <span className="text-sm text-texto-3">Motivos comuns:</span>
         {m.sugestoes.map((s) => (
           <button
@@ -2876,15 +3003,23 @@ function JanelaNaoFechou({
       </div>
       <textarea
         ref={campo}
+        id={`nf-${lead.kommo_lead_id}-motivo`}
         autoFocus
         rows={4}
         value={motivo}
         disabled={enviando}
-        aria-label="Motivo"
         placeholder={m.exemplo}
         onChange={(e) => mudarMotivo(e.target.value)}
         className="mt-3 min-h-[112px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
       />
+      {/* POR QUE O BOTÃO ESTÁ APAGADO, a mesma frase das outras janelas que
+          movem (revisão de UX de 20/10/2026). */}
+      {motivo.trim().length === 0 && (
+        <p className="mt-s2 text-sm text-texto-3">
+          O botão libera com o motivo escrito ({MINIMO_DO_MOTIVO} caracteres ou mais). As automações da coluna
+          de destino disparam na hora.
+        </p>
+      )}
       {motivo.trim().length > 0 && !motivoSuficiente(motivo) && (
         <DicaDeAviso>Escreva o motivo por extenso — é o que o comercial lê depois para entender a perda.</DicaDeAviso>
       )}
@@ -2897,15 +3032,13 @@ function JanelaNaoFechou({
   )
 }
 
-/** O "·" entre os campos do título do card. */
-// SÓ A PARTIR DE 640PX (revisão visual de 07/10/2026): no celular a linha
-// quebra, e a quebra deixava um "•" sozinho no começo da linha de baixo. Lá
-// quem separa os campos é o vão.
-const Ponto = () => (
-  <span className="hidden text-borda-forte sm:inline" aria-hidden>
-    •
-  </span>
-)
+/*
+ * O "•" ENTRE OS CAMPOS DO TÍTULO DO CARD SAIU (revisão de UX de 20/10/2026).
+ * Desde 07/10/2026 ele já não ia ao celular, porque a quebra deixava um "•"
+ * sozinho no começo da linha de baixo — e o mesmo acontecia no computador, com
+ * a zona de ações mais larga ("• resp. Daniela Furtado"). Quem separa os campos
+ * é o vão de 12px, em toda largura: um sinal a menos por linha.
+ */
 
 /** O ícone de cada tom de etiqueta (amostra): cotado ✓, reprovado ✕, enviado →. */
 function iconeDaEtiqueta(tom: TomDaTag, nome = ''): ReactNode {
@@ -2961,6 +3094,8 @@ function CardCredito({
   negociacao,
   onGerarContrato,
   onDesistirDoMovimento,
+  colunaDoId,
+  destinoDaProposta,
   realcado = false,
 }: {
   lead: KommoLead
@@ -3051,6 +3186,7 @@ function CardCredito({
   anexarEMover?: {
     rotulo: string
     soMover: boolean
+    destino?: string
     onEnviar: (l: KommoLead, arquivo: File | null, onAndamento: (p: AndamentoDoAnexo) => void) => Promise<void>
   }
   /** Os checks do envio aos fundos, onde a aba os declara (a Remessa do Externo). */
@@ -3096,6 +3232,13 @@ function CardCredito({
   onDesistirDoMovimento?: (leadId: number) => void
   /** Leva à Geração de contratos com este card (onda 4 — para todos desde 03/10/2026). Não move card. */
   onGerarContrato?: (l: KommoLead) => void
+  /**
+   * O nome da coluna de um status, para as dicas dos botões que movem o card
+   * (revisão de UX de 20/10/2026). Sem ele, a dica diz só "outra coluna".
+   */
+  colunaDoId?: (statusId: number) => string | undefined
+  /** A coluna aonde o "Escolher proposta" leva, para o aviso do passo de confirmar. */
+  destinoDaProposta?: string
   /** O card que o endereço apontou ("Voltar ao card"): moldura de destaque, sem abrir nada. */
   realcado?: boolean
 }) {
@@ -3211,13 +3354,12 @@ function CardCredito({
         </div>
 
         {campos ? (
-          <div className="mt-1 flex flex-wrap items-center gap-x-s3 gap-y-s1 text-corpo text-texto-2 sm:gap-x-2">
+          <div className="mt-1 flex flex-wrap items-center gap-x-s3 gap-y-s1 text-corpo text-texto-2">
             <span>{campos.intermediador}</span>
             {/* SEM NÚMERO NO TÍTULO, O CAMPO SOME (amostra) — o resto do título
                 continua separado. Quem avisa da falta é o selo do cadastro. */}
             {campos.numero && (
               <>
-                <Ponto />
                 <span className="inline-flex items-center gap-0.5 font-medium tabular-nums tracking-[.01em] text-texto">
                   {campos.numero}
                   <button
@@ -3232,12 +3374,10 @@ function CardCredito({
                 </span>
               </>
             )}
-            {(campos.objeto || campos.percentual) && <Ponto />}
             {campos.objeto && <Selo>{campos.objeto}</Selo>}
             {campos.percentual && <Selo>{campos.percentual}</Selo>}
             {lead.responsavel_nome && (
               <>
-                <Ponto />
                 <span className="text-texto-3" title="Responsável no Kommo">
                   resp. {lead.responsavel_nome}
                 </span>
@@ -3596,9 +3736,15 @@ function CardCredito({
             soltos à direita, o último caía sozinho numa linha de baixo — e era
             justamente a ação da etapa, que vem por último. Esticados, cada linha
             fecha inteira e a ação que avança fica larga, embaixo, perto do
-            polegar. NO COMPUTADOR, 500PX: com 420 o "Concluir" da Revisão (o
-            quarto botão) quebrava sozinho para baixo dos outros três. */}
-        <div className="flex w-full flex-wrap items-center justify-end gap-s2 max-sm:[&>*]:flex-auto max-sm:[&>div>button]:w-full min-[900px]:mt-auto min-[900px]:w-auto min-[900px]:max-w-[500px]">
+            polegar. NO COMPUTADOR, 560PX (era 500, revisão de UX de
+            20/10/2026): com 500 o "Escolher proposta" da Em precificação (o
+            quarto botão, a ação da etapa) caía sozinho numa segunda linha.
+            UMA ORDEM SÓ EM TODA ETAPA (mesma revisão): Anotar → o trabalho
+            (Due diligence, Executar análise, Certidões, Justificativa) → a
+            saída negativa (Sem proposta, Não fechou) → a ação que avança, por
+            último. Quem alterna entre colunas acha cada coisa no mesmo lugar.
+            O QUE MOVE O CARD DIZ ISSO NO PASSAR DO MOUSE, e abre confirmação. */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-s2 max-sm:[&>*]:flex-auto max-sm:[&>div>button]:w-full min-[900px]:mt-auto min-[900px]:w-auto min-[900px]:max-w-[560px]">
           {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
           {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t) => onAnotar(lead, t)} />}
 
@@ -3616,6 +3762,7 @@ function CardCredito({
               icon={<ClipboardCheck className={IC} aria-hidden />}
               onClick={() => onDueDiligence(lead)}
               disabled={ocupado}
+              title={DICA.dueDiligence}
             >
               Due diligence
             </Button>
@@ -3636,6 +3783,7 @@ function CardCredito({
               onClick={() => onAnalisar(lead)}
               loading={analisando}
               disabled={ocupado || analisando}
+              title={DICA.analiseRpv}
             >
               {analisando ? 'Analisando…' : 'Executar análise'}
             </Button>
@@ -3660,9 +3808,75 @@ function CardCredito({
               }
               onClick={() => onAnaliseExterna(lead)}
               disabled={ocupado}
-              title={lendoAutos ? 'Os autos deste card estão sendo lidos — clicar de novo abre outra conversa' : undefined}
+              title={
+                lendoAutos
+                  ? 'Os autos deste card estão sendo lidos — clicar de novo abre outra conversa'
+                  : DICA.analiseExterna
+              }
             >
               Executar análise
+            </Button>
+          )}
+
+          {/* AS CERTIDÕES (a Em precificação e a Obtenção de documentação do Externo):
+              é trabalho, como a due diligence, e não desfecho. ANTES DA AÇÃO QUE
+              AVANÇA (revisão visual de 07/10/2026): como Due diligence antes de
+              Executar análise, o trabalho vem antes e a ação da etapa fecha a
+              fileira — no celular, larga, na última linha. */}
+          {onCertidoes && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={BTN}
+              icon={<ScrollText className={IC} aria-hidden />}
+              onClick={() => onCertidoes(lead)}
+              disabled={ocupado}
+              title={DICA.certidoes}
+            >
+              Certidões
+            </Button>
+          )}
+
+          {/* A JUSTIFICATIVA TÉCNICA (a Produção de proposta dos três funis):
+              trabalho, não desfecho — o card não se move. Enviada, o botão
+              vira o cheque, que reabre o texto enviado. */}
+          {justificativa && (
+            <BotaoJustificativa
+              resumo={justificativa.resumo}
+              ocupado={ocupado}
+              onAbrir={() => justificativa.onAbrir(lead)}
+            />
+          )}
+
+          {/* SEM PROPOSTA, contornado em vermelho, antes da escolha: é a outra
+              saída da precificação, a de quando nenhum fundo respondeu com valor. */}
+          {onSemProposta && (
+            <Button
+              size="sm"
+              variant="dangerOutline"
+              className={BTN}
+              icon={<X className={IC} aria-hidden />}
+              onClick={() => onSemProposta(lead)}
+              disabled={ocupado}
+              title={DICA.semProposta}
+            >
+              Sem proposta
+            </Button>
+          )}
+
+          {/* A NEGOCIAÇÃO (onda 4, para todos desde 03/10/2026): o cedente respondeu. O negativo
+              contornado à esquerda, o positivo em destaque à direita (amostra). */}
+          {negociacao && (negociacao.opcoes.naoFechou || negociacao.opcoes.semResposta) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className={cn(BTN, PERIGO_CONTORNADO)}
+              icon={<X className={IC} aria-hidden />}
+              onClick={() => negociacao.onNaoFechou(lead)}
+              disabled={ocupado}
+              title={DICA.naoFechou}
+            >
+              Não fechou
             </Button>
           )}
 
@@ -3680,6 +3894,7 @@ function CardCredito({
               icon={<CheckCircle2 className={IC} aria-hidden />}
               onClick={() => onConcluir(lead)}
               disabled={ocupado}
+              title={DICA.concluir}
             >
               Concluir
             </Button>
@@ -3702,51 +3917,20 @@ function CardCredito({
                 onClick={() => onAcao(lead, a)}
                 loading={statusEmAndamento === a.statusId}
                 disabled={ocupado}
+                title={dicaDoMovimento(colunaDoId?.(a.statusId))}
               >
                 {a.label}
               </Button>
             ))}
 
-          {/* AS CERTIDÕES (a Em precificação e a Obtenção de documentação do Externo):
-              é trabalho, como a due diligence, e não desfecho. ANTES DA AÇÃO QUE
-              AVANÇA (revisão visual de 07/10/2026): como Due diligence antes de
-              Executar análise, o trabalho vem antes e a ação da etapa fecha a
-              fileira — no celular, larga, na última linha. */}
-          {onCertidoes && (
-            <Button
-              size="sm"
-              variant="secondary"
-              className={BTN}
-              icon={<ScrollText className={IC} aria-hidden />}
-              onClick={() => onCertidoes(lead)}
-              disabled={ocupado}
-            >
-              Certidões
-            </Button>
-          )}
-
           {anexarEMover && (
             <BotaoAnexarEMover
               rotulo={anexarEMover.rotulo}
               soMover={anexarEMover.soMover}
+              destino={anexarEMover.destino}
               ocupado={ocupado}
               onEnviar={(arquivo, onAndamento) => anexarEMover.onEnviar(lead, arquivo, onAndamento)}
             />
-          )}
-
-          {/* SEM PROPOSTA, contornado em vermelho, antes da escolha: é a outra
-              saída da precificação, a de quando nenhum fundo respondeu com valor. */}
-          {onSemProposta && (
-            <Button
-              size="sm"
-              variant="dangerOutline"
-              className={BTN}
-              icon={<X className={IC} aria-hidden />}
-              onClick={() => onSemProposta(lead)}
-              disabled={ocupado}
-            >
-              Sem proposta
-            </Button>
           )}
 
           {onEscolherProposta && (
@@ -3754,36 +3938,12 @@ function CardCredito({
               lead={lead}
               ocupado={ocupado}
               carregando={ocupado}
+              destino={destinoDaProposta}
               onEscolher={(f) => onEscolherProposta(lead, f)}
               onDesistir={() => onDesistirDoMovimento?.(lead.kommo_lead_id)}
             />
           )}
 
-          {/* A JUSTIFICATIVA TÉCNICA (a Produção de proposta dos três funis):
-              trabalho, não desfecho — o card não se move. Enviada, o botão
-              vira o cheque, que reabre o texto enviado. */}
-          {justificativa && (
-            <BotaoJustificativa
-              resumo={justificativa.resumo}
-              ocupado={ocupado}
-              onAbrir={() => justificativa.onAbrir(lead)}
-            />
-          )}
-
-          {/* A NEGOCIAÇÃO (onda 4, para todos desde 03/10/2026): o cedente respondeu. O negativo
-              contornado à esquerda, o positivo em destaque à direita (amostra). */}
-          {negociacao && (negociacao.opcoes.naoFechou || negociacao.opcoes.semResposta) && (
-            <Button
-              size="sm"
-              variant="outline"
-              className={cn(BTN, PERIGO_CONTORNADO)}
-              icon={<X className={IC} aria-hidden />}
-              onClick={() => negociacao.onNaoFechou(lead)}
-              disabled={ocupado}
-            >
-              Não fechou
-            </Button>
-          )}
           {negociacao?.opcoes.fechado && (
             <BotaoFechado
               acao={negociacao.opcoes.fechado}
@@ -5934,6 +6094,15 @@ export default function AnaliseCredito() {
   /** O nome de uma coluna, como a tela a mostra (o rótulo da aba dela). */
   const nomeDaColunaDoId = (statusId: number) =>
     nomeDaColuna(abas.find((a) => a.statusIds.includes(statusId))?.label ?? String(statusId))
+  /**
+   * O nome da coluna, ou nada — para os AVISOS de que confirmar move o card
+   * (`AvisoDoMovimento`): sem a coluna no quadro, o aviso fica genérico, em vez
+   * de mostrar um número de status a quem não sabe o que ele é.
+   */
+  const colunaDoId = (statusId: number): string | undefined => {
+    const a = abas.find((x) => x.statusIds.includes(statusId))
+    return a ? nomeDaColuna(a.label) : undefined
+  }
 
   /** A janela do "Não fechou" aberta, com as saídas daquela Negociação. */
   const [naoFechou, setNaoFechou] = useState<{ lead: KommoLead; opcoes: DesfechoDaNegociacao } | null>(null)
@@ -6338,10 +6507,12 @@ export default function AnaliseCredito() {
                 {lista.length}
               </span>
             </h2>
+            {/* COM "MAIS" QUANDO NÃO CABE (revisão de UX de 20/10/2026): o resto
+                da frase ficava só no `title`, que o celular não tem. */}
             {abaAtual.descricao && (
-              <p className="mt-s1 line-clamp-1 max-w-[720px] text-corpo text-texto-2" title={abaAtual.descricao}>
+              <DescricaoDaEtapa texto={abaAtual.descricao}>
                 <TextoComTermos texto={abaAtual.descricao} />
-              </p>
+              </DescricaoDaEtapa>
             )}
           </div>
         )}
@@ -6524,6 +6695,7 @@ export default function AnaliseCredito() {
                       ? {
                           rotulo: abaAtual.anexarEMover.rotulo,
                           soMover: anexadosSemMover.has(l.kommo_lead_id),
+                          destino: colunaDoId(abaAtual.anexarEMover.statusId),
                           onEnviar: anexarEMover,
                         }
                       : undefined
@@ -6576,6 +6748,10 @@ export default function AnaliseCredito() {
                   }
                   onGerarContrato={abaAtual?.gerarContrato ? gerarContratoDoCard : undefined}
                   onDesistirDoMovimento={esquecerMovimentos}
+                  colunaDoId={colunaDoId}
+                  destinoDaProposta={
+                    abaAtual?.escolhaDeProposta ? colunaDoId(abaAtual.escolhaDeProposta) : undefined
+                  }
                   realcado={realce === l.kommo_lead_id}
                 />
               ))}
@@ -6704,6 +6880,7 @@ export default function AnaliseCredito() {
           // última movimentação pedida, de qualquer card.
           ocupado={emAndamento[mensagemDoCard.lead.kommo_lead_id] !== undefined}
           jaMovido={jaMovidoPara(mensagemDoCard.lead.kommo_lead_id)}
+          destinoDe={colunaDoId}
           onConfirmar={async (acao, mensagem) => {
             const leadId = mensagemDoCard.lead.kommo_lead_id
             await comCardTravado(leadId, acao.statusId, () => moverComNota(leadId, acao.statusId, mensagem))
@@ -6748,6 +6925,7 @@ export default function AnaliseCredito() {
           // aparece — os botões continuam no card, e mostrá-los nos dois
           // lugares daria duas portas para a mesma decisão.
           acoes={abaAtual?.key === ABA_RPV_DESFECHO_NA_JANELA ? (abaAtual?.acoes ?? []) : []}
+          nomeDaColuna={colunaDoId}
           onMover={async (statusId, comentario) => {
             await comCardTravado(rpvLead.kommo_lead_id, statusId, () =>
               moverComNota(rpvLead.kommo_lead_id, statusId, comentario),
@@ -6815,6 +6993,7 @@ export default function AnaliseCredito() {
           leadId={ddLead.kommo_lead_id}
           tituloDoCard={tituloCard(ddLead)}
           cedenteDoCard={lerCardCredijuris(ddLead).cedente}
+          nomeDaColuna={colunaDoId}
           arquivos={arquivosCache[ddLead.kommo_lead_id] ?? []}
           lendoPdf={
             lendoPdf.has(ddLead.kommo_lead_id) ||
