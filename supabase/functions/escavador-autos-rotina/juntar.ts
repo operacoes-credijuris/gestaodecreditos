@@ -10,8 +10,10 @@
 //   3. MONTAR UMA PARTE por invocação: baixar os documentos dela, juntar com o
 //      pdf-lib, subir ao drive do Kommo e ligar ao card. Os bytes da parte não
 //      cabem no banco, então ela começa e termina na mesma invocação.
-//   4. FECHAR: a nota de anexo de cada parte no chat do card (é o que a equipe
-//      vê), e a nota dos autos dizendo o que foi reunido e onde está.
+//   4. FECHAR: confere que toda parte está ligada ao card (aba Arquivos) e
+//      marca o processo CONCLUIDO. SEM NOTA NENHUMA aqui desde 20/10/2026
+//      (pedido do dono): nem a de anexo por parte, nem a dos autos — a nota
+//      única do card, editada pela rotina, diz o que subiu e onde está.
 //
 // O QUE PODE DERRUBAR A INVOCAÇÃO no meio de uma parte — memória (256 MB),
 // CPU, relógio — não tem como ser pego. A tentativa conta ANTES de começar, e
@@ -22,7 +24,6 @@ import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
 import { criarJuntador } from '../_shared/juntarPdfs.ts'
 import { ArquivoGrandeDemaisParaOKommo, type ArquivoNoDrive } from '../_shared/driveDoKommo.ts'
 import type { DocumentoDosAutos } from '../_shared/autosParaOKommo.ts'
-import { notaDeFalha } from '../_shared/autosParaOKommo.ts'
 import {
   antesDaParte,
   depoisDaParte,
@@ -35,8 +36,6 @@ import {
   MAX_TENTATIVAS_MEDIR,
   type NaoJuntado,
   nomeDaParte,
-  notaDaJuntadaQueFalhou,
-  notaDosAutosJuntos,
   type ParteFeita,
   type PartePlanejada,
   proximoPasso,
@@ -48,14 +47,13 @@ import { ehPdf, erroPassageiro, falhaPassageira, MAX_BYTES_NA_MEMORIA, semAcesso
 // deno-lint-ignore no-explicit-any
 type Servico = any
 
-/** O que a junção pede do cliente do Kommo da rotina. */
+/**
+ * O que a junção pede do cliente do Kommo da rotina: subir a parte ao drive e
+ * ligá-la ao card (aba Arquivos). Nenhuma nota — ver o passo 4 no cabeçalho.
+ */
 export interface KommoDaJuntada {
   subirComVersao(nome: string, bytes: Uint8Array): Promise<ArquivoNoDrive>
   anexar(leadId: number, uuids: string[]): Promise<void>
-  versaoDoArquivo(uuid: string): Promise<string | null>
-  /** A nota de anexo no chat. Devolve null se entrou, ou o erro ("HTTP 400: …"). */
-  anotarAnexo(leadId: number, a: { uuid: string; versao: string | null; nome: string }): Promise<string | null>
-  anotar(leadId: number, texto: string): Promise<void>
 }
 
 interface Linha {
@@ -254,7 +252,7 @@ async function trabalhar(
   o: Parameters<typeof juntarProcessos>[0],
   p: Linha,
 ): Promise<'parte' | 'continua' | 'fim'> {
-  const { svc, kommo } = o
+  const { svc } = o
   const cnj = p.numero_cnj
   const leadId = Number(p.kommo_lead_id)
   const gravar = async (m: Record<string, unknown>) => {
@@ -279,7 +277,6 @@ async function trabalhar(
       if (lista.length === 0) {
         const motivo = 'o Escavador concluiu, mas não entregou documento nenhum'
         await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null, juntada: j })
-        await kommo.anotar(leadId, notaDeFalha(cnj, motivo, p.rotulo))
         return 'fim'
       }
       const paginas = lista.reduce((t, d) => t + d.paginas, 0)
@@ -535,6 +532,7 @@ async function montarEEnviar(
     primeiro: datas[0] ?? null,
     ultimo: datas.at(-1) ?? null,
     ligada: false,
+    // Campo das notas de anexo de antes de 20/10/2026; nenhuma se escreve mais.
     nota: 'pendente',
   }
   registrarParte(j, parte)
@@ -548,7 +546,7 @@ async function montarEEnviar(
   return { resultado: 'ok' }
 }
 
-/** As notas de anexo no chat e a nota dos autos; o processo fica CONCLUIDO. */
+/** Confere que toda parte está ligada ao card (aba Arquivos); o processo fica CONCLUIDO. */
 async function fechar(
   o: Parameters<typeof juntarProcessos>[0],
   p: Linha,
@@ -556,44 +554,37 @@ async function fechar(
   j: Juntada,
   gravar: (m: Record<string, unknown>) => Promise<void>,
 ): Promise<'continua' | 'fim'> {
-  const leadId = Number(p.kommo_lead_id)
   if (j.partes.length === 0) {
     const motivo = `nenhum dos ${docs.length} documento(s) pôde ser juntado (${j.naoJuntados.slice(0, 3).map((d) => d.motivo).join('; ')})`
     await falhar(o, p, j, gravar, motivo)
     return 'fim'
   }
-  const pendente = await notasDeAnexo(o, p, j, gravar)
+  const pendente = await ligarPartes(o, p, j, gravar)
   if (pendente) return 'continua'
-  if (!j.notaFinal) {
-    await o.kommo.anotar(
-      leadId,
-      notaDosAutosJuntos({
-        cnj: p.numero_cnj,
-        rotulo: p.rotulo,
-        modo: j.modo,
-        partes: j.partes,
-        totalDocumentos: docs.length,
-        naoJuntados: [...j.naoJuntados].sort((a, b) => a.ordem - b.ordem),
-      }),
-    )
-    j.notaFinal = true
-  }
   j.concluida = true
+  const soltas = j.partes.filter((x) => !x.ligada).length
   await gravar({
     estado: 'CONCLUIDO',
     concluido_em: agora(),
     trabalhando_ate: null,
     juntada: j,
-    detalhe: j.naoJuntados.length ? `${j.naoJuntados.length} documento(s) não juntados.` : null,
+    detalhe: [
+      j.naoJuntados.length ? `${j.naoJuntados.length} documento(s) não juntados.` : '',
+      soltas ? `${soltas} PDF(s) não ficaram ligados ao card.` : '',
+    ].filter(Boolean).join(' ') || null,
   })
   return 'fim'
 }
 
 /**
- * Liga ao card a parte que ficou sem ligar e escreve a nota de anexo de cada
- * parte no chat. true = algo passageiro ficou para a próxima volta.
+ * Liga ao card (aba Arquivos) a parte que ficou sem ligar. true = algo
+ * passageiro ficou para a próxima volta.
+ *
+ * SEM NOTA DE ANEXO NO CHAT desde 20/10/2026: a parte que não liga de jeito
+ * nenhum fica registrada na junção (`ligada: false`), e a nota única do card
+ * diz que ela não está na aba Arquivos.
  */
-async function notasDeAnexo(
+async function ligarPartes(
   o: Parameters<typeof juntarProcessos>[0],
   p: Linha,
   j: Juntada,
@@ -601,37 +592,24 @@ async function notasDeAnexo(
 ): Promise<boolean> {
   const leadId = Number(p.kommo_lead_id)
   for (const parte of j.partes) {
-    if (!parte.ligada) {
-      try {
-        await o.kommo.anexar(leadId, [parte.uuid])
-        parte.ligada = true
-      } catch (e) {
-        const erro = String((e as Error).message)
-        depoisDaParte(j, 'passageira')
-        if (erroPassageiro(erro) && j.passageiras <= MAX_PASSAGEIRAS) {
-          await gravar({ juntada: j, trabalhando_ate: null, detalhe: `Ligando as partes ao card: ${erro.slice(0, 200)}` })
-          return true
-        }
-        // Não liga de jeito nenhum: a nota de anexo no chat ainda o mostra.
-      }
-    }
-    if (parte.nota === 'pendente') {
-      const versao = parte.versao ?? (await o.kommo.versaoDoArquivo(parte.uuid).catch(() => null))
-      parte.versao = versao
-      const erro = await o.kommo.anotarAnexo(leadId, { uuid: parte.uuid, versao, nome: parte.nome })
-      if (!erro) parte.nota = 'feita'
-      else if (erroPassageiro(erro) && j.passageiras < MAX_PASSAGEIRAS) {
-        depoisDaParte(j, 'passageira')
-        await gravar({ juntada: j, trabalhando_ate: null, detalhe: `Nota de anexo no chat: ${erro.slice(0, 200)}` })
+    if (parte.ligada) continue
+    try {
+      await o.kommo.anexar(leadId, [parte.uuid])
+      parte.ligada = true
+    } catch (e) {
+      const erro = String((e as Error).message)
+      depoisDaParte(j, 'passageira')
+      if (erroPassageiro(erro) && j.passageiras <= MAX_PASSAGEIRAS) {
+        await gravar({ juntada: j, trabalhando_ate: null, detalhe: `Ligando as partes ao card: ${erro.slice(0, 200)}` })
         return true
-      } else parte.nota = 'recusada'
+      }
     }
     await gravar({ juntada: j, trabalhando_ate: new Date(Date.now() + TRAVA_MS).toISOString() })
   }
   return false
 }
 
-/** A junção não chega ao fim: o que subiu aparece no chat, e a nota diz o que faltou. */
+/** A junção não chega ao fim: o que subiu fica ligado ao card, e o motivo vai para o processo (e dali para a nota única). */
 async function falhar(
   o: Parameters<typeof juntarProcessos>[0],
   p: Linha,
@@ -639,9 +617,9 @@ async function falhar(
   gravar: (m: Record<string, unknown>) => Promise<void>,
   motivo: string,
 ): Promise<void> {
-  // As partes que subiram aparecem no chat mesmo assim: são autos de verdade.
+  // As partes que subiram ficam no card mesmo assim: são autos de verdade.
   j.passageiras = MAX_PASSAGEIRAS + 1
-  if (j.partes.length) await notasDeAnexo(o, p, j, gravar).catch(() => false)
+  if (j.partes.length) await ligarPartes(o, p, j, gravar).catch(() => false)
   // O REJUNTADO VOLTA A CONCLUIDO: o card continua com os documentos soltos de
   // antes, e a junção que não terminou não os substitui na análise.
   await gravar({
@@ -650,8 +628,4 @@ async function falhar(
     trabalhando_ate: null,
     juntada: j,
   })
-  await o.kommo.anotar(
-    Number(p.kommo_lead_id),
-    notaDaJuntadaQueFalhou({ cnj: p.numero_cnj, rotulo: p.rotulo, partes: j.partes, motivo, modo: j.modo }),
-  )
 }

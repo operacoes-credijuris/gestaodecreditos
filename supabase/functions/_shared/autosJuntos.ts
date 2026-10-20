@@ -10,8 +10,10 @@
 //
 // AGORA: os documentos de cada processo são JUNTADOS num PDF, na ordem do
 // processo, e só se dividem em PARTES quando o tamanho obriga (memória da
-// função, teto do Kommo). Cada parte sobe ao card e entra também como NOTA DE
-// ANEXO no chat, onde a equipe a vê.
+// função, teto do Kommo). Cada parte sobe à aba Arquivos do card. (De 07/10 a
+// 20/10/2026 cada parte entrava também como NOTA DE ANEXO no chat; o dono pediu
+// o chat limpo, e agora a nota única do card — `notaUnicaDosAutos.ts` — diz o
+// que subiu e onde está.)
 //
 // ESTE ARQUIVO é a parte pura: o plano das partes, os nomes, o estado da
 // junção (que atravessa invocações, guardado no banco), as notas e a regra que
@@ -68,7 +70,11 @@ export interface ParteFeita {
   ultimo: string | null
   /** Já ligada ao card (área Arquivos). */
   ligada: boolean
-  /** A nota de anexo no chat: feita, por fazer, ou recusada pelo Kommo. */
+  /**
+   * A nota de anexo no chat: feita, por fazer, ou recusada pelo Kommo. SÓ DAS
+   * PARTES DE ANTES DE 20/10/2026: desde então nenhuma nota de anexo se escreve,
+   * e o campo fica como estava.
+   */
   nota: 'feita' | 'pendente' | 'recusada'
 }
 

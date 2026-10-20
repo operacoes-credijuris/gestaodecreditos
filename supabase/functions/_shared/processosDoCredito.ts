@@ -181,29 +181,17 @@ export function rotuloDoProcesso(papeis: Papel[], rpv: boolean): string {
   return 'Processo'
 }
 
-/** A nota do card quando a leitura define (ou amplia) os processos do crédito. */
-export function notaDosProcessos(processos: ProcessoDoCredito[], rpv: boolean, novos: number): string {
-  const linhas = processos.map((p) => `• ${rotuloDoProcesso(p.papeis, rpv)}: ${p.cnj}`)
-  return [
-    novos === processos.length
-      ? '🔎 Processos deste crédito, identificados para baixar os autos:'
-      : `🔎 ${novos} processo(s) novo(s) identificado(s) neste crédito. Todos, até agora:`,
-    ...linhas,
-    'Os autos de cada um são pedidos ao Escavador e sobem a este card juntados num PDF por processo ' +
-      '(em partes, se for muito grande), no chat e na área Arquivos. ' +
-      'Se algum número estiver errado, corrija o título ou as anotações do card.',
-  ].join('\n')
-}
-
 /**
  * Anexo que a própria rotina subiu — não se lê para achar processo.
  *
  * OS DOIS FORMATOS: o documento solto de antes de 07/10/2026 ("Conhecimento
  * 001 - …") e a parte juntada ("Conhecimento - autos (parte 1 de 3) - CNJ.pdf").
- * Faltar o segundo aqui seria caro: a nota de anexo de cada parte entra no
- * chat do card, mudaria a impressão dele, e cada parte que sobe pediria uma
- * nova leitura paga pela IA. O CLIPE na frente é o do espelho ("📎 nome"),
- * que é como a nota de anexo chega em `notas`.
+ * Faltar o segundo aqui seria caro: a parte fica na aba Arquivos do card, que
+ * a leitura percorre, e a IA leria os próprios autos à procura de processo (e
+ * nos cards de 07/10 a 20/10/2026 a nota de anexo de cada parte ainda está no
+ * chat, e mudaria a impressão dele — uma nova leitura paga por parte). O CLIPE
+ * na frente é o do espelho ("📎 nome"), que é como a nota de anexo chega em
+ * `notas`.
  */
 export function ehAnexoDosAutos(nome: string): boolean {
   const n = nome.trim().replace(/^📎\s*/u, '')
