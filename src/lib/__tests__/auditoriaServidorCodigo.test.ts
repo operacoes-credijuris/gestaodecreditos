@@ -57,7 +57,7 @@ describe('Escavador e autos', () => {
     const f = ler('escavador-autos-rotina/index.ts')
     expect(f).toContain('if (erroCota || count == null) {')
     expect(f).toContain('if (resta() < FOLGA_PARA_PEDIR_MS) {')
-    expect(f).toContain('await pedir(svc, chave, kommo, soEste, avisos, novas, resta)')
+    expect(f).toContain('await pedir(svc, chave, situacoes, soEste, avisos, novas, resta)')
   })
   it('rotina: falha do Kommo ao listar anexos sobe (a leitura é refeita), não vira "sem anexo"', () => {
     const f = ler('escavador-autos-rotina/index.ts')

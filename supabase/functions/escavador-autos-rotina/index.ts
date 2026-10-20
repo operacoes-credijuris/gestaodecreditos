@@ -19,18 +19,28 @@
 //   4. ANEXA. Pronto o pedido, os documentos descem do Escavador e sobem ao card
 //      JUNTADOS: um PDF por processo, na ordem do processo, dividido em partes
 //      só quando o tamanho obriga — "Conhecimento - autos completos - {CNJ}.pdf"
-//      ou "Conhecimento - autos (parte 1 de 3) - {CNJ}.pdf". Cada parte fica na
-//      área Arquivos do card E como nota de anexo no chat, onde a equipe a vê
-//      (pedido do dono, 07/10/2026; ver `juntar.ts`). Nada fica guardado na
-//      plataforma além do registro do que já subiu.
+//      ou "Conhecimento - autos (parte 1 de 3) - {CNJ}.pdf". Cada parte fica SÓ
+//      na aba Arquivos do card (pedido do dono, 20/10/2026: sem nota de anexo
+//      no chat; ver `juntar.ts`). Nada fica guardado na plataforma além do
+//      registro do que já subiu.
 //
 //      ANTES DA MIGRAÇÃO 0077 a rotina faz o que fazia: um arquivo por
 //      documento, só na área Arquivos. A coluna `juntada` é o que liga o novo.
 //
+// UMA NOTA SÓ POR CARD (pedido do dono, 20/10/2026). Criada quando a leitura
+// identifica os processos e EDITADA no lugar a cada mudança — nenhuma nota nova
+// no fim do histórico. O texto é recalculado do banco a cada volta
+// (`atualizarNotas`; ver `_shared/notaUnicaDosAutos.ts`). Sem a migração 0078
+// fica só a primeira nota; card lido antes da mudança não ganha nota nenhuma.
+//
+// O CARD QUE SAI DA COLUNA DE ANÁLISE não pede mais autos (pedido do dono,
+// 20/10/2026): o que ainda não foi pedido vira INTERROMPIDO, e volta para a
+// fila se o card voltar. O pedido já iniciado termina. Ver
+// `_shared/interrupcaoDosAutos.ts`.
+//
 // A FALHA DO ROBÔ DO ESCAVADOR (INTERNAL_ERROR, LOGIN_ERROR) não encerra mais
 // o processo: o pedido se repete de 10 em 10 minutos, até um teto (6 por
-// padrão), com uma nota no card na primeira falha e outra no fim. Ver
-// `_shared/falhasDosAutos.ts`.
+// padrão); a nota do card mostra a tentativa. Ver `_shared/falhasDosAutos.ts`.
 //
 // AÇÕES (só com x-cron-secret; `simular: true` lista sem mudar nada):
 //   { acao: 'rejuntar', lead_id?, cnj? }      os processos já CONCLUIDOS com os
@@ -52,7 +62,7 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, chaveEscavador, contaKommo } from '../_shared/segredos.ts'
 import { falhaDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
 import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
-import { cnjDoCard, digitosDoCnj } from '../_shared/nucleo/cnj.ts'
+import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
 import { assinarNota } from '../_shared/notaCredijuris.ts'
 import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { subirAoDriveDoKommo, subirAoDriveDoKommoComVersao } from '../_shared/driveDoKommo.ts'
@@ -64,11 +74,6 @@ import {
   FUNIS_DE_ENTRADA_POR_NOME,
   motivoDoEstado,
   nomeDoAnexo,
-  notaDaDesistenciaDoRobo,
-  notaDaFalhaDoRobo,
-  notaDaNovaRodada,
-  notaDeFalha,
-  notaDosAutos,
 } from '../_shared/autosParaOKommo.ts'
 import { juntadaInicial, lerJuntada } from '../_shared/autosJuntos.ts'
 import { juntarProcessos } from './juntar.ts'
@@ -78,11 +83,28 @@ import {
   impressaoDoCard,
   mesclarProcessos,
   normalizarProcessos,
-  notaDosProcessos,
   type ProcessoDoCredito,
   rotuloDoProcesso,
   SISTEMA_PROCESSOS,
 } from '../_shared/processosDoCredito.ts'
+import {
+  DETALHE_INTERROMPIDO,
+  DETALHE_RETOMADO,
+  ESTADOS_INTERROMPIVEIS,
+  INTERROMPIDO,
+  podePagarPedido,
+  proximoEstadoDaLeitura,
+  proximoEstadoDoProcesso,
+  situacaoDoCard,
+  type SituacaoDoCard,
+} from '../_shared/interrupcaoDosAutos.ts'
+import {
+  type NotaDoCard,
+  notaUnicaDosAutos,
+  type PortaDaNota,
+  processoDaNota,
+  sincronizarNotaDoCard,
+} from '../_shared/notaUnicaDosAutos.ts'
 import {
   codigoDoRoboNoDetalhe,
   consultaRespondeu,
@@ -163,6 +185,10 @@ interface CardLido {
   lido_em: string | null
   impressao: string | null
   atualizado_em: string
+  // Da migração 0078 (ausentes antes dela):
+  nota_id?: number | null
+  nota_texto?: string | null
+  nota_em?: string | null
 }
 
 interface Processo {
@@ -194,6 +220,8 @@ interface Processo {
  * não os 400 s do plano pago); 115 s deixa folga para fechar e gravar.
  */
 const PRAZO_JUNCAO_MS = 115_000
+/** Até quando (contado do início da invocação) a nota do card se edita depois da junção. */
+const PRAZO_DAS_NOTAS_MS = 140_000
 
 /**
  * A migração 0077 já rodou? Sem as colunas dela, a rotina faz o que fazia
@@ -205,6 +233,17 @@ async function temAMigracaoNova(svc: Servico): Promise<boolean> {
     .from('escavador_autos_processo')
     .select('juntada, tentativas_do_pedido, teto_de_tentativas, falha_do_robo, desistiu_em')
     .limit(1)
+  return !error
+}
+
+/**
+ * A migração 0078 já rodou? Sem as colunas da nota única, a rotina escreve só
+ * a PRIMEIRA nota do card (os processos identificados) e nenhuma outra: não há
+ * onde guardar o id para editá-la depois, e escrever uma nota a cada passo é o
+ * que o dono pediu para acabar.
+ */
+async function temANotaUnica(svc: Servico): Promise<boolean> {
+  const { error } = await svc.from('escavador_autos_card').select('nota_id, nota_texto, nota_em').limit(1)
   return !error
 }
 
@@ -270,18 +309,19 @@ function clienteKommo(token: string, subdominio: string) {
   let ultima = 0
   let drive: string | null = null
   // O TETO DO KOMMO É 7 REQUISIÇÕES POR SEGUNDO, e violá-lo bloqueia o IP.
-  const api = async (caminho: string, init: RequestInit = {}) => {
+  const api = async (caminho: string, init: RequestInit = {}, opcoes: { idempotente?: boolean } = {}) => {
     const espera = 160 - (Date.now() - ultima)
     if (espera > 0) await dormir(espera)
     ultima = Date.now()
     // PELO kommoFetch (auditoria de bugs, 09/10/2026): o 429 (a cota é
     // disputada com o sync e a equipe) é repetido com espera, em vez de virar
-    // falha; o 5xx só no GET (um POST de nota pode ter gravado).
+    // falha; o 5xx só no GET e no que se declara idempotente (o PATCH do texto
+    // da nota) — um POST de nota pode ter gravado.
     return kommoFetch(`${base}${caminho}`, {
       ...init,
       signal: AbortSignal.timeout(TEMPO_API_MS),
       headers: { ...auth, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
-    })
+    }, opcoes)
   }
   const cliente = {
     async urlDoDrive(): Promise<string> {
@@ -337,43 +377,14 @@ function clienteKommo(token: string, subdominio: string) {
     async subir(nome: string, bytes: Uint8Array): Promise<string> {
       return subirAoDriveDoKommo({ drive: await cliente.urlDoDrive(), auth, nome, bytes, mime: 'application/pdf' })
     },
-    /** Sobe um PDF e devolve o uuid e a versão — a nota de anexo no chat pede as duas. */
+    /** Sobe um PDF e devolve o uuid e a versão. */
     async subirComVersao(nome: string, bytes: Uint8Array) {
       return subirAoDriveDoKommoComVersao({ drive: await cliente.urlDoDrive(), auth, nome, bytes, mime: 'application/pdf' })
     },
-    /** A versão atual de um arquivo do drive, pelos metadados dele. */
-    async versaoDoArquivo(uuid: string): Promise<string | null> {
-      const d = await cliente.urlDoDrive()
-      const r = await fetch(`${d}/v1.0/files/${uuid}`, { headers: auth, signal: AbortSignal.timeout(TEMPO_API_MS) })
-      if (!r.ok) return null
-      const m = (await r.json().catch(() => null)) as any
-      return m?.version_uuid ? String(m.version_uuid) : null
-    },
-    /**
-     * A NOTA DE ANEXO no chat do card (`note_type: 'attachment'`), como a
-     * kommo-anexo-enviar faz. É ela que põe o arquivo à vista da equipe: o que
-     * só se liga ao card fica na área Arquivos, e lá ninguém o achava. O
-     * kommo-sync a espelha com o uuid, e o histórico do card na plataforma a
-     * mostra junto da nota dos autos. Devolve null se entrou, ou o erro.
-     */
-    async anotarAnexo(leadId: number, a: { uuid: string; versao: string | null; nome: string }): Promise<string | null> {
-      try {
-        const r = await api('/leads/notes', {
-          method: 'POST',
-          body: JSON.stringify([
-            {
-              entity_id: leadId,
-              note_type: 'attachment',
-              params: { file_uuid: a.uuid, file_name: a.nome, ...(a.versao ? { version_uuid: a.versao } : {}) },
-              is_need_to_trigger_digital_pipeline: false,
-            },
-          ]),
-        })
-        return r.ok ? null : `o Kommo recusou a nota de anexo (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`
-      } catch (e) {
-        return `a nota de anexo não respondeu (${(e as Error)?.message ?? e})`
-      }
-    },
+    // SEM NOTA DE ANEXO (o tipo `attachment`) desde 20/10/2026, a pedido
+    // do dono: os PDFs dos autos ficam só na aba Arquivos do card (o PUT de
+    // `anexar`). O "Executar análise" e o conector dos autos leem a lista
+    // `/leads/{id}/files` (pela buscar-kommo), e não as notas.
     async anexar(leadId: number, uuids: string[]) {
       const r = await api(`/leads/${leadId}/files`, {
         method: 'PUT',
@@ -381,18 +392,44 @@ function clienteKommo(token: string, subdominio: string) {
       })
       if (!r.ok) throw new Error(`o Kommo recusou o anexo (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
     },
-    async anotar(leadId: number, texto: string) {
-      await api('/leads/notes', {
-        method: 'POST',
-        body: JSON.stringify([
-          {
-            entity_id: leadId,
-            note_type: 'common',
-            params: { text: assinarNota(texto) },
-            is_need_to_trigger_digital_pipeline: false,
-          },
-        ]),
-      }).catch(() => null)
+    /**
+     * A NOTA ÚNICA dos autos, criada (POST; o texto já vem assinado). Devolve o
+     * id que o Kommo deu — 0 se ele aceitou sem devolver id: não há o que
+     * editar depois, e criar outra duplicaria a nota.
+     */
+    async criarNota(leadId: number, texto: string): Promise<{ id: number } | { erro: string }> {
+      try {
+        const r = await api('/leads/notes', {
+          method: 'POST',
+          body: JSON.stringify([
+            { entity_id: leadId, note_type: 'common', params: { text: texto }, is_need_to_trigger_digital_pipeline: false },
+          ]),
+        })
+        if (!r.ok) return { erro: `o Kommo recusou a nota (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}` }
+        const j = (await r.json().catch(() => null)) as { _embedded?: { notes?: { id?: number }[] } } | null
+        const id = Number(j?._embedded?.notes?.[0]?.id)
+        return { id: Number.isFinite(id) && id > 0 ? id : 0 }
+      } catch (e) {
+        return { erro: `a nota não respondeu (${(e as Error)?.message ?? e})` }
+      }
+    },
+    /**
+     * A NOTA ÚNICA editada no lugar: PATCH /leads/notes/{id}, que mantém a nota
+     * na posição dela no histórico. IDEMPOTENTE (o mesmo texto aplicado duas
+     * vezes dá o mesmo), então o 5xx se repete. 404 = apagada no Kommo.
+     */
+    async editarNota(leadId: number, notaId: number, texto: string): Promise<'ok' | 'apagada' | { erro: string }> {
+      try {
+        const r = await api(`/leads/notes/${notaId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ entity_id: leadId, note_type: 'common', params: { text: texto } }),
+        }, { idempotente: true })
+        if (r.ok) return 'ok'
+        if (r.status === 404) return 'apagada'
+        return { erro: `o Kommo recusou a edição da nota (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}` }
+      } catch (e) {
+        return { erro: `a edição da nota não respondeu (${(e as Error)?.message ?? e})` }
+      }
     },
   }
   return cliente
@@ -573,14 +610,18 @@ async function lerCards(
   soEste: number | null,
   resta: () => number,
   avisos: string[],
+  notaUnica: boolean,
 ) {
   const leads = await cardsNaEntrada(svc, soEste)
   if (leads.length === 0) return
   const { data: linhas } = await svc
     .from('escavador_autos_card')
-    .select('kommo_lead_id, estado, processos, leituras, lido_em, impressao, atualizado_em')
+    .select(
+      'kommo_lead_id, estado, processos, leituras, lido_em, impressao, atualizado_em' +
+        (notaUnica ? ', nota_id, nota_texto, nota_em' : ''),
+    )
     .in('kommo_lead_id', leads.map((l) => l.kommo_lead_id))
-  const porLead = new Map(((linhas ?? []) as CardLido[]).map((c) => [Number(c.kommo_lead_id), c]))
+  const porLead = new Map(((linhas ?? []) as unknown as CardLido[]).map((c) => [Number(c.kommo_lead_id), c]))
   let feitas = 0
 
   for (const l of leads) {
@@ -659,8 +700,12 @@ async function lerCards(
 
     const antes = (linha?.processos ?? []) as ProcessoDoCredito[]
     const todos = mesclarProcessos(antes, achados)
-    const conhecidos = new Set(antes.map((p) => digitosDoCnj(p.cnj)))
-    const novos = todos.filter((p) => !conhecidos.has(digitosDoCnj(p.cnj)))
+
+    // O REGIME DA NOTA ÚNICA começa na PRIMEIRA leitura depois da migração 0078
+    // (`nota_em`). Card que já tinha sido lido antes dela fica sem nota nova:
+    // ele já tem as notas antigas no histórico.
+    const primeiraLeitura = !linha || !((linha.leituras ?? 0) > 0 || linha.lido_em)
+    const entraNoRegime = notaUnica && !linha?.nota_em && primeiraLeitura
 
     await svc.from('escavador_autos_card').update({
       estado: lerDeNovo ? 'NOVO' : todos.length ? 'LIDO' : 'SEM_PROCESSO',
@@ -671,6 +716,7 @@ async function lerCards(
       fontes: lidos,
       detalhe: todos.length ? null : 'Nenhum número de processo no título, nas anotações nem nos anexos.',
       atualizado_em: agora(),
+      ...(entraNoRegime ? { nota_em: agora() } : {}),
     }).eq('kommo_lead_id', leadId)
 
     // CADA PROCESSO VIRA UMA LINHA DE PEDIDO — a chave (card, CNJ) é o que
@@ -688,7 +734,123 @@ async function lerCards(
         .eq('numero_cnj', p.cnj)
         .eq('anexados', 0)
     }
-    if (novos.length) await kommo.anotar(leadId, notaDosProcessos(todos, rpv, novos.length))
+
+    // A NOTA DO CARD, UMA VEZ SÓ: criada aqui, quando os processos aparecem pela
+    // primeira vez; dali em diante, só editada (`atualizarNotas`).
+    //  - Com a 0078: só o card que ENTROU AGORA no regime (a posse LENDO é desta
+    //    volta, e o `nota_em` recém-gravado afasta as outras). O que já estava
+    //    no regime sem nota (a criação falhou) fica para `atualizarNotas`, que
+    //    toma a posse da criação antes de escrever.
+    //  - Sem a 0078: a primeira nota e mais nenhuma — não há onde guardar o id.
+    if (todos.length && (notaUnica ? entraNoRegime : antes.length === 0)) {
+      const texto = await textoDaNota(svc, leadId)
+      if (texto) {
+        const r = await kommo.criarNota(leadId, texto)
+        if ('erro' in r) avisos.push(`card ${leadId}: a nota dos autos não entrou (${r.erro}); tento de novo.`)
+        else if (notaUnica) {
+          await svc.from('escavador_autos_card')
+            .update({ nota_id: r.id, nota_texto: texto })
+            .eq('kommo_lead_id', leadId)
+            .is('nota_id', null)
+        }
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------ A NOTA DO CARD
+/** O texto da nota única do card (já assinado), dos processos dele no banco. Vazio se não há processo. */
+async function textoDaNota(svc: Servico, leadId: number): Promise<string> {
+  const { data } = await svc.from('escavador_autos_processo').select('*').eq('kommo_lead_id', leadId)
+  const linhas = (data ?? []) as Record<string, unknown>[]
+  return linhas.length ? assinarNota(notaUnicaDosAutos(linhas.map(processoDaNota))) : ''
+}
+
+/** Quanto para trás se procuram cards com mudança: cobre a edição que falhou e é refeita. */
+const JANELA_DAS_NOTAS_MS = 48 * 3_600_000
+/** Abaixo disto de tempo, não se começa outra edição de nota (cada uma é uma ida ao Kommo). */
+const FOLGA_DA_NOTA_MS = 5_000
+
+/**
+ * A NOTA ÚNICA DE CADA CARD, levada ao estado do banco. Só os cards no regime
+ * (`nota_em`) que mudaram nas últimas 48 horas; o texto é recalculado inteiro e
+ * comparado com o último que subiu — igual, nenhuma chamada ao Kommo. Edição
+ * que falha fica para a próxima volta (o mesmo texto sai de novo).
+ */
+async function atualizarNotas(svc: Servico, kommo: Kommo, soEste: number | null, resta: () => number, avisos: string[]) {
+  const desde = new Date(Date.now() - JANELA_DAS_NOTAS_MS).toISOString()
+  const ids = new Set<number>()
+  let qp = svc.from('escavador_autos_processo').select('kommo_lead_id').gte('atualizado_em', desde)
+  let qc = svc
+    .from('escavador_autos_card')
+    .select('kommo_lead_id')
+    .not('nota_em', 'is', null)
+    .or(`atualizado_em.gte."${desde}",nota_em.gte."${desde}"`)
+  if (soEste) {
+    qp = qp.eq('kommo_lead_id', soEste)
+    qc = qc.eq('kommo_lead_id', soEste)
+  }
+  const [{ data: dp }, { data: dc }] = await Promise.all([qp, qc])
+  for (const l of [...(dp ?? []), ...(dc ?? [])] as { kommo_lead_id: number }[]) ids.add(Number(l.kommo_lead_id))
+  if (ids.size === 0) return
+
+  const lista = [...ids]
+  const cards: NotaDoCard[] = []
+  const processos = new Map<number, Record<string, unknown>[]>()
+  for (let i = 0; i < lista.length; i += 150) {
+    const fatia = lista.slice(i, i + 150)
+    const { data: c, error: ec } = await svc
+      .from('escavador_autos_card')
+      .select('kommo_lead_id, nota_id, nota_texto, nota_em')
+      .in('kommo_lead_id', fatia)
+      .not('nota_em', 'is', null)
+    if (ec) return
+    if (!c?.length) continue
+    cards.push(...(c as NotaDoCard[]))
+    const { data: p, error: ep } = await svc
+      .from('escavador_autos_processo')
+      .select('*')
+      .in('kommo_lead_id', (c as NotaDoCard[]).map((x) => x.kommo_lead_id))
+    // SEM OS PROCESSOS, NENHUMA EDIÇÃO: a nota sairia sem eles.
+    if (ep) return
+    for (const x of (p ?? []) as Record<string, unknown>[]) {
+      const id = Number(x.kommo_lead_id)
+      processos.set(id, [...(processos.get(id) ?? []), x])
+    }
+  }
+
+  const porta: PortaDaNota = {
+    criar: (leadId, texto) => kommo.criarNota(leadId, texto),
+    editar: (leadId, notaId, texto) => kommo.editarNota(leadId, notaId, texto),
+    async tomarCriacao(leadId, lido) {
+      let q = svc
+        .from('escavador_autos_card')
+        .update({ nota_id: null, nota_em: agora() })
+        .eq('kommo_lead_id', leadId)
+      q = lido.notaId == null ? q.is('nota_id', null) : q.eq('nota_id', lido.notaId)
+      q = lido.notaEm == null ? q.is('nota_em', null) : q.eq('nota_em', lido.notaEm)
+      const { data } = await q.select('kommo_lead_id')
+      return !!data?.length
+    },
+    async gravarCriada(leadId, notaId, texto) {
+      await svc.from('escavador_autos_card').update({ nota_id: notaId, nota_texto: texto }).eq('kommo_lead_id', leadId).is('nota_id', null)
+    },
+    async gravarTexto(leadId, texto, textoLido) {
+      // CONDICIONADO AO TEXTO LIDO: se outra volta editou a nota no meio, o
+      // banco fica com o texto dela, e a próxima volta confere de novo.
+      const q = svc.from('escavador_autos_card').update({ nota_texto: texto }).eq('kommo_lead_id', leadId)
+      await (textoLido == null ? q.is('nota_texto', null) : q.eq('nota_texto', textoLido))
+    },
+  }
+
+  for (const card of cards) {
+    if (resta() < FOLGA_DA_NOTA_MS) break
+    const linhas = processos.get(Number(card.kommo_lead_id)) ?? []
+    // A nota nasce com os processos: card sem processo (ainda) não tem o que dizer.
+    if (linhas.length === 0) continue
+    const texto = assinarNota(notaUnicaDosAutos(linhas.map(processoDaNota)))
+    const r = await sincronizarNotaDoCard(card, texto, porta, Date.now())
+    if (r === 'falhou') avisos.push(`card ${card.kommo_lead_id}: a nota dos autos não foi atualizada; tento de novo na próxima volta.`)
   }
 }
 
@@ -712,7 +874,7 @@ async function registrarPedido(svc: Servico, id: number, cnj: string, leadId: nu
 async function pedir(
   svc: Servico,
   chave: string,
-  kommo: Kommo,
+  situacoes: Map<number, SituacaoDoCard>,
   soEste: number | null,
   avisos: string[],
   novas: boolean,
@@ -758,6 +920,11 @@ async function pedir(
     }
     const leadId = Number(p.kommo_lead_id)
     const cnj = p.numero_cnj
+    // O CARD QUE SAIU DA ANÁLISE não pede nada novo. O que não começou já foi
+    // (ou será, na próxima volta) INTERROMPIDO; só a posse PEDINDO parada passa,
+    // para a consulta gratuita adotar o pedido que a volta morta possa ter feito.
+    const podePagar = podePagarPedido(situacoes.get(leadId))
+    if (!podePagar && p.estado !== 'PEDINDO') continue
     // Posse de pedido só se retoma parada; fila da cota cheia nem se consulta.
     if (p.estado === 'PEDINDO' && Date.now() - Date.parse(p.atualizado_em) < POSSE_PARADA_MS) continue
     if (p.estado === 'FILA' && pedidosHoje >= LIMITE_PEDIDOS_DIA) continue
@@ -830,6 +997,12 @@ async function pedir(
       continue
     }
 
+    // DAQUI EM DIANTE É PEDIDO PAGO: o card que saiu da análise para aqui.
+    if (!podePagar) {
+      await gravar({ estado: INTERROMPIDO, detalhe: DETALHE_INTERROMPIDO })
+      continue
+    }
+
     if (pedidosHoje >= LIMITE_PEDIDOS_DIA) {
       await gravar({ estado: 'FILA', detalhe: `Cota de ${LIMITE_PEDIDOS_DIA} pedidos por dia atingida; pede amanhã.` })
       continue
@@ -874,8 +1047,8 @@ async function pedir(
         await registrarPedido(svc, Number(depois.id), cnj, leadId, depois)
         await gravar({ estado: 'AGUARDANDO', pedido_id: Number(depois.id), verificado_em: agora(), detalhe: null })
       } else {
+        // A nota do card mostra a falha na próxima `atualizarNotas`.
         await gravar({ estado: 'FALHOU', detalhe })
-        await kommo.anotar(leadId, notaDeFalha(cnj, detalhe.replace(/^O Escavador/, 'o Escavador'), p.rotulo))
       }
       continue
     }
@@ -909,7 +1082,7 @@ async function quandoFoiPedido(svc: Servico, pedidoId: number | null): Promise<n
   return Date.parse(String(data?.criado_em ?? '')) || null
 }
 
-async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: number | null, novas: boolean) {
+async function acompanhar(svc: Servico, chave: string, soEste: number | null, novas: boolean) {
   let q = svc.from('escavador_autos_processo').select('*').eq('estado', 'AGUARDANDO')
   if (soEste) q = q.eq('kommo_lead_id', soEste)
   const { data } = await q
@@ -949,11 +1122,10 @@ async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: num
         ...(novas ? { falha_do_robo: null, juntada: juntadaInicial('novo') } : {}),
       })
     } else if (codigoDoRobo) {
-      // A FALHA É DO ROBÔ DO ESCAVADOR, e passa: o pedido se repete. Nota no
-      // card só na primeira falha e no fim (ver `depoisDaFalhaDoRobo`).
+      // A FALHA É DO ROBÔ DO ESCAVADOR, e passa: o pedido se repete. A nota
+      // única do card mostra a tentativa e, no fim, a desistência.
       const teto = tetoDoRobo(p.teto_de_tentativas)
       const d = depoisDaFalhaDoRobo({ tentativas: Number(p.tentativas_do_pedido) || 0, teto, jaAvisou: !!p.falha_do_robo })
-      const rotulo = p.rotulo
       if (d.estado === 'REPETIR') {
         await gravar({
           estado: 'REPETIR',
@@ -961,12 +1133,6 @@ async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: num
           verificado_em: agora(),
           detalhe: `Falha do Escavador (${codigoDoRobo}) na tentativa ${d.tentativas} de ${teto}; peço de novo em ${INTERVALO_REPETIR_MIN} minutos.`,
         })
-        if (d.nota === 'primeira') {
-          await kommo.anotar(
-            p.kommo_lead_id,
-            notaDaFalhaDoRobo({ cnj: p.numero_cnj, rotulo, codigo: codigoDoRobo, teto, intervaloMin: INTERVALO_REPETIR_MIN }),
-          )
-        }
       } else {
         await gravar({
           estado: 'FALHOU',
@@ -975,19 +1141,13 @@ async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: num
           verificado_em: agora(),
           detalhe: `${motivoDoEstado(status, v?.motivo_erro ?? null)} — ${d.tentativas} tentativa(s); parei de tentar.`,
         })
-        await kommo.anotar(
-          p.kommo_lead_id,
-          notaDaDesistenciaDoRobo({ cnj: p.numero_cnj, rotulo, codigo: codigoDoRobo, tentativas: d.tentativas }),
-        )
       }
     } else if (doPedido && status !== 'PENDENTE') {
       const motivo = motivoDoEstado(status, v?.motivo_erro ?? null)
       await gravar({ estado: 'FALHOU', detalhe: motivo, verificado_em: agora() })
-      await kommo.anotar(p.kommo_lead_id, notaDeFalha(p.numero_cnj, motivo, p.rotulo))
     } else if (pedidoEm && Date.now() - pedidoEm > DESISTIR_H * 3_600_000) {
       const motivo = `o tribunal não respondeu em ${DESISTIR_H} horas`
       await gravar({ estado: 'FALHOU', detalhe: motivo })
-      await kommo.anotar(p.kommo_lead_id, notaDeFalha(p.numero_cnj, motivo, p.rotulo))
     } else {
       await gravar({ verificado_em: agora() })
     }
@@ -1092,7 +1252,6 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         if (lista.length === 0) {
           const motivo = 'o Escavador concluiu, mas não entregou documento nenhum'
           await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null })
-          await kommo.anotar(leadId, notaDeFalha(cnj, motivo, p.rotulo))
           continue
         }
         const paginas = lista.reduce((t, d) => t + d.paginas, 0)
@@ -1209,7 +1368,6 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         // tentativas, então a espera não vira laço.
         if (semAcessoAoKommo(ultimoErro)) {
           await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null })
-          await kommo.anotar(leadId, notaDeFalha(cnj, motivo, p.rotulo))
         } else {
           // A TENTATIVA DEVOLVIDA quando a queda foi passageira: uma
           // indisponibilidade longa esgotaria os documentos da frente um a um,
@@ -1228,27 +1386,14 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
 
       const faltam = todos.filter((d) => !feitas.has(d.chave) && Number(d.tentativas) < MAX_TENTATIVAS)
       if (faltam.length === 0) {
-        const falhas = todos.filter((d) => !feitas.has(d.chave)).map((d) => `${d.nome} (${d.erro ?? 'erro'})`)
-        const datas = todos.map((d) => d.data_documento).filter(Boolean).sort()
+        const falhas = todos.filter((d) => !feitas.has(d.chave))
+        // A nota única do card mostra a conclusão (`atualizarNotas`).
         await gravar({
           estado: 'CONCLUIDO',
           concluido_em: agora(),
           trabalhando_ate: null,
           detalhe: falhas.length ? `${falhas.length} documento(s) não desceram.` : null,
         })
-        await kommo.anotar(
-          leadId,
-          notaDosAutos({
-            cnj,
-            rotulo: p.rotulo,
-            anexados: feitas.size,
-            total: todos.length,
-            paginas: p.paginas,
-            primeiro: datas[0] ?? null,
-            ultimo: datas.at(-1) ?? null,
-            falhas,
-          }),
-        )
       } else {
         sobrou = true
         await gravar({ trabalhando_ate: null })
@@ -1261,6 +1406,86 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
   return sobrou
 }
 
+// ------------------------------------------------------------------ O CARD QUE SAIU DA ANÁLISE
+/**
+ * Onde cada card está, para a regra da interrupção. Card que não está no
+ * espelho fica de fora do mapa (= segue como sempre); se a leitura do espelho
+ * falhar, o mapa volta vazio — na dúvida, nada se interrompe.
+ */
+async function situacoesDosCards(svc: Servico, ids: number[]): Promise<Map<number, SituacaoDoCard>> {
+  const fora = new Map<number, SituacaoDoCard>()
+  if (!ids.length) return fora
+  const { data: etapas, error: erroEtapas } = await svc
+    .from('kommo_etapa')
+    .select('pipeline_id, status_id, nome')
+    .in('pipeline_id', FUNIS_DE_ENTRADA_POR_NOME)
+  if (erroEtapas) return fora
+  const entradas = entradasDoOperacional((etapas ?? []) as any[])
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data: leads, error } = await svc
+      .from('kommo_leads')
+      .select('kommo_lead_id, pipeline_id, status_id')
+      .in('kommo_lead_id', ids.slice(i, i + 150))
+    if (error) return new Map()
+    for (const l of (leads ?? []) as any[]) fora.set(Number(l.kommo_lead_id), situacaoDoCard(l, entradas))
+  }
+  return fora
+}
+
+/**
+ * A REGRA DA INTERRUPÇÃO, aplicada (pedido do dono, 20/10/2026): o card que
+ * saiu da coluna de análise de um funil operacional tem o que ainda não foi
+ * pedido (e a leitura pendente) INTERROMPIDO; o card que voltou tem o
+ * INTERROMPIDO de volta na fila. Nada aqui chama o Escavador.
+ *
+ * RODA DEPOIS DE ACOMPANHAR E ANTES DE PEDIR: o processo cujo robô acabou de
+ * falhar (REPETIR) num card que já saiu é interrompido antes do pedido pago da
+ * mesma volta. Devolve a situação dos cards, que o `pedir` confere de novo.
+ */
+async function interromperERetomar(svc: Servico, soEste: number | null): Promise<Map<number, SituacaoDoCard>> {
+  let qp = svc
+    .from('escavador_autos_processo')
+    .select('kommo_lead_id, numero_cnj, estado, atualizado_em')
+    .in('estado', [...ESTADOS_INTERROMPIVEIS, INTERROMPIDO, 'PEDINDO'])
+  let qc = svc.from('escavador_autos_card').select('kommo_lead_id, estado, atualizado_em').in('estado', ['NOVO', INTERROMPIDO])
+  if (soEste) {
+    qp = qp.eq('kommo_lead_id', soEste)
+    qc = qc.eq('kommo_lead_id', soEste)
+  }
+  const [{ data: processos }, { data: cards }] = await Promise.all([qp, qc])
+  const ps = (processos ?? []) as { kommo_lead_id: number; numero_cnj: string; estado: string; atualizado_em: string }[]
+  const cs = (cards ?? []) as { kommo_lead_id: number; estado: string; atualizado_em: string }[]
+  const ids = [...new Set([...ps, ...cs].map((x) => Number(x.kommo_lead_id)))]
+  const situacoes = await situacoesDosCards(svc, ids)
+
+  for (const p of ps) {
+    const s = situacoes.get(Number(p.kommo_lead_id))
+    const novo = s ? proximoEstadoDoProcesso(p.estado, s) : null
+    if (!novo) continue
+    // CONDICIONADO AO QUE SE LEU: a volta que tomou o processo no meio (a posse
+    // do pedido) ganha, e nada se sobrescreve.
+    await svc
+      .from('escavador_autos_processo')
+      .update({ estado: novo, detalhe: novo === INTERROMPIDO ? DETALHE_INTERROMPIDO : DETALHE_RETOMADO, atualizado_em: agora() })
+      .eq('kommo_lead_id', p.kommo_lead_id)
+      .eq('numero_cnj', p.numero_cnj)
+      .eq('estado', p.estado)
+      .eq('atualizado_em', p.atualizado_em)
+  }
+  for (const c of cs) {
+    const s = situacoes.get(Number(c.kommo_lead_id))
+    const novo = s ? proximoEstadoDaLeitura(c.estado, s) : null
+    if (!novo) continue
+    await svc
+      .from('escavador_autos_card')
+      .update({ estado: novo, detalhe: novo === INTERROMPIDO ? DETALHE_INTERROMPIDO : DETALHE_RETOMADO, atualizado_em: agora() })
+      .eq('kommo_lead_id', c.kommo_lead_id)
+      .eq('estado', c.estado)
+      .eq('atualizado_em', c.atualizado_em)
+  }
+  return situacoes
+}
+
 // ------------------------------------------------------------------ OUTRA RODADA
 /**
  * O CARD DEVOLVIDO À ENTRADA pede outra rodada ao robô. É o "como tentar de
@@ -1268,7 +1493,7 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
  * entrada e devolvê-lo. Só vale para o processo de que a rotina DESISTIU por
  * falha do robô (`desistiu_em`); os FALHOU antigos não voltam sozinhos.
  */
-async function rearmarQuemVoltou(svc: Servico, kommo: Kommo, soEste: number | null) {
+async function rearmarQuemVoltou(svc: Servico, soEste: number | null) {
   let q = svc
     .from('escavador_autos_processo')
     .select('kommo_lead_id, numero_cnj, rotulo, falha_do_robo, desistiu_em, teto_de_tentativas')
@@ -1294,8 +1519,8 @@ async function rearmarQuemVoltou(svc: Servico, kommo: Kommo, soEste: number | nu
     if (!l) continue
     const naEntrada = entradas.some((e) => e.pipeline_id === Number(l.pipeline_id) && e.status_id === Number(l.status_id))
     if (!voltouParaAEntrada({ naEntrada, etapaEm: l.etapa_em ?? null, desistiuEm: p.desistiu_em })) continue
-    const teto = tetoDoRobo(p.teto_de_tentativas)
-    const { data: tomei } = await svc
+    // Sem nota própria: a nota única do card passa a mostrar a nova rodada.
+    await svc
       .from('escavador_autos_processo')
       .update({
         estado: 'REPETIR',
@@ -1309,19 +1534,6 @@ async function rearmarQuemVoltou(svc: Servico, kommo: Kommo, soEste: number | nu
       .eq('numero_cnj', p.numero_cnj)
       .eq('estado', 'FALHOU')
       .eq('desistiu_em', p.desistiu_em)
-      .select('kommo_lead_id')
-    if (!tomei?.length) continue
-    await kommo.anotar(
-      Number(p.kommo_lead_id),
-      notaDaNovaRodada({
-        cnj: p.numero_cnj,
-        rotulo: p.rotulo,
-        codigo: String(p.falha_do_robo ?? 'erro do robô'),
-        teto,
-        intervaloMin: INTERVALO_REPETIR_MIN,
-        porque: 'O card voltou para a coluna de entrada',
-      }),
-    )
   }
 }
 
@@ -1342,7 +1554,6 @@ async function codigoDaFalhaAntiga(svc: Servico, p: Processo): Promise<string | 
  */
 async function acaoRepetirFalhas(
   svc: Servico,
-  kommo: Kommo,
   o: { soEste: number | null; teto: number | null; simular: boolean },
 ) {
   let q = svc.from('escavador_autos_processo').select('*').eq('estado', 'FALHOU')
@@ -1355,7 +1566,10 @@ async function acaoRepetirFalhas(
     fora.push({ kommo_lead_id: p.kommo_lead_id, numero_cnj: p.numero_cnj, rotulo: p.rotulo, codigo })
     if (o.simular) continue
     const teto = tetoDoRobo(o.teto ?? p.teto_de_tentativas)
-    const { data: tomei } = await svc
+    // Sem nota própria: a nota única do card passa a mostrar a nova rodada. O
+    // card que já saiu da coluna de análise é INTERROMPIDO na próxima volta,
+    // antes de qualquer pedido pago (pedido do dono, 20/10/2026).
+    await svc
       .from('escavador_autos_processo')
       .update({
         estado: 'REPETIR',
@@ -1370,19 +1584,6 @@ async function acaoRepetirFalhas(
       .eq('kommo_lead_id', p.kommo_lead_id)
       .eq('numero_cnj', p.numero_cnj)
       .eq('estado', 'FALHOU')
-      .select('kommo_lead_id')
-    if (!tomei?.length) continue
-    await kommo.anotar(
-      p.kommo_lead_id,
-      notaDaNovaRodada({
-        cnj: p.numero_cnj,
-        rotulo: p.rotulo,
-        codigo,
-        teto,
-        intervaloMin: INTERVALO_REPETIR_MIN,
-        porque: 'Nova rodada pedida pela Credijuris',
-      }),
-    )
   }
   return fora
 }
@@ -1467,6 +1668,7 @@ Deno.serve(async (req: Request) => {
     const chaveIA = await chaveAnthropic()
     const avisos: string[] = []
     const novas = await temAMigracaoNova(svc)
+    const notaUnica = await temANotaUnica(svc)
 
     // AS AÇÕES EXPLÍCITAS: só pelo segredo do cron (quem dispara é o dono, pelo
     // SQL Editor) — uma delas gasta dinheiro.
@@ -1480,7 +1682,7 @@ Deno.serve(async (req: Request) => {
         acao = { acao: 'rejuntar', simular, processos: lista }
       } else if (body.acao === 'repetir_falhas') {
         const teto = Number(body.teto) > 0 ? Number(body.teto) : null
-        const lista = await acaoRepetirFalhas(svc, kommo, { soEste, teto, simular })
+        const lista = await acaoRepetirFalhas(svc, { soEste, teto, simular })
         acao = { acao: 'repetir_falhas', simular, teto: tetoDoRobo(teto), processos: lista }
       } else {
         return jsonResponse({ erro: `Ação desconhecida: ${body.acao}` }, 400)
@@ -1491,12 +1693,16 @@ Deno.serve(async (req: Request) => {
     // A primeira volta lê, acompanha e pede; as encadeadas só continuam
     // anexando. ACOMPANHAR ANTES DE PEDIR: o processo cujo robô acabou de
     // falhar é pedido de novo na mesma volta — é o que faz a repetição sair de
-    // 10 em 10 minutos, e não de 20 em 20.
+    // 10 em 10 minutos, e não de 20 em 20. E A INTERRUPÇÃO ENTRE OS DOIS: o
+    // card que saiu da análise não chega ao pedido pago.
     if (volta === 0) {
-      if (novas) await rearmarQuemVoltou(svc, kommo, soEste)
-      await lerCards(svc, kommo, chaveIA, soEste, resta, avisos)
-      await acompanhar(svc, chave, kommo, soEste, novas)
-      await pedir(svc, chave, kommo, soEste, avisos, novas, resta)
+      if (novas) await rearmarQuemVoltou(svc, soEste)
+      await lerCards(svc, kommo, chaveIA, soEste, resta, avisos, notaUnica)
+      await acompanhar(svc, chave, soEste, novas)
+      const situacoes = await interromperERetomar(svc, soEste)
+      await pedir(svc, chave, situacoes, soEste, avisos, novas, resta)
+      // A nota única de cada card, com o que esta volta mudou.
+      if (notaUnica) await atualizarNotas(svc, kommo, soEste, resta, avisos)
     }
 
     let sobrou = false
@@ -1504,6 +1710,7 @@ Deno.serve(async (req: Request) => {
     if (!novas) {
       sobrou = await anexar(svc, chave, kommo, soEste, resta)
       if (sobrou && volta < MAX_ENCADEADAS) proximaVolta(volta, soEste)
+      if (notaUnica) await atualizarNotas(svc, kommo, soEste, resta, avisos)
     } else {
       // A JUNÇÃO RODA DEPOIS DA RESPOSTA, em segundo plano: uma parte de 48 MB
       // (baixar, juntar, subir) passa dos 150 s em que a resposta tem de sair,
@@ -1523,8 +1730,13 @@ Deno.serve(async (req: Request) => {
         orcamento,
         listar: (cnj, pedidoId) => listarAutos(svc, chave, cnj, pedidoId),
       })
-        .then((s) => {
+        .then(async (s) => {
           if (s && volta < MAX_ENCADEADAS) proximaVolta(volta, soEste)
+          // A NOTA DEPOIS DA JUNÇÃO: a parte que subiu, o processo que concluiu.
+          // No que sobrar do teto da invocação; o que não couber, a próxima volta faz.
+          if (notaUnica) {
+            await atualizarNotas(svc, kommo, soEste, () => PRAZO_DAS_NOTAS_MS - (Date.now() - inicio), []).catch(() => {})
+          }
           return s
         })
         .catch(() => false)
