@@ -52,6 +52,9 @@ export function Modal({
   /**
    * O rodapé, À DIREITA: `[Cancelar/Fechar] [Primário]`, nessa ordem — o
    * primário por último, no canto (auditoria visual de 03/10/2026, §0.6/C8).
+   * O Cancelar/Fechar é `variant="ghost"` em toda janela, como na amostra e no
+   * ConfirmDialog (revisão UX em equipe, 20/10/2026: metade das janelas usava
+   * contorno, e o mesmo botão tinha dois pesos de uma janela para outra).
    */
   footer?: ReactNode
   /**

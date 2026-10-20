@@ -54,6 +54,7 @@ import { getLabel, INDICE_ATUALIZACAO, textosResumo } from '@/lib/labels'
 import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
 import { Chip } from '@/components/ui/Chip'
@@ -455,6 +456,16 @@ function Individual() {
   // mensagem saem sempre com as 25 colunas (ver lib/gruposDaCarteira.ts).
   const [grupos, setGrupos] = useState<GruposLigados>(todosLigados)
 
+  // GERAR RESUMOS PERGUNTA ANTES (revisão UX em equipe, 20/10/2026): o alcance
+  // (a carteira inteira, não só o investidor da tela) e o custo (uma consulta à
+  // IA por crédito) estavam só na dica do mouse — no celular, nem isso.
+  const [confirmarResumos, setConfirmarResumos] = useState(false)
+  const nParaResumir = useMemo(
+    () =>
+      (processos.data ?? []).filter((p) => (p.cessionario ?? '').trim() && p.status !== 'encerrado').length,
+    [processos.data],
+  )
+
   const gerar = useMutation({
     mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
       invokeFunction<{ gerados: number; pulados: number; falhas: number; restantes: number }>(
@@ -720,7 +731,7 @@ function Individual() {
             variant="secondary"
             icon={<Sparkles className="h-[16px] w-[16px]" />}
             loading={gerar.isPending && !gerar.variables?.processo_id}
-            onClick={() => gerar.mutate({ forcar: true })}
+            onClick={() => setConfirmarResumos(true)}
             title="Refaz o estágio processual e as providências de TODOS os créditos com cessionário, não só os deste investidor. Cada crédito é uma consulta à IA."
           >
             Gerar resumos
@@ -736,13 +747,19 @@ function Individual() {
       {!investidor ? (
         <EmptyState
           title="Selecione um investidor"
-          description="Escolha acima para ver a carteira dele."
+          description="Digite o nome no campo Investidor. Aparecem os créditos dele, o que já voltou e o que falta, e o relatório para enviar a ele."
         />
       ) : (
         <>
         {/* No celular, o relatório (o principal) numa linha inteira em cima, e
             Excel e mensagem lado a lado embaixo. */}
-        <div className="grid grid-cols-2 gap-s2 sm:flex sm:flex-wrap sm:justify-end">
+        <div className="grid grid-cols-2 gap-s2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
+          {/* DE QUEM SÃO ESTES BOTÕES (revisão UX em equipe, 20/10/2026): logo
+              acima ficam Parâmetros e Gerar resumos, que valem para a carteira
+              inteira; estes três são só do investidor escolhido. */}
+          <p className="order-first col-span-2 min-w-0 truncate text-sm text-texto-3 sm:mr-auto">
+            Para enviar a <span className="font-semibold text-texto-2">{investidor}</span>
+          </p>
           <Button
             variant="secondary"
             icon={<Download className="h-[16px] w-[16px]" />}
@@ -989,6 +1006,27 @@ function Individual() {
         onClose={() => setAbrirParametros(false)}
       />
 
+      <ConfirmDialog
+        open={confirmarResumos}
+        title="Gerar resumos da carteira"
+        message={
+          <>
+            Refaz o estágio processual e as providências de{' '}
+            <strong>
+              {nParaResumir === 1 ? '1 crédito' : `${nParaResumir} créditos`}
+            </strong>{' '}
+            — todos os que têm cessionário e não estão encerrados, não só os do investidor da tela. Cada crédito é
+            uma consulta à IA, e os textos vão aparecendo aqui em alguns minutos.
+          </>
+        }
+        confirmLabel="Gerar resumos"
+        onConfirm={() => {
+          setConfirmarResumos(false)
+          gerar.mutate({ forcar: true })
+        }}
+        onClose={() => setConfirmarResumos(false)}
+      />
+
       {/* Texto inteiro do estágio/providências. Guarda id + campo, então o
           conteúdo se atualiza sozinho quando o botão gera de novo. */}
       <Modal
@@ -999,7 +1037,7 @@ function Individual() {
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAberto(null)}>
+            <Button variant="ghost" onClick={() => setAberto(null)}>
               Fechar
             </Button>
             {/* Crédito ENCERRADO (pelo status, não pela cor) tem texto fixo:

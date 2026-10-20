@@ -591,7 +591,7 @@ export default function DadosPessoaisBancarios() {
     if (!aExcluir) return
     try {
       await excluir.mutateAsync({ tipo, nome_chave: aExcluir.chave })
-      toast.success(`${aExcluir.nome} removido.`)
+      toast.success(`${aExcluir.nome} excluído.`)
       setAExcluir(null)
     } catch (e) {
       toast.error((e as Error).message)
@@ -616,11 +616,14 @@ export default function DadosPessoaisBancarios() {
       onSelecionar: () => abrirJanela(i.chave, i.nome, false),
     },
     {
-      rotulo: `Remover ${rotuloMin}`,
+      // "EXCLUIR", COMO EM TODA A PLATAFORMA (revisão UX em equipe, 20/10/2026):
+      // Créditos, Requerimentos, Apensos e Contatos já diziam Excluir; aqui era
+      // "Remover", e o mesmo gesto com dois nomes faz pensar em duas coisas.
+      rotulo: `Excluir ${rotuloMin}`,
       icone: <Trash2 aria-hidden />,
       perigo: true,
       desabilitada: i.emCredito,
-      motivo: 'Está num crédito: o nome vem de lá, e remover aqui só apagaria os dados bancários.',
+      motivo: 'Está num crédito: o nome vem de lá, e excluir aqui só apagaria os dados bancários.',
       onSelecionar: () => setAExcluir(i),
     },
   ]
@@ -935,7 +938,7 @@ export default function DadosPessoaisBancarios() {
         }
         footer={
           <>
-            <Button variant="secondary" onClick={cancelarFicha}>
+            <Button variant="ghost" onClick={cancelarFicha}>
               Cancelar
             </Button>
             {/* "SALVANDO…" ENQUANTO GRAVA (amostra): o giro sozinho não diz o
@@ -1238,15 +1241,15 @@ export default function DadosPessoaisBancarios() {
 
       <ConfirmDialog
         open={!!aExcluir}
-        title={`Remover ${rotuloMin}`}
+        title={`Excluir ${rotuloMin}`}
         message={
           <>
-            Remover <strong>{aExcluir?.nome}</strong> e os dados pessoais e
+            Excluir <strong>{aExcluir?.nome}</strong> e os dados pessoais e
             bancários dele? Como não há crédito com este nome, nada mais fica
             apontando para ele.
           </>
         }
-        confirmLabel="Remover"
+        confirmLabel="Excluir"
         danger
         loading={excluir.isPending}
         onConfirm={handleExcluir}

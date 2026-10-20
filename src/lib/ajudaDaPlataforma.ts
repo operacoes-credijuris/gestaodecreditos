@@ -18,8 +18,8 @@ export const AJUDA_DAS_TELAS: Readonly<Record<string, readonly string[]>> = {
   ],
   '/comercial/dados-pessoais': [
     'Investidores e originadores com os dados que entram nos contratos.',
-    'Clique na linha para ver ou corrigir a ficha; o CEP completa o endereço.',
-    'Só dá para remover quem não tem crédito.',
+    'Clique na linha (ou no ›) para ver e corrigir a ficha; o ⋯ tem Editar e Excluir. O CEP completa o endereço.',
+    'Só dá para excluir quem não está em crédito nenhum: o selo "sem crédito" mostra quem.',
   ],
   '/comercial/contratos': [
     'Gera os contratos a partir dos modelos e da análise já salva no Drive.',
@@ -33,18 +33,18 @@ export const AJUDA_DAS_TELAS: Readonly<Record<string, readonly string[]>> = {
   ],
   '/operacional/execucao/tarefas': [
     'Os prazos dos processos, sincronizados com o ADVBOX.',
-    'As vencidas aparecem primeiro, depois hoje e amanhã e os próximos 7 dias. A tarefa é concluída no ADVBOX.',
+    'Em Fatais, as tarefas com prazo: vencidas primeiro, depois hoje e amanhã e os próximos 7 dias. A tarefa é concluída no ADVBOX.',
     '"Gerar petição" parte de um modelo ou da IA, e nada é salvo sem você conferir.',
   ],
   '/operacional/execucao/processos': [
     'A carteira: cada crédito adquirido, contra quem e quando deve pagar.',
-    'Clique na linha para abrir a ficha ao lado, sem perder a lista.',
+    'Clique na linha (ou no ›) para abrir a ficha ao lado, sem perder a lista; o ⋯ tem Editar, Excluir e Adicionar apenso.',
     'O novo crédito pode ser preenchido pela pasta do Drive, com a IA lendo os documentos.',
   ],
   '/operacional/execucao/requerimentos': [
     'Pedidos feitos fora do processo: habilitações, preferências, retificações.',
-    'Clique na linha para ver a ficha e o histórico.',
-    'O "+" de cada linha adiciona um apenso; o número ao lado do protocolo mostra os que já existem.',
+    'Clique na linha (ou no ›) para ver a ficha e o histórico; o ⋯ tem Editar, Excluir e Adicionar apenso.',
+    'A pílula "1 apenso", ao lado do protocolo, abre ali mesmo a lista dos apensos.',
   ],
   '/operacional/execucao/contatos': [
     'Telefones e e-mails das serventias, gabinetes e órgãos auxiliares.',

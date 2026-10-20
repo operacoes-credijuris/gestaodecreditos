@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Textarea } from '@/components/ui/Field'
 import { IconButton } from '@/components/ui/IconButton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Table, THead, TH, TBody, TR, TD, Loading } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { ROTEIRO_QUALIFICACAO } from '../../../supabase/functions/_shared/roteiroQualificacao.ts'
@@ -144,12 +145,17 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
     })
   }
 
+  // EXCLUIR PEDE CONFIRMAÇÃO (revisão UX em equipe, 20/10/2026): o pacote sai da
+  // Anthropic e o assistente de TODA a equipe deixa de usá-lo — para voltar, só
+  // enviando o .zip de novo. Era um clique na lixeira, colada no Desativar.
+  const [aExcluir, setAExcluir] = useState<SkillAssistente | null>(null)
+
   async function remover(id: string) {
     await comTrava(id, async () => {
       try {
         await invokeFunction('assistente-skills', { acao: 'remover', id })
         await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
-        toast.success('Skill removida.')
+        toast.success('Skill excluída.')
       } catch (err) {
         toast.error((err as Error).message)
       }
@@ -238,11 +244,11 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                             {s.ativo ? 'Desativar' : 'Ativar'}
                           </Button>
                           <IconButton
-                            label={`Remover skill ${s.nome}`}
+                            label={`Excluir a skill ${s.nome}`}
                             variant="danger"
                             icon={<Trash2 className="h-[16px] w-[16px]" />}
                             disabled={emCurso.has(s.id)}
-                            onClick={() => remover(s.id)}
+                            onClick={() => setAExcluir(s)}
                           />
                         </div>
                       </TD>
@@ -329,6 +335,25 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
           </div>
         </>
       )}
+      <ConfirmDialog
+        open={!!aExcluir}
+        title="Excluir skill"
+        message={
+          <>
+            Excluir <strong>{aExcluir?.nome}</strong>? O assistente deixa de usá-la para toda a equipe. Para voltar,
+            será preciso enviar o .zip de novo. Se for só uma pausa, use Desativar.
+          </>
+        }
+        confirmLabel="Excluir"
+        danger
+        loading={!!aExcluir && emCurso.has(aExcluir.id)}
+        onConfirm={() => {
+          if (!aExcluir) return
+          const id = aExcluir.id
+          void remover(id).finally(() => setAExcluir(null))
+        }}
+        onClose={() => setAExcluir(null)}
+      />
     </>
   )
 }

@@ -367,7 +367,7 @@ export default function Processos() {
           ) : (
             <EmptyState
               title="Nenhum crédito"
-              description="Cadastre o primeiro crédito."
+              description="Cada crédito adquirido entra aqui, com as partes, a devedora e a previsão de pagamento. Cadastre o primeiro pelo formulário ou pela pasta do Drive."
               action={
                 <Button
                   icon={<Plus className="h-[16px] w-[16px]" />}

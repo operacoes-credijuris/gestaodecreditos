@@ -19,6 +19,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancelar',
   danger = false,
   loading = false,
+  iconeDoBotao,
   onConfirm,
   onClose,
 }: {
@@ -29,6 +30,12 @@ export function ConfirmDialog({
   cancelLabel?: string
   danger?: boolean
   loading?: boolean
+  /**
+   * O ícone do botão de confirmar. No perigo, o padrão é a lixeira — certo para
+   * excluir, errado para o que não apaga nada ("Desativar" um usuário). Passe
+   * `null` para tirar o ícone, ou outro ícone. Sem a prop, nada muda.
+   */
+  iconeDoBotao?: ReactNode
   onConfirm: () => void
   onClose: () => void
 }) {
@@ -47,7 +54,13 @@ export function ConfirmDialog({
             variant={danger ? 'danger' : 'primary'}
             onClick={onConfirm}
             loading={loading}
-            icon={danger ? <Trash2 className="h-[16px] w-[16px]" aria-hidden /> : undefined}
+            icon={
+              iconeDoBotao !== undefined
+                ? iconeDoBotao ?? undefined
+                : danger
+                  ? <Trash2 className="h-[16px] w-[16px]" aria-hidden />
+                  : undefined
+            }
           >
             {confirmLabel}
           </Button>

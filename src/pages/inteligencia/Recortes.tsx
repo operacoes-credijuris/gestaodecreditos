@@ -219,7 +219,10 @@ function TabelaGrupos({
       {grupos.length === 0 ? (
         // O VAZIO DE SEMPRE, tracejado (§0.10): dentro de um cartão sólido ele virava
         // cartão dentro de cartão.
-        <EmptyState title="Sem dados para este recorte" />
+        <EmptyState
+          title="Sem dados para este recorte"
+          description={`Nenhuma operação da carteira tem ${contexto} preenchido. Ele vem do cadastro de cada crédito, na tela Créditos.`}
+        />
       ) : (
         <>
           {/* O RANKING (Novo): comparação é barra, e ordenada pelo capital. Os

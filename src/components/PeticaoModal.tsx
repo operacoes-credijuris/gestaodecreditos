@@ -678,7 +678,7 @@ export function PeticaoModal({
       }
       footer={
         <>
-          <Button variant="secondary" onClick={fechar}>
+          <Button variant="ghost" onClick={fechar}>
             Fechar
           </Button>
           <Button
