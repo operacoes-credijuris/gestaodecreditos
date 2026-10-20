@@ -777,7 +777,7 @@ export function FaseProcessual({
 
   const gerar = useMutation({
     mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
-      invokeFunction<{ gerados: number; pulados: number; falhas: number }>('fase-processual', vars),
+      invokeFunction<{ gerados: number; pulados: number; falhas: number; adiados?: number }>('fase-processual', vars),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['processos_fase'], refetchType: 'all' })
       qc.invalidateQueries({ queryKey: ['processos_fase_mudancas'] })
@@ -788,6 +788,12 @@ export function FaseProcessual({
           r.falhas === 1
             ? '1 crédito não pôde ser classificado; os demais foram atualizados.'
             : `${r.falhas} créditos não puderam ser classificados; os demais foram atualizados.`,
+        )
+      } else if (r?.adiados) {
+        // O RELÓGIO DO SERVIDOR acabou antes de todos (21/10/2026): os que faltam
+        // entram na próxima rodada — o cron diário, ou um novo "Atualizar fases".
+        toast.info(
+          `${r.gerados} crédito(s) atualizado(s); ${r.adiados} ficaram para a próxima rodada — clique em "Atualizar fases" de novo para continuar.`,
         )
       } else {
         toast.success('Classificação atualizada.')

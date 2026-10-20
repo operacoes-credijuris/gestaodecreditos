@@ -12,15 +12,12 @@
 //   { forcar?: boolean }                  varredura diária (botão "Atualizar" e o cron)
 //   { acao: 'override_manual', processo_id, fase_codigo }   reclassificação manual do usuário
 //
-// A VARREDURA DIÁRIA NÃO RELÊ A CARTEIRA INTEIRA. Ela busca só dois grupos:
-// (1) créditos nunca classificados (primeira fase, precisa acontecer uma vez
-// por crédito, independente de movimentação); (2) créditos — OU um de seus
-// apensos — com andamento dentro de JANELA_RECENTE_DIAS. É a mesma resolução
-// (crédito + apensos, casamento por dígito) que a tela "Movimentações
-// recentes" usa para exibir, para as duas leituras nunca divergirem sobre
-// "quem mudou". `forcar: true` ignora tudo isso e reclassifica o lote inteiro
-// mesmo assim (uso: depois de um ajuste no prompt, quando se quer reprocessar
-// todo mundo de propósito).
+// A VARREDURA DIÁRIA OLHA A CARTEIRA INTEIRA (21/10/2026), e o HASH decide quem
+// vai ao modelo: só o crédito que nunca foi classificado ou cujo conjunto de
+// andamentos (crédito + apensos, casamento por dígito) mudou desde a última
+// classificação (`fonte_hash`). Antes ela olhava só quem tinha andamento nos
+// últimos 3 dias, pela data do andamento — a conclusão publicada com atraso
+// nunca entrava no card de Conclusos. `forcar: true` ignora o hash.
 //
 // Autorização: JWT do usuário (app) OU x-cron-secret (pg_cron) para os modos de
 // classificação; override_manual exige sempre um usuário autenticado (é ação
@@ -35,19 +32,21 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
+import { lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
 
 // Haiku dá conta: a saída é um código fixo de uma lista curta, não prosa livre.
 const MODELO = 'claude-haiku-4-5-20251001'
 
 const CONCORRENCIA = 5
 
-// Janela de "movimentação recente" que decide quem entra na varredura diária —
-// crédito ou um de seus apensos precisa ter andamento dentro dela. Maior que 1
-// dia de propósito: dá folga para o cron não perder ninguém se um dia passar
-// sem rodar. Créditos nunca classificados entram sempre, independente desta
-// janela (ver a varredura abaixo) — senão um crédito novo, sem "movimentação
-// recente" nenhuma ainda, nunca ganharia a primeira fase.
-const JANELA_RECENTE_DIAS = 3
+/**
+ * Até quando a invocação começa uma nova ida ao modelo (21/10/2026). O teto real
+ * de uma Edge Function aqui é ~150 s; com a carteira inteira no lote, a primeira
+ * rodada depois de uma mudança grande pode ter muitos créditos a reclassificar —
+ * os que não couberem ficam para a rodada seguinte (cron diário ou "Atualizar").
+ */
+const ORCAMENTO_MS = 110_000
+
 
 // Teto de andamentos enviados ao modelo. A primeira classificação de um
 // crédito precisa enxergar mais fundo no histórico (o marco mais avançado pode
@@ -406,6 +405,8 @@ async function varrerTransicaoPorCalendario(svc: ReturnType<typeof serviceClient
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  // O RELÓGIO DA INVOCAÇÃO (~150 s de teto no servidor): ver ORCAMENTO_MS.
+  const inicio = Date.now()
 
   try {
     const body = (await req.json().catch(() => ({}))) as {
@@ -528,53 +529,20 @@ Deno.serve(async (req: Request) => {
       // alocado a um cessionário — é o processo judicial que anda, não a
       // carteira do investidor. Filtrar por `cessionario` aqui descartava quase
       // toda a base.
-      const { data: candidatosData } = await svc
-        .from('processos')
-        .select('id, numero_cnj')
-        .in('status', ['ativo', 'complementar'])
-      const candidatos = (candidatosData ?? []) as { id: string; numero_cnj: string | null }[]
+      // PAGINADO: o PostgREST corta em 1000 linhas sem avisar.
+      const { linhas: candidatos } = await lerTodasAsLinhas<{ id: string; numero_cnj: string | null }>((de, ate) =>
+        svc.from('processos').select('id, numero_cnj').in('status', ['ativo', 'complementar']).order('id').range(de, ate),
+      )
 
-      if (forcar) {
-        // Reprocessamento completo proposital (ex.: depois de ajustar o
-        // prompt) — ignora a varredura por novidade, pega todo mundo.
-        lote = candidatos.map((p) => p.id)
-      } else {
-        // Quem nunca foi classificado entra sempre — não dá pra depender de
-        // "teve movimentação recente" pra dar a PRIMEIRA fase a um crédito novo.
-        const { data: jaClassificadosData } = await svc.from('processos_fase').select('processo_id')
-        const idsClassificados = new Set(
-          ((jaClassificadosData ?? []) as { processo_id: string }[]).map((r) => r.processo_id),
-        )
-        const semClassificacao = candidatos.filter((p) => !idsClassificados.has(p.id)).map((p) => p.id)
-
-        // Quem teve movimentação recente — crédito OU um de seus apensos,
-        // mesma resolução usada na tela "Movimentações recentes": é a
-        // varredura diária olhando o que realmente mudou, em vez de reler a
-        // carteira inteira.
-        const { data: apensosTodosData } = await svc.from('apensos').select('processo_id, numero')
-        const processoPorDigitos = new Map<string, string>()
-        for (const p of candidatos) {
-          const d = onlyDigits(p.numero_cnj)
-          if (d.length >= 6) processoPorDigitos.set(d, p.id)
-        }
-        for (const a of (apensosTodosData ?? []) as { processo_id: string | null; numero: string | null }[]) {
-          if (!a.processo_id) continue
-          const d = onlyDigits(a.numero)
-          if (d.length >= 6 && !processoPorDigitos.has(d)) processoPorDigitos.set(d, a.processo_id)
-        }
-        const corteRecente = new Date(Date.now() - JANELA_RECENTE_DIAS * 86400000).toISOString().slice(0, 10)
-        const { data: movRecentesData } = await svc
-          .from('advbox_movimentacoes')
-          .select('numero_digits')
-          .gte('data', corteRecente)
-        const movimentaramRecentemente = new Set<string>()
-        for (const m of (movRecentesData ?? []) as { numero_digits: string | null }[]) {
-          const credId = processoPorDigitos.get(m.numero_digits ?? '')
-          if (credId) movimentaramRecentemente.add(credId)
-        }
-
-        lote = [...new Set([...semClassificacao, ...movimentaramRecentemente])]
-      }
+      // A CARTEIRA INTEIRA, E O HASH DECIDE (21/10/2026). A varredura olhava só
+      // quem teve andamento nos últimos dias, contados pela data do andamento — e
+      // a conclusão publicada com atraso, ou que caía num dia sem varredura (o
+      // cron diário chegou a não existir), nunca entrava: o processo não ia para
+      // o card de Conclusos. Agora todo crédito ativo/complementar entra no lote,
+      // e o modelo SÓ é chamado para quem teve o conjunto de andamentos mudado
+      // desde a última classificação (`fonte_hash`, abaixo) ou nunca foi
+      // classificado. `forcar: true` ignora o hash e reclassifica todos.
+      lote = candidatos.map((p) => p.id)
     }
 
     // Transição de calendário só na varredura da carteira inteira, não no
@@ -626,15 +594,21 @@ Deno.serve(async (req: Request) => {
     }
     const todosDigits = [...new Set([...digitsDe.values()].flat())]
 
-    const { data: movData } = todosDigits.length
-      ? await svc
-          .from('advbox_movimentacoes')
-          .select('id, numero_digits, data, data_ts, conteudo')
-          .in('numero_digits', todosDigits)
-          .order('data', { ascending: false })
-          .order('data_ts', { ascending: false, nullsFirst: false })
-          .order('id', { ascending: false })
-      : { data: [] }
+    // PAGINADO (21/10/2026): sem `range`, o PostgREST devolvia só 1000 andamentos
+    // do lote inteiro, sem avisar — o histórico de parte dos créditos chegava
+    // cortado ao modelo (e a conclusão recente podia nem estar nele).
+    const { linhas: movData } = todosDigits.length
+      ? await lerTodasAsLinhas<MovRow>((de, ate) =>
+          svc
+            .from('advbox_movimentacoes')
+            .select('id, numero_digits, data, data_ts, conteudo')
+            .in('numero_digits', todosDigits)
+            .order('data', { ascending: false })
+            .order('data_ts', { ascending: false, nullsFirst: false })
+            .order('id', { ascending: false })
+            .range(de, ate),
+        )
+      : { linhas: [] as MovRow[] }
     const movsPor = new Map<string, MovRow[]>()
     for (const m of (movData ?? []) as MovRow[]) {
       const k = m.numero_digits ?? ''
@@ -670,6 +644,8 @@ Deno.serve(async (req: Request) => {
     let gerados = 0
     let pulados = encerrados.length
     let falhas = 0
+    // OS QUE FICARAM PARA A PRÓXIMA RODADA: o relógio acabou antes deles.
+    let adiados = 0
 
     await mapPool(processos, CONCORRENCIA, async (p) => {
       const trilha = p.status === 'complementar' ? 'complementar' : 'ativo'
@@ -681,6 +657,13 @@ Deno.serve(async (req: Request) => {
       const fonte = hash([todasMovs.length, movs.map((m) => m.id).join(','), p.status ?? ''].join('|'))
       if (!forcar && atual?.fonte_hash === fonte) {
         pulados++
+        return
+      }
+      // SEM RELÓGIO PARA MAIS UMA IDA AO MODELO: fica para a próxima rodada (o
+      // hash continua o antigo, então ele entra de novo). Melhor parar com folga
+      // do que a plataforma derrubar a invocação no meio de uma gravação.
+      if (Date.now() - inicio > ORCAMENTO_MS) {
+        adiados++
         return
       }
 
@@ -762,6 +745,7 @@ Deno.serve(async (req: Request) => {
       gerados,
       pulados,
       falhas,
+      adiados,
       calendarioTransicionados,
     })
   } catch (e) {
