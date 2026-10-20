@@ -6824,6 +6824,8 @@ export default function AnaliseCredito() {
         title="Sem proposta"
         danger
         confirmLabel="Confirmar sem proposta"
+        // SEM A LIXEIRA: aqui nada é apagado — o card vai para Reprovados (ConfirmDialog, 22/10/2026).
+        iconeDoBotao={<ArrowRight className="h-[16px] w-[16px]" aria-hidden />}
         loading={semPropostaDe !== null && emAndamento[semPropostaDe.kommo_lead_id] !== undefined}
         message={
           // SÓ SPANS: o ConfirmDialog já põe a mensagem dentro de um <p>.
