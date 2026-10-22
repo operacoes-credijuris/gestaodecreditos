@@ -115,11 +115,41 @@ export async function invokeFunction<T = unknown>(
   name: string,
   body?: Record<string, unknown>,
 ): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<T>(name, {
-    body: body ?? {},
-  })
+  const { data, error } = await invocarComSessaoRenovada<T>(name, body ?? {})
   if (error) throw await erroDaFuncao(error)
   return data as T
+}
+
+/**
+ * A RECUSA DA SESSÃO, e só ela: o 401 do portão das funções (ERRO_ACESSO, a
+ * "Sessão inválida." da advbox-tarefas) ou do gateway (JWT vencido/inválido).
+ * Um 401 que a função repassa de outro serviço (Escavador, Kommo) não entra:
+ * renovar a sessão não muda a resposta dele.
+ */
+const SESSAO_RECUSADA = /acesso não autorizado|sessão inválida|invalid jwt|jwt expired|missing authorization/i
+
+/** Exportada só para o teste. */
+export async function sessaoRecusada(error: unknown): Promise<boolean> {
+  const ctx = (error as { context?: Response } | null)?.context
+  if (ctx?.status !== 401 || typeof ctx.clone !== 'function') return false
+  const txt = await ctx.clone().text().catch(() => '')
+  return SESSAO_RECUSADA.test(txt)
+}
+
+/**
+ * RENOVA A SESSÃO E TENTA DE NOVO, uma vez, quando a função recusa o acesso
+ * (22/10/2026): com a aba aberta por horas, o token podia sair vencido, e a
+ * pessoa logada lia "Acesso não autorizado. Faça login novamente" — foi o que a
+ * justificativa técnica mostrou, e o vigia dela, que falhava calado, deixou a
+ * geração parar no meio. O 401 do portão vem antes de qualquer trabalho da
+ * função, então repetir não faz nada duas vezes.
+ */
+async function invocarComSessaoRenovada<T>(name: string, body: Record<string, unknown> | FormData) {
+  const r = await supabase.functions.invoke<T>(name, { body })
+  if (!r.error || !(await sessaoRecusada(r.error))) return r
+  const { data } = await supabase.auth.refreshSession().catch(() => ({ data: { session: null } }))
+  if (!data.session) return r
+  return supabase.functions.invoke<T>(name, { body })
 }
 
 /**
@@ -132,7 +162,7 @@ export async function invokeFunctionForm<T = unknown>(
   name: string,
   form: FormData,
 ): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<T>(name, { body: form })
+  const { data, error } = await invocarComSessaoRenovada<T>(name, form)
   if (error) throw await erroDaFuncao(error)
   return data as T
 }

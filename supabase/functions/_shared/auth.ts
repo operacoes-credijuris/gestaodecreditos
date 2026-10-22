@@ -37,10 +37,23 @@ export async function getCaller(req: Request) {
     global: { headers: { Authorization: authHeader } },
     auth: { persistSession: false, autoRefreshToken: false },
   })
-  const {
-    data: { user },
-  } = await client.auth.getUser()
-  return user
+  // UMA SEGUNDA TENTATIVA QUANDO O AUTH FALHA, e não quando recusa (22/10/2026):
+  // um tropeço do servidor de autenticação (rede, 5xx) virava "Acesso não
+  // autorizado" (401) com a sessão boa — foi o que a justificativa técnica
+  // mostrou ao tentar de novo. Token recusado (4xx) não se repete.
+  for (let tentativa = 0; ; tentativa++) {
+    const { data, error } = await client.auth.getUser()
+    if (data?.user) return data.user
+    if (tentativa >= 1 || !falhaDoAuth(error)) return null
+    await new Promise((r) => setTimeout(r, 400))
+  }
+}
+
+/** O erro é do servidor de autenticação (sem status, ou 5xx), e não do token. */
+export function falhaDoAuth(error: { status?: number } | null | undefined): boolean {
+  if (!error) return false
+  const s = error.status
+  return typeof s !== 'number' || s === 0 || s >= 500
 }
 
 /**

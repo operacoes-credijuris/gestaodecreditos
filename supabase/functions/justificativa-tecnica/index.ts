@@ -339,6 +339,25 @@ async function vigiar(req: Request, svc: SupabaseClient, body: Record<string, un
   return jsonResponse({ ok: true, relancadas })
 }
 
+/**
+ * O VIGIA DO AGENDAMENTO (22/10/2026): o mesmo vigia, para todas as gerações em
+ * curso, chamado pelo cron a cada 2 min. O da janela só valia com ela aberta e
+ * com a sessão de quem olhava boa — com o 401, a frente morta não voltou, e a
+ * geração parou "pesquisando na internet".
+ */
+async function vigiarTodas(svc: SupabaseClient): Promise<Response> {
+  const { data, error } = await svc.from(TABELA).select('kommo_lead_id, tentativa').eq('status', 'gerando').limit(50)
+  if (error) {
+    if (ehTabelaAusente(error)) throw new TabelaAusente(error.message)
+    return erro(`Não consegui ler as gerações em curso: ${error.message}`, 500)
+  }
+  const linhas = (data ?? []) as { kommo_lead_id: number; tentativa: string | null }[]
+  const relancadas = await Promise.all(
+    linhas.map((l) => vigiarFrentes(svc, Number(l.kommo_lead_id), String(l.tentativa ?? '')).catch(() => 0)),
+  )
+  return jsonResponse({ ok: true, em_curso: linhas.length, relancadas: relancadas.reduce((a, b) => a + b, 0) })
+}
+
 /** A mensagem que a pessoa lê quando a IA falha — sem pilha, sem inglês cru. */
 function mensagemDaFalha(e: unknown): string {
   // SEM CRÉDITOS NA CONTA (19/10/2026) e as outras falhas conhecidas: o texto
@@ -1083,14 +1102,19 @@ Deno.serve(async (req: Request) => {
     const svc = serviceClient()
     const acao = String(body.acao ?? '')
 
+    // SEM USUÁRIO POR TRÁS: só passa quem traz a service_role ou o segredo de
+    // cron — nenhum dos dois chega ao navegador.
+    const cronSecret = Deno.env.get('CRON_SECRET')
+    const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    const interna =
+      (!!cronSecret && req.headers.get('x-cron-secret') === cronSecret) ||
+      (!!svcKey && req.headers.get('Authorization') === `Bearer ${svcKey}`)
+
+    if (acao === 'vigiar-todas') {
+      if (!interna) return erro(ERRO_ACESSO, 401)
+      return await vigiarTodas(svc)
+    }
     if (acao === 'passo') {
-      // SEM USUÁRIO POR TRÁS: só passa quem traz a service_role ou o segredo de
-      // cron — nenhum dos dois chega ao navegador.
-      const cronSecret = Deno.env.get('CRON_SECRET')
-      const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-      const interna =
-        (!!cronSecret && req.headers.get('x-cron-secret') === cronSecret) ||
-        (!!svcKey && req.headers.get('Authorization') === `Bearer ${svcKey}`)
       if (!interna) return erro(ERRO_ACESSO, 401)
       // RESPONDE JÁ, TRABALHA DEPOIS: quem disparou não fica preso esperando.
       const trabalho = executarPasso(svc, body).catch(() => {})
