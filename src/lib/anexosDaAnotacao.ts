@@ -12,6 +12,10 @@
 //      o passo 4 dela), e assim o texto não se repete a cada arquivo. Nada muda
 //      na função.
 //
+// DESDE 22/10/2026, COM TEXTO E ARQUIVO, o primeiro arquivo sobe sem nota e o
+// texto vai na nota dele (passos `subir` e `anotarComArquivo`): uma nota só no
+// card. Os demais seguem como acima.
+//
 // O TEXTO NÃO VAI NO CABEÇALHO DO ARQUIVO: um texto de alguns parágrafos,
 // codificado, pode passar do tamanho que o caminho até a função aceita num
 // cabeçalho — e aí a requisição inteira é recusada (o mesmo motivo da Remessa).
@@ -23,6 +27,9 @@
 //
 // NADA AQUI MOVE CARD.
 import type { ProgressoDoEnvio } from './enviarArquivo'
+import type { ArquivoNoDrive } from '../../supabase/functions/_shared/notaComArquivo.ts'
+
+export type { ArquivoNoDrive }
 
 /** O teto da kommo-anexo-enviar (`MAX_BYTES` lá): 100 MB por arquivo. */
 export const LIMITE_DO_ANEXO = 100 * 1024 * 1024
@@ -107,6 +114,14 @@ export interface PassosDaAnotacao {
    * O `aviso` é o da função: o arquivo entrou no card, mas a nota dele não.
    */
   anexar: (arquivo: File, onProgresso: (p: ProgressoDoEnvio) => void) => Promise<{ aviso?: string | null } | void>
+  /**
+   * O TEXTO NA NOTA DO ARQUIVO (22/10/2026): sobe o arquivo ao card SEM nota
+   * (kommo-anexo-enviar com `x-sem-nota`) e devolve onde ele ficou. LANÇA.
+   * Sem este passo e o seguinte, a sequência é a de antes.
+   */
+  subir?: (arquivo: File, onProgresso: (p: ProgressoDoEnvio) => void) => Promise<ArquivoNoDrive>
+  /** A nota com o texto e o arquivo (kommo-anotar com `anexo`). LANÇA. */
+  anotarComArquivo?: (texto: string, arquivo: ArquivoNoDrive) => Promise<void>
 }
 
 export interface ResultadoDaAnotacao {
@@ -139,7 +154,41 @@ export async function enviarAnotacao(
 ): Promise<ResultadoDaAnotacao> {
   const r: ResultadoDaAnotacao = { textoEnviado: false, erroDoTexto: null, enviados: [], falhas: [], avisos: [] }
   const t = texto.trim()
-  if (t) {
+  let fila = anexos
+  // TEXTO E ARQUIVO NUMA NOTA SÓ (22/10/2026): o primeiro arquivo sobe sem nota,
+  // e a nota dele leva o texto. Não subindo o arquivo, a sequência de antes
+  // segue (o texto sozinho, e os outros arquivos), e ele fica para tentar de novo.
+  const primeiro = t && passos.subir && passos.anotarComArquivo
+    ? anexos.find((a) => a.arquivo.size <= LIMITE_DO_ANEXO)
+    : undefined
+  if (primeiro && passos.subir && passos.anotarComArquivo) {
+    fila = anexos.filter((a) => a !== primeiro)
+    onEstado(primeiro.chave, { fase: 'enviando', pct: 0 })
+    let noDrive: ArquivoNoDrive | null = null
+    try {
+      noDrive = await passos.subir(primeiro.arquivo, (p) =>
+        onEstado(primeiro.chave, p.fase === 'enviando' ? { fase: 'enviando', pct: p.pct } : { fase: 'gravando' }),
+      )
+    } catch (e) {
+      const erro = mensagem(e)
+      r.falhas.push({ chave: primeiro.chave, nome: primeiro.arquivo.name, erro })
+      onEstado(primeiro.chave, { fase: 'falhou', erro })
+    }
+    if (noDrive) {
+      try {
+        await passos.anotarComArquivo(t, noDrive)
+        r.textoEnviado = true
+        r.enviados.push(primeiro.arquivo.name)
+      } catch (e) {
+        // A NOTA NÃO SUBIU: nada mais sai, como quando o texto falha. O arquivo
+        // ficou na aba Arquivos do card, sem nota.
+        r.erroDoTexto = mensagem(e)
+        onEstado(primeiro.chave, { fase: 'esperando' })
+        return r
+      }
+    }
+  }
+  if (t && !r.textoEnviado) {
     try {
       await passos.anotar(t)
       r.textoEnviado = true
@@ -148,7 +197,7 @@ export async function enviarAnotacao(
       return r
     }
   }
-  for (const a of anexos) {
+  for (const a of fila) {
     // A PORTA DE NOVO, aqui: a lista é da tela, e um arquivo que passasse do
     // limite seria recusado pela função só depois de subir inteiro.
     if (a.arquivo.size > LIMITE_DO_ANEXO) {

@@ -38,7 +38,28 @@ export const ehAnexo = (n: KommoNota): boolean => n.tipo === 'attachment'
  * pelo nome na API precisa do nome limpo.
  */
 export function nomeDoAnexo(n: KommoNota): string {
-  return String(n.texto ?? '').replace(/^📎\s*/u, '').trim()
+  return n.arquivo_nome?.trim() || String(n.texto ?? '').replace(/^📎\s*/u, '').trim()
+}
+
+/**
+ * A NOTA DE ARQUIVO COM TEXTO (22/10/2026): o "Anotar" grava o texto dentro da
+ * nota do arquivo (ver supabase/functions/_shared/notaComArquivo.ts). No
+ * histórico ela vira o que é: a anotação, com o arquivo dela junto.
+ *
+ * A ANOTAÇÃO LEVA O `arquivo_uuid`, e é de propósito: a nota no Kommo é de
+ * arquivo, e a edição (que só vale para `common`) não aparece para ela.
+ */
+export function desdobrarNotaComArquivo(n: KommoNota): { texto: KommoNota; anexo: KommoNota } | null {
+  const nome = n.arquivo_nome?.trim()
+  if (!ehAnexo(n) || !nome) return null
+  const texto = String(n.texto ?? '').trim()
+  if (!texto || texto === nome || texto === `📎 ${nome}`) return null
+  return {
+    texto: { ...n, tipo: 'common' },
+    // O ID DO ARQUIVO é outro (a chave da lista): o negativo do da nota, ou,
+    // na nota otimista (já negativa), o vizinho dela.
+    anexo: { ...n, id: n.id > 0 ? -n.id : n.id - 1, texto: `📎 ${nome}` },
+  }
 }
 
 const instante = (n: KommoNota): number => {
@@ -67,7 +88,10 @@ function autoresCompativeis(a: KommoNota, b: KommoNota): boolean {
  * existe — que é a única coisa que aquela nota tem a dizer.
  */
 export function agruparNotas(notas: KommoNota[]): BlocoDoHistorico[] {
-  const blocos: BlocoDoHistorico[] = notas.map((nota) => ({ nota, anexos: [] }))
+  const blocos: BlocoDoHistorico[] = notas.map((nota) => {
+    const d = desdobrarNotaComArquivo(nota)
+    return d ? { nota: d.texto, anexos: [d.anexo] } : { nota, anexos: [] }
+  })
   const hospedeiros = blocos
     .map((b, i) => ({ b, i }))
     .filter(({ b }) => !ehAnexo(b.nota))

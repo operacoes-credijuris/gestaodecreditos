@@ -123,6 +123,7 @@ import {
   lerTituloCard,
 } from '@/lib/kommo'
 import type { KommoLead, KommoNota } from '@/lib/types'
+import type { ArquivoNoDrive } from '@/lib/anexosDaAnotacao'
 import { semRodapeDeAssinatura } from '@/lib/textoDoProcesso'
 import { resumoDaOportunidade, VEREDITO_JURIDICO } from '@/lib/anotacaoKommo'
 import { Modal } from '@/components/ui/Modal'
@@ -2626,7 +2627,7 @@ function BotaoAnexarEMover({
  * moram em components/CaixaDeAnotacao.tsx. ENVIANDO, A CAIXA NÃO FECHA por um
  * clique fora: o andamento e a falha parcial precisam de onde aparecer.
  */
-function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (texto: string) => Promise<void> }) {
+function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (texto: string, anexo?: ArquivoNoDrive) => Promise<void> }) {
   const [aberto, setAberto] = useState(false)
   const anotacao = useAnotacaoDoCard(leadId, onEnviar)
   const caixa = useRef<HTMLDivElement>(null)
@@ -3162,7 +3163,7 @@ function CardCredito({
   /** A etiqueta deste card que está sendo gravada, ou null. */
   etiquetaEmVoo: string | null
   /** Escreve uma anotação no card do Kommo — ver `BotaoDeAnotacao`. */
-  onAnotar?: (l: KommoLead, texto: string) => Promise<void>
+  onAnotar?: (l: KommoLead, texto: string, anexo?: ArquivoNoDrive) => Promise<void>
   /** Edita o texto de uma nota do histórico, no Kommo (ver `CorpoDaNota`). LANÇA com a mensagem. */
   onEditarNota?: (l: KommoLead, n: KommoNota, texto: string) => Promise<void>
   /**
@@ -3746,7 +3747,7 @@ function CardCredito({
             O QUE MOVE O CARD DIZ ISSO NO PASSAR DO MOUSE, e abre confirmação. */}
         <div className="flex w-full flex-wrap items-center justify-end gap-s2 max-sm:[&>*]:flex-auto max-sm:[&>div>button]:w-full min-[900px]:mt-auto min-[900px]:w-auto min-[900px]:max-w-[560px]">
           {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
-          {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t) => onAnotar(lead, t)} />}
+          {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t, a) => onAnotar(lead, t, a)} />}
 
           {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA — a regra é `botoesDaAba`.
               A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
@@ -5750,26 +5751,34 @@ export default function AnaliseCredito() {
     else toast.success('Nota editada no Kommo.')
   }
 
-  async function anotarNoCard(lead: KommoLead, texto: string) {
+  async function anotarNoCard(lead: KommoLead, texto: string, anexo?: ArquivoNoDrive) {
+    let junto = false
     try {
-      await invokeFunction('kommo-anotar', {
-        lead_id: lead.kommo_lead_id, texto, origem: 'pessoa', autor: analistaNome,
+      // COM O ARQUIVO (22/10/2026), o texto vai na nota dele — ver
+      // supabase/functions/_shared/notaComArquivo.ts.
+      const r = await invokeFunction<{ junto?: boolean }>('kommo-anotar', {
+        lead_id: lead.kommo_lead_id, texto, origem: 'pessoa', autor: analistaNome, ...(anexo ? { anexo } : {}),
       })
+      junto = !!anexo && r?.junto === true
     } catch (e) {
       toast.error(`A anotação não subiu para o Kommo: ${(e as Error)?.message ?? e}. O texto continua na caixa.`)
       throw e
     }
-    const nova: KommoNota = {
-      id: -Date.now(),
-      texto,
-      criado_em: new Date().toISOString(),
-      autor: analistaNome,
-      tipo: 'common',
-      automatica: false,
-    }
+    const agora = new Date().toISOString()
+    const base = { criado_em: agora, autor: analistaNome, automatica: false }
+    // O QUE O CARD MOSTRA ATÉ A PRÓXIMA SINCRONIZAÇÃO: a nota única, ou as duas
+    // (o arquivo e o texto) quando o Kommo não guardou o texto na do arquivo.
+    const novas: KommoNota[] = junto && anexo
+      ? [{ ...base, id: -Date.now(), texto, tipo: 'attachment', arquivo_uuid: anexo.file_uuid, arquivo_nome: anexo.file_name }]
+      : [
+          ...(anexo
+            ? [{ ...base, id: -Date.now() - 1, texto: `📎 ${anexo.file_name}`, tipo: 'attachment', arquivo_uuid: anexo.file_uuid, arquivo_nome: anexo.file_name }]
+            : []),
+          { ...base, id: -Date.now(), texto, tipo: 'common' },
+        ]
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
-        l.kommo_lead_id === lead.kommo_lead_id ? { ...l, notas: [...(l.notas ?? []), nova] } : l,
+        l.kommo_lead_id === lead.kommo_lead_id ? { ...l, notas: [...(l.notas ?? []), ...novas] } : l,
       ),
     )
     toast.success('Anotação enviada ao card no Kommo.')

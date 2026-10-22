@@ -17,8 +17,10 @@
 // ser "o que o card diz". O sistema confirmava a si mesmo.
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795, "texto": "..." }
+//   e, para o texto ir na nota do arquivo, "anexo": { file_uuid, version_uuid, file_name }.
 
-import { postarNotas } from "../_shared/anotarNoKommo.ts";
+import { postarNotaComArquivo, postarNotas } from "../_shared/anotarNoKommo.ts";
+import { arquivoNoDrive } from "../_shared/notaComArquivo.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { contaKommo } from "../_shared/segredos.ts";
@@ -66,13 +68,24 @@ Deno.serve(async (req) => {
     // tipo: é a marca no rodapé, que o kommo-sync descarta (ver
     // _shared/notaCredijuris.ts). Duas perguntas diferentes — como se lê e de
     // quem é — que estavam presas na mesma resposta.
-    const r = await postarNotas({ token, subdominio }, leadId, [texto], { dePessoa, autor });
+    //
+    // COM O ARQUIVO (22/10/2026): o `anexo` é o arquivo que a kommo-anexo-enviar
+    // já pôs no card, sem nota (`x-sem-nota`). O texto vai DENTRO da nota dele,
+    // e, se o Kommo não o guardar, sai a nota de texto ao lado — ver
+    // _shared/notaComArquivo.ts. Anexo informado e inválido é recusa, e não
+    // nota sem o arquivo.
+    const temAnexo = (body as any).anexo != null;
+    const anexo = temAnexo ? arquivoNoDrive((body as any).anexo) : null;
+    if (temAnexo && !anexo) return json({ erro: "O arquivo informado não é válido." }, 400);
+    const r = anexo
+      ? await postarNotaComArquivo({ token, subdominio }, leadId, texto, anexo, { dePessoa, autor })
+      : await postarNotas({ token, subdominio }, leadId, [texto], { dePessoa, autor });
     if (!r.ok) {
       return json({ erro: `Kommo recusou a anotação (HTTP ${r.status}).`, detalhe: r.detalhe }, 502);
     }
     // O id da nota vai junto, para quem quiser guardá-lo; os chamadores de
     // sempre só leem o `ok`.
-    return json({ ok: true, nota_id: r.ids[0] ?? null });
+    return json({ ok: true, nota_id: r.ids[0] ?? null, junto: "junto" in r ? r.junto === true : undefined });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);
   }

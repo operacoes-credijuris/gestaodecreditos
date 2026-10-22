@@ -48,7 +48,7 @@ const TEMPO_PARTE_MS = 60_000
 // chega a enviar.
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-lead-id, x-nome, x-texto, x-tamanho',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-lead-id, x-nome, x-texto, x-tamanho, x-sem-nota',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 const responder = (corpo: unknown, status = 200) =>
@@ -178,6 +178,13 @@ Deno.serve(async (req: Request) => {
     }, { idempotente: true /* vincular o mesmo arquivo de novo não duplica */ })
     if (!rAnexo.ok) {
       return responder({ erro: `O arquivo subiu, mas o Kommo recusou anexá-lo ao card (HTTP ${rAnexo.status}).` }, 502)
+    }
+
+    // SEM NOTA (22/10/2026): o "Anotar" com texto e arquivo pede assim o
+    // primeiro arquivo, e a nota — uma só, com o texto dentro — sai pela
+    // kommo-anotar, que recebe o texto em JSON (ver _shared/notaComArquivo.ts).
+    if (req.headers.get('x-sem-nota') === '1') {
+      return responder({ ok: true, file_uuid: uuid, version_uuid: versao, nome, aviso: null })
     }
 
     // 4. AS NOTAS: a do arquivo e, se houver, a do texto — com quem enviou.

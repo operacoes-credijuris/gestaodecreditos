@@ -57,6 +57,12 @@ export interface KommoNota {
    */
   arquivo_uuid?: string | null
   /**
+   * O nome do arquivo, quando a nota é um anexo. Desde 22/10/2026 a nota de
+   * arquivo pode levar o texto de quem anotou, e aí o texto não é o nome.
+   * Ausente nas linhas gravadas antes: o nome está no texto.
+   */
+  arquivo_nome?: string | null
+  /**
    * Escrita por máquina — a plataforma, ou a automação do Kommo.
    *
    * QUEM EXIBE MOSTRA TUDO; QUEM ANALISA FILTRA POR AQUI. O espelho antes

@@ -143,6 +143,19 @@ function textoDaNota(n: KommoNote): string {
   return arquivo ? `📎 ${arquivo}` : ''
 }
 
+/** O nome do arquivo de uma nota de anexo. */
+function nomeDoArquivoDaNota(n: KommoNote): string {
+  const p = n.params ?? {}
+  return semEntidadesHtml(p.original_file_name ?? p.file_name).trim()
+}
+
+/** Nota de arquivo cujo texto é de alguém, e não o nome do arquivo que o Kommo põe. */
+function arquivoComTexto(n: KommoNote): boolean {
+  if (n.note_type !== 'attachment') return false
+  const texto = semEntidadesHtml(n.params?.text).trim()
+  return !!texto && texto !== nomeDoArquivoDaNota(n)
+}
+
 /** Uma anotação como fica guardada em kommo_leads.notas. */
 interface NotaGravada {
   id: number
@@ -164,6 +177,8 @@ interface NotaGravada {
    * muda, e o endereço se pede no clique (ver a function kommo-anexo).
    */
   arquivo_uuid: string | null
+  /** O nome do arquivo, quando a nota é um anexo (o texto pode ser outro). */
+  arquivo_nome: string | null
   /**
    * A nota foi escrita pelo sistema?
    *
@@ -764,13 +779,19 @@ Deno.serve(async (req: Request) => {
           autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
           tipo: String(n.note_type ?? 'common'),
           arquivo_uuid: String((n.params as Record<string, unknown> | undefined)?.file_uuid ?? '') || null,
+          // O NOME DO ARQUIVO À PARTE (22/10/2026): a nota de arquivo pode levar
+          // o texto de quem anotou (ver _shared/notaComArquivo.ts), e aí o texto
+          // não é mais o nome do arquivo.
+          arquivo_nome: n.note_type === 'attachment' ? nomeDoArquivoDaNota(n) || null : null,
           // O QUE NÃO É `common` NÃO É CADASTRO. Movimentação, anexo e mensagem
           // de automação são registro do que aconteceu com o card, não o que o
           // comercial declarou sobre o crédito — e a análise lê declaração.
           // A DATA VAI JUNTO: sem ela, o reconhecimento por forma — que existe para
           // as notas antigas, sem assinatura — marcaria como nossa a nota em que uma
           // PESSOA colou o resumo da oportunidade.
-          automatica: n.note_type !== 'common' || ehNotaNossa(texto, criadoEm),
+          // A NOTA DE ARQUIVO COM TEXTO DE GENTE é anotação como a `common`: quem
+          // decide é a marca, e não o tipo.
+          automatica: (n.note_type !== 'common' && !arquivoComTexto(n)) || ehNotaNossa(texto, criadoEm),
         }
       })
       // nota_texto é simplesmente a PRIMEIRA anotação DO COMERCIAL — sem promessa

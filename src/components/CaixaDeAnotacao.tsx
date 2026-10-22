@@ -10,7 +10,8 @@
 // A ORDEM DAS CHAMADAS e as mensagens de falha parcial moram em
 // lib/anexosDaAnotacao.ts (testadas): o texto pela kommo-anotar, uma vez; cada
 // arquivo pela kommo-anexo-enviar, sem texto. O que entrou sai da lista; o que
-// não entrou fica, para tentar de novo sem repetir nada.
+// não entrou fica, para tentar de novo sem repetir nada. Desde 22/10/2026, com
+// texto e arquivo, o texto vai na nota do primeiro arquivo (uma nota só).
 //
 // O RASCUNHO É SÓ DO TEXTO (como antes, `rascunhoDoCard.ts`). Arquivo não cabe no
 // armazenamento do navegador: saindo da página, ele sai da lista — e a caixa
@@ -34,6 +35,7 @@ import { enviarArquivo } from '@/lib/enviarArquivo'
 import { apagarRascunho, guardarRascunho, rascunhoGuardado } from '@/lib/rascunhoDoCard'
 import {
   type AnexoDaAnotacao,
+  type ArquivoNoDrive,
   type EstadoDoAnexo,
   acrescentarAnexos,
   enviarAnotacao,
@@ -63,7 +65,10 @@ export interface AnotacaoDoCard {
  * texto da página (kommo-anotar, o cache do card e o aviso) — LANÇA na falha.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string) => Promise<void>): AnotacaoDoCard {
+export function useAnotacaoDoCard(
+  leadId: number,
+  onEnviarTexto: (texto: string, anexo?: ArquivoNoDrive) => Promise<void>,
+): AnotacaoDoCard {
   // O RASCUNHO SOBREVIVE AO CARD (ver rascunhoDoCard.ts): trocar de etapa,
   // filtrar ou sincronizar desmonta o botão, e o texto ia junto, sem aviso.
   const [texto, setTextoNaTela] = useState(() => rascunhoGuardado(leadId, 'anotacao')?.texto ?? '')
@@ -109,6 +114,14 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
   // nova tentativa só com os arquivos que falharam, não se escreve outra linha.
   const textoSubiu = useRef(false)
 
+  // O TEXTO ENTROU: sai da caixa e do rascunho já, antes dos arquivos. Se um
+  // arquivo falhar, enviar de novo não repete a nota.
+  function textoEntrou() {
+    textoSubiu.current = true
+    setTextoNaTela('')
+    apagarRascunho(leadId, 'anotacao')
+  }
+
   async function enviar(): Promise<boolean> {
     if (emVoo.current) return false
     const textoJaNoCard = textoSubiu.current
@@ -126,11 +139,22 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
         {
           anotar: async (t) => {
             await onEnviarTexto(t)
-            textoSubiu.current = true
-            // O TEXTO ENTROU: sai da caixa e do rascunho já, antes dos arquivos.
-            // Se um arquivo falhar, enviar de novo não repete a nota.
-            setTextoNaTela('')
-            apagarRascunho(leadId, 'anotacao')
+            textoEntrou()
+          },
+          // O TEXTO NA NOTA DO PRIMEIRO ARQUIVO (ver lib/anexosDaAnotacao.ts).
+          subir: async (arquivo, onProgresso) => {
+            const r = await enviarArquivo<{ file_uuid?: string; version_uuid?: string | null; nome?: string }>(
+              'kommo-anexo-enviar',
+              arquivo,
+              { 'x-lead-id': String(leadId), 'x-nome': encodeURIComponent(arquivo.name), 'x-texto': '', 'x-sem-nota': '1' },
+              onProgresso,
+            )
+            if (!r?.file_uuid) throw new Error('o Kommo não devolveu o arquivo enviado')
+            return { file_uuid: r.file_uuid, version_uuid: r.version_uuid ?? null, file_name: r.nome || arquivo.name }
+          },
+          anotarComArquivo: async (t, noDrive) => {
+            await onEnviarTexto(t, noDrive)
+            textoEntrou()
           },
           anexar: (arquivo, onProgresso) =>
             enviarArquivo<{ aviso?: string | null }>(
