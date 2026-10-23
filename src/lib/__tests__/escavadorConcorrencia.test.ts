@@ -25,10 +25,13 @@ import {
 import { lerTodasAsLinhas } from '../../../supabase/functions/_shared/leituraPaginada.ts'
 import { podePagarPedido, type SituacaoDoCard } from '../../../supabase/functions/_shared/interrupcaoDosAutos.ts'
 
+// SEM O \r DO WINDOWS (23/10/2026): com core.autocrlf, o checkout no Windows
+// grava CRLF, e a asserção que procura um trecho terminado em '\n' falhava aqui
+// e passava no Linux — o código era o mesmo.
 const rotina = readFileSync(
   join(__dirname, '..', '..', '..', 'supabase/functions/escavador-autos-rotina/index.ts'),
   'utf8',
-)
+).replace(/\r\n/g, '\n')
 /** O corpo de uma função da rotina, do cabeçalho até o próximo `async function` de topo. */
 function corpo(nome: string): string {
   const i = rotina.indexOf(`async function ${nome}(`)

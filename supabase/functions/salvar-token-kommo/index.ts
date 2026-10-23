@@ -40,6 +40,16 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Informe o subdomínio da conta Kommo.' }, 400)
     }
     const subdominio = normalizarSubdominio(subdominioBruto)
+    // SÓ LETRAS, DÍGITOS E HÍFEN (Varredura E, 23/10/2026). O subdomínio vira o
+    // HOST de toda chamada ao Kommo, que leva o token no Authorization: um valor
+    // como "outro.site#" ou "x@outro.site" passava pela normalização e mandava o
+    // token para fora do Kommo — aqui na validação e depois em cada sync.
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdominio)) {
+      return jsonResponse(
+        { error: 'Subdomínio inválido: use só o nome da conta (ex.: "minhaempresa", de minhaempresa.kommo.com).' },
+        400,
+      )
+    }
 
     // O token é opcional na atualização: permite corrigir só o subdomínio sem
     // precisar redigitar um JWT de mil caracteres.

@@ -44,10 +44,12 @@ import { chaveAnthropic } from '../_shared/segredos.ts'
 import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import {
   ESFORCO_PADRAO_DO_OPUS,
+  motivoDaRespostaIncompleta,
   semCercaDeMarkdown,
   textoDaResposta,
   type PedidoAoOpus,
 } from '../_shared/respostaDoClaude.ts'
+import { mensagemDoErroDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
 import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
 import { MAX_TEXTO_CHARS } from '../_shared/orcamentoLeitura.ts'
 import {
@@ -204,16 +206,17 @@ Deno.serve(async (req: Request) => {
       )
     }
     const resposta = await res.json().catch(() => null)
+    // O MOTIVO DA ANTHROPIC NO CAMPO QUE A TELA LÊ (Varredura E, 23/10/2026):
+    // ele ia cru em `resposta`, que ninguém mostra, e "HTTP 400" sozinho não
+    // distingue conta sem crédito de chave recusada.
     if (!res.ok) {
-      return jsonResponse(
-        { erro: `A IA recusou a leitura (HTTP ${res.status}).`, resposta },
-        502,
-      )
+      return jsonResponse({ erro: mensagemDoErroDaAnthropic(res.status, resposta, 'a leitura') }, 502)
     }
 
-    if (resposta?.stop_reason === 'max_tokens') {
-      return jsonResponse({ erro: 'A resposta da IA foi cortada no limite de tamanho; tente de novo.' }, 502)
-    }
+    // CORTADA, RECUSADA OU PAUSADA não é leitura — a recusa caía em "não
+    // devolveu JSON válido" (Varredura E, 23/10/2026).
+    const incompleta = motivoDaRespostaIncompleta(resposta?.stop_reason)
+    if (incompleta) return jsonResponse({ erro: `${incompleta} Tente de novo.` }, 502)
     const bruto = semCercaDeMarkdown(textoDaResposta(resposta?.content))
 
     let lido: { titulares?: unknown; titular_do_oficio?: unknown; aviso?: unknown }

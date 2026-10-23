@@ -103,6 +103,17 @@ const ESPERA_PASSO_MS = 1_500;
 // análise seguir sem o documento.
 const ESPERA_IMAGENS_MS = 90_000;
 
+/**
+ * O TETO DA CHAMADA INTEIRA, contado do começo dela (23/10/2026).
+ *
+ * As duas esperas se SOMAVAM: `tools/call` espera o depósito do texto (até 45 s)
+ * e só então `ver_paginas` começava a sua, de 90 s, contada daquele instante —
+ * 135 s de espera mais o download das imagens passavam dos ~150 s em que a Edge
+ * Function morre. Morrendo calada, o aplicativo recebia um erro de conexão em
+ * vez do "ainda não subiu, peça de novo", e a análise seguia sem o documento.
+ */
+const ORCAMENTO_DA_CHAMADA_MS = 110_000;
+
 /** O mesmo balde das páginas digitalizadas da análise de RPV (migração 0055). */
 const BALDE = "analises-input";
 
@@ -373,8 +384,8 @@ function okDaFerramenta(texto: string) {
  * e devolver "não há imagem" nesse instante seria mentir por alguns segundos de
  * diferença — e a análise seguiria sem o documento.
  */
-async function verPaginas(codigo: string, arquivo: string, de: number, ate: number) {
-  const limite = Date.now() + ESPERA_IMAGENS_MS;
+async function verPaginas(codigo: string, arquivo: string, de: number, ate: number, inicio: number) {
+  const limite = Math.min(Date.now() + ESPERA_IMAGENS_MS, inicio + ORCAMENTO_DA_CHAMADA_MS);
   for (;;) {
     const carga = await carregarAutos(codigo);
     if (!carga.ok) return carga.falha;
@@ -643,6 +654,7 @@ async function despachar(msg: any): Promise<unknown | null> {
       // AS TRÊS CARREGAM O MESMO MATERIAL, e é por isso que a busca dele vem
       // antes do despacho: o código é a chave de todas, e a espera pelo depósito
       // também.
+      const inicio = Date.now();
       const carga = await carregarAutos(codigo);
       if (!carga.ok) return okRpc(id, carga.falha);
       const args = params?.arguments ?? {};
@@ -661,7 +673,7 @@ async function despachar(msg: any): Promise<unknown | null> {
       if (nome === "ver_paginas") {
         const de = Number(args.de ?? 1);
         const ate = Number(args.ate ?? Number.MAX_SAFE_INTEGER);
-        return okRpc(id, await verPaginas(codigo, String(args.arquivo ?? "").trim(), de, ate));
+        return okRpc(id, await verPaginas(codigo, String(args.arquivo ?? "").trim(), de, ate, inicio));
       }
       if (nome === "entregar_planilha") {
         return okRpc(id, await entregarPlanilha(carga.g, args));

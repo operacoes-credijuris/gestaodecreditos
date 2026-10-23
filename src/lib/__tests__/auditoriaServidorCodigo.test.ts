@@ -84,7 +84,9 @@ describe('Escavador e autos', () => {
   it('dd-titulares: a chamada à IA não passa do teto da invocação', () => {
     const f = ler('dd-titulares/index.ts')
     expect(f).toContain('signal: sinalAteOTeto(inicio),')
-    expect(f).toContain("if (resposta?.stop_reason === 'max_tokens') {")
+    // Desde a varredura E (23/10/2026) o corte, a recusa e a pausa passam pelo
+    // mesmo filtro (motivoDaRespostaIncompleta).
+    expect(f).toContain('const incompleta = motivoDaRespostaIncompleta(resposta?.stop_reason)')
   })
 })
 
@@ -97,7 +99,9 @@ describe('Anthropic', () => {
   it('assistente: pause_turn é retomado, não entregue como resposta final', () => {
     const f = ler('assistente/index.ts')
     expect(f).toContain("if (resposta.stop_reason === 'pause_turn' && rodada < MAX_RODADAS - 1) {")
-    expect(f).toContain("const truncada = resposta.stop_reason === 'max_tokens' || resposta.stop_reason === 'pause_turn'")
+    // Desde a varredura E (23/10/2026) o motivo é lido uma vez, e a janela de
+    // contexto cheia também conta como interrompida.
+    expect(f).toContain("motivo === 'max_tokens' || motivo === 'pause_turn' || motivo === 'model_context_window_exceeded'")
   })
   it('justificativa-tecnica: o planejamento cabe no orçamento da invocação', () => {
     const f = ler('justificativa-tecnica/index.ts')

@@ -52,10 +52,13 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import {
   ESFORCO_PADRAO_DO_OPUS,
+  motivoDaRespostaIncompleta,
   semCercaDeMarkdown,
   textoDaResposta,
   type PedidoAoOpus,
 } from '../_shared/respostaDoClaude.ts'
+import { mensagemDoErroDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import { MAX_TEXTO_CHARS } from '../_shared/orcamentoLeitura.ts'
 import { alvosDaCessao, type ParcelaCedida } from '../_shared/titularesDaCessao.ts'
 import { lerTituloCard } from '../_shared/cadastroDoCard.ts'
@@ -121,6 +124,7 @@ Responda APENAS com JSON válido, sem markdown e sem texto em volta:
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const inicio = Date.now()
 
   try {
     const svc = serviceClient()
@@ -208,26 +212,49 @@ Deno.serve(async (req: Request) => {
         ? `Extraia a qualificação de ${nomeDoCedente} — e só dela.`
         : 'Extraia a qualificação de quem cede.')
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': chave,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        // 8000, e não 2000: no Opus 5.5 o raciocínio, sempre ligado, conta
-        // dentro do teto, e com 2000 ele podia comer o JSON.
-        max_tokens: 8000,
-        // O padrão do Opus 5 (o do 5.5 é 'medium').
-        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
-        system: SISTEMA,
-        messages: [{ role: 'user', content: pedido }],
-      } satisfies PedidoAoOpus),
-    })
+    // O TETO DA INVOCAÇÃO (Varredura E, 23/10/2026): é a mesma leitura da
+    // dd-titulares — até ~360 mil caracteres de autos, esforço alto — e era a
+    // única das duas sem sinal. Passando dos ~150 s a função morria calada e a
+    // tela via erro de rede; agora a chamada é interrompida antes, com motivo.
+    let res: Response
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        signal: sinalAteOTeto(inicio),
+        method: 'POST',
+        headers: {
+          'x-api-key': chave,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          // 8000, e não 2000: no Opus 5.5 o raciocínio, sempre ligado, conta
+          // dentro do teto, e com 2000 ele podia comer o JSON.
+          max_tokens: 8000,
+          // O padrão do Opus 5 (o do 5.5 é 'medium').
+          output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
+          system: SISTEMA,
+          messages: [{ role: 'user', content: pedido }],
+        } satisfies PedidoAoOpus),
+      })
+    } catch (e) {
+      if (!estourouOTempo(e)) throw e
+      return jsonResponse(
+        { erro: 'A leitura da IA passou do tempo de uma chamada e foi interrompida. Tente de novo.' },
+        504,
+      )
+    }
     const resposta = await res.json().catch(() => null)
-    if (!res.ok) return jsonResponse({ erro: `A IA recusou a leitura (HTTP ${res.status}).` }, 502)
+    // O MOTIVO DA ANTHROPIC, e não só o status (Varredura E, 23/10/2026): sem
+    // crédito, chave recusada e sobrecarga pedem providências diferentes.
+    if (!res.ok) {
+      return jsonResponse({ erro: mensagemDoErroDaAnthropic(res.status, resposta, 'a leitura') }, 502)
+    }
+    // CORTADA OU RECUSADA NÃO É CADASTRO: o JSON pela metade não se lê, e a
+    // recusa virava "não devolveu JSON válido", que manda procurar o defeito
+    // no lugar errado.
+    const incompleta = motivoDaRespostaIncompleta(resposta?.stop_reason)
+    if (incompleta) return jsonResponse({ erro: `${incompleta} Tente de novo.` }, 502)
 
     const bruto = semCercaDeMarkdown(textoDaResposta(resposta?.content))
 

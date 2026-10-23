@@ -97,6 +97,32 @@ export function textoDaResposta(
     .trim()
 }
 
+/**
+ * POR QUE A RESPOSTA NÃO É UMA RESPOSTA INTEIRA — ou null, se é (Varredura E,
+ * 23/10/2026).
+ *
+ * As chamadas por `fetch` conferiam `max_tokens` e esqueciam o resto: uma
+ * RECUSA (o filtro de segurança) vinha com texto parcial ou vazio e virava "a
+ * IA não devolveu JSON válido" — ou, na redação do desfecho, um parágrafo pela
+ * metade a caminho do CRM. `pause_turn` e a janela de contexto estourada são o
+ * mesmo caso: não houve resposta final, e o que veio não pode ser lido como se
+ * tivesse havido.
+ */
+export function motivoDaRespostaIncompleta(stopReason: string | null | undefined): string | null {
+  switch (stopReason) {
+    case 'max_tokens':
+      return 'A resposta da IA saiu cortada no limite de tamanho.'
+    case 'refusal':
+      return 'A IA se recusou a responder (filtro de segurança da Anthropic).'
+    case 'pause_turn':
+      return 'A IA pausou antes de terminar a resposta.'
+    case 'model_context_window_exceeded':
+      return 'O texto enviado passou do tamanho que a IA lê de uma vez.'
+    default:
+      return null
+  }
+}
+
 /** Tira a cerca de markdown (```json … ```) que o modelo às vezes põe em volta do JSON. */
 export function semCercaDeMarkdown(texto: string): string {
   return texto.replace(/```json/gi, '').replace(/```/g, '').trim()

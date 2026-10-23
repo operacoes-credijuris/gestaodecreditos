@@ -59,3 +59,24 @@ export function falhaDaAnthropic(texto: unknown): { tipo: TipoDaFalhaDaAnthropic
 export function traduzirFalhaDaAnthropic(texto: string): string {
   return falhaDaAnthropic(texto)?.mensagem ?? texto
 }
+
+/**
+ * A MENSAGEM DE UM `!res.ok` DA API DE MENSAGENS, para as funções que chamam
+ * por `fetch` (Varredura E, 23/10/2026).
+ *
+ * O MOTIVO SE PERDIA NO MEIO DO CAMINHO: dd-qualificacao, dd-titulares e
+ * redigir-desfecho respondiam só "A IA recusou a leitura (HTTP 400)" — e o
+ * corpo da Anthropic, quando ia, ia num campo que a tela não lê. Conta sem
+ * crédito, chave recusada e sobrecarga chegavam iguais, e ninguém sabia se era
+ * para recarregar, trocar a chave ou esperar. Agora a falha conhecida sai em
+ * português (a mesma frase que `erroDaFuncao` daria) e a desconhecida leva a
+ * mensagem da própria API.
+ */
+export function mensagemDoErroDaAnthropic(status: number, corpo: unknown, oQue: string): string {
+  const erro = (corpo as { error?: { type?: unknown; message?: unknown } } | null)?.error
+  const tipo = typeof erro?.type === 'string' ? erro.type : ''
+  const mensagem = typeof erro?.message === 'string' ? erro.message : ''
+  const conhecida = falhaDaAnthropic(`${tipo} ${mensagem}`)
+  if (conhecida) return conhecida.mensagem
+  return `A IA recusou ${oQue} (HTTP ${status})` + (mensagem ? `: ${mensagem.slice(0, 200)}` : '.')
+}

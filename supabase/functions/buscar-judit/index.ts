@@ -8,7 +8,7 @@
 //   { "numero": "5209009-77.2021.8.09.0090" }
 //   -> { pronto:true, job_id, numero, resumo } | { pronto:false, aguarde:true }
 //
-// MODO TESTE (GET no navegador, sem sessão) — só pra conferir o texto montado:
+// MODO TESTE (com sessão ativa desde 23/10/2026) — só pra conferir o texto montado:
 //   ?numero=5209009-77.2021.8.09.0090&teste=sim
 //   -> { resumo, texto_preview }   (NÃO grava nada, NÃO roda IA)
 // ============================================================================
@@ -25,6 +25,15 @@ const BUCKET_INPUT = "analises-input";
 const MAX_DOC_CHARS = 420000;
 const MAX_DOCS_BAIXAR = 20;
 const POLL_MAX = 22;
+// O RELÓGIO DA INVOCAÇÃO (Varredura E, 23/10/2026). A espera pela Judit (até
+// 22 voltas de 2 s) e o download de até 20 anexos, um a um e sem teto, somavam
+// mais que os ~150 s da função — que morria calada, sem dizer "aguarde" nem
+// gravar o texto já montado. Agora a espera para aos 60 s (volta "aguarde"),
+// os anexos que não couberem até os 110 s entram como "não lidos", e nenhum
+// pedido isolado segura a função por mais de 20 s.
+const ESPERA_MAX_MS = 60_000;
+const LEITURA_MAX_MS = 110_000;
+const PEDIDO_MAX_MS = 20_000;
 
 const PALAVRAS_CHAVE = [
   "CALCULO", "CONTA", "DEMONSTRATIVO", "MEMORIA", "PLANILHA",
@@ -45,11 +54,12 @@ function fmtData(iso?: string) {
 }
 
 // Busca na Judit + monta o texto do processo. Retorna {aguarde} se ainda coletando.
-async function montarTextoProcesso(juditKey: string, numero: string, soLista = false) {
+async function montarTextoProcesso(juditKey: string, numero: string, soLista = false, inicio = Date.now()) {
   const postRes = await fetch(JUDIT_REQUESTS, {
     method: "POST",
     headers: { "api-key": juditKey, "Content-Type": "application/json" },
     body: JSON.stringify({ search: { search_type: "lawsuit_cnj", search_key: numero }, with_attachments: true }),
+    signal: AbortSignal.timeout(PEDIDO_MAX_MS),
   });
   const postJson = safeParse(await postRes.text());
   if (!postRes.ok) return { erro: "Judit recusou a busca", http: postRes.status, resposta: postJson };
@@ -58,8 +68,9 @@ async function montarTextoProcesso(juditKey: string, numero: string, soLista = f
 
   let resp: any = null, completo = false;
   for (let i = 0; i < POLL_MAX; i++) {
+    if (Date.now() - inicio > ESPERA_MAX_MS) break; // sem completar: volta "aguarde"
     await new Promise((r) => setTimeout(r, 2000));
-    const r = await fetch(`${JUDIT_RESPONSES}?request_id=${requestId}&page_size=100`, { headers: { "api-key": juditKey } });
+    const r = await fetch(`${JUDIT_RESPONSES}?request_id=${requestId}&page_size=100`, { headers: { "api-key": juditKey }, signal: AbortSignal.timeout(PEDIDO_MAX_MS) });
     resp = safeParse(await r.text());
     const st = (resp as { request_status?: string })?.request_status;
     const pd: any[] = Array.isArray((resp as any)?.page_data) ? (resp as any).page_data : [];
@@ -115,9 +126,10 @@ async function montarTextoProcesso(juditKey: string, numero: string, soLista = f
     .slice(0, MAX_DOCS_BAIXAR);
   const baixados: string[] = []; const inacessiveis: string[] = [];
   for (const a of chaves) {
+    if (Date.now() - inicio > LEITURA_MAX_MS) { inacessiveis.push(`${a.attachment_name} — não lido: acabou o tempo da chamada`); continue; }
     if (texto.length > MAX_DOC_CHARS) break;
     try {
-      const dl = await fetch(`${JUDIT_LAWSUITS}/${base.code || numero}/${a._instancia}/attachments/${a.attachment_id}`, { headers: { "api-key": juditKey } });
+      const dl = await fetch(`${JUDIT_LAWSUITS}/${base.code || numero}/${a._instancia}/attachments/${a.attachment_id}`, { headers: { "api-key": juditKey }, signal: AbortSignal.timeout(PEDIDO_MAX_MS) });
       if (!dl.ok) { inacessiveis.push(`${a.attachment_name}${a.private ? " \u2014 SIGILOSO (segredo de justiça)" : ` \u2014 indisponível (HTTP ${dl.status})`}`); continue; }
       const bytes = new Uint8Array(await dl.arrayBuffer());
       const { text } = await extractText(bytes, { mergePages: true });
@@ -148,22 +160,33 @@ async function montarTextoProcesso(juditKey: string, numero: string, soLista = f
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  const inicio = Date.now();
   try {
     const url = new URL(req.url);
     const testeMode = url.searchParams.get("teste") === "sim";
 
     const svc = serviceClient();
+
+    // O PORTÃO VALE PARA OS DOIS MODOS (Varredura E, 23/10/2026). O modo teste
+    // rodava ANTES dele, "sem sessão": o gateway aceita a chave anon — que é
+    // pública, vai no bundle do site —, e qualquer um com ela fazia a função
+    // gastar uma consulta paga da Judit por URL aberta e ler o texto do
+    // processo (partes, CPFs, decisões). Conta desativada também passava. Agora
+    // o teste pede a mesma sessão ativa do modo produção.
+    const user = await getCallerAtivo(req, svc);
+    if (!user) return json({ erro: ERRO_ACESSO }, 401);
+
     const juditKey = await chaveJudit();
     if (!juditKey) return json({ erro: "Chave da Judit não configurada (integracao_judit_secret)." }, 500);
 
-    // ---------- MODO TESTE (navegador, sem sessão) ----------
+    // ---------- MODO TESTE (com sessão; não grava, não roda IA) ----------
     if (testeMode) {
       const numero = String(url.searchParams.get("numero") || "").trim();
       if (!numero) return json({ erro: "?numero= é obrigatório no modo teste" }, 400);
       const soLista = url.searchParams.get("so_lista") === "sim";
       const soValor = url.searchParams.get("so_valor") === "sim";
       const termo = (url.searchParams.get("termo") || "").trim();
-      const r = await montarTextoProcesso(juditKey, numero, soLista);
+      const r = await montarTextoProcesso(juditKey, numero, soLista, inicio);
       if ((r as any).aguarde) return json({ pronto: false, aguarde: true, mensagem: "Judit ainda coletando; rode de novo em ~2 min." });
       if ((r as any).erro || (r as any).nao_encontrado) return json(r);
       if (soLista && soValor) {
@@ -182,15 +205,13 @@ Deno.serve(async (req) => {
     }
 
     // ---------- MODO PRODUÇÃO (site, com sessão) ----------
-    const user = await getCallerAtivo(req, serviceClient());
-    if (!user) return json({ erro: ERRO_ACESSO }, 401);
     const userId = user.id;
 
     const body = await req.json().catch(() => ({}));
     const numero = String(body.numero || body.numero_processo || "").trim();
     if (!numero) return json({ erro: "Informe o número do processo (campo 'numero')." }, 400);
 
-    const r = await montarTextoProcesso(juditKey, numero);
+    const r = await montarTextoProcesso(juditKey, numero, false, inicio);
     if ((r as any).aguarde) return json({ pronto: false, aguarde: true, mensagem: "A Judit ainda está baixando os autos. Aguarde ~2 minutos e busque de novo." });
     if ((r as any).nao_encontrado) return json({ pronto: false, nao_encontrado: true, mensagem: "A Judit não encontrou este processo." });
     if ((r as any).erro) return json({ pronto: false, ...(r as any) }, 502);

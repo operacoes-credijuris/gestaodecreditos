@@ -594,6 +594,7 @@ async function paginar(
   chave: string,
   primeira: string,
   chaveEncontrado: string,
+  prazo?: number,
 ): Promise<BuscaEscavador> {
   const items: ProcessoEscavador[] = []
   let encontrado: Record<string, unknown> | null = null
@@ -602,6 +603,21 @@ async function paginar(
   let paginas = 0
 
   while (url && paginas < MAX_PAGINAS) {
+    // O PRAZO DA INVOCAÇÃO (Varredura E, 23/10/2026): cinco páginas de até 30 s
+    // cada, depois da consulta da OAB, passavam dos ~150 s — e a função morria
+    // sem gravar nem o consumo do que já fora pago. Passado o prazo, a página
+    // seguinte não é pedida e o que veio volta como parcial, dito como tal. A
+    // primeira página sempre vai: sem ela não há o que gravar.
+    if (prazo !== undefined && paginas > 0 && Date.now() > prazo) {
+      return {
+        items,
+        encontrado,
+        centavos,
+        paginas,
+        truncado: true,
+        falha: 'o tempo da chamada acabou antes das páginas seguintes',
+      }
+    }
     let resposta: { corpo: unknown; centavos: number }
     try {
       resposta = await pedir(chave, url)
@@ -653,6 +669,8 @@ export function processosDoEnvolvido(
     tribunais?: string[]
     polo?: 'ATIVO' | 'PASSIVO' | 'ADVOGADO' | 'OUTROS'
   },
+  /** Instante (ms) depois do qual nenhuma página nova é pedida — ver `paginar`. */
+  prazo?: number,
 ): Promise<BuscaEscavador> {
   const doc = soDigitos(alvo.documento)
   const q = new URLSearchParams()
@@ -664,7 +682,7 @@ export function processosDoEnvolvido(
   q.set('ordem', 'desc')
   if (alvo.polo) q.set('polo', alvo.polo)
   for (const t of alvo.tribunais ?? []) q.append('tribunais[]', t)
-  return paginar(chave, `${BASE_ESCAVADOR}/envolvido/processos?${q}`, 'envolvido_encontrado')
+  return paginar(chave, `${BASE_ESCAVADOR}/envolvido/processos?${q}`, 'envolvido_encontrado', prazo)
 }
 
 /**

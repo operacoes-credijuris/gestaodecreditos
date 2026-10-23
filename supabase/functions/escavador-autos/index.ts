@@ -100,7 +100,9 @@ Deno.serve(async (req: Request) => {
         if (chave) {
           const res = await fetch(
             `${BASE_ESCAVADOR}/processos/numero_cnj/${numeroCnj}/status-atualizacao`,
-            { headers: { Authorization: `Bearer ${chave}`, Accept: 'application/json' } },
+            // COM TETO (Varredura E, 23/10/2026): a consulta é de cortesia; parada,
+            // não pode segurar a tela até a função morrer.
+            { headers: { Authorization: `Bearer ${chave}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
           )
           if (res.ok) {
             const j = await res.json().catch(() => null)
@@ -221,7 +223,7 @@ Deno.serve(async (req: Request) => {
     // O REGISTRO É O QUE SOBREVIVE À ESPERA: sem ele, uma solicitação paga
     // ficaria só no painel do Escavador, e a tela não teria o que mostrar
     // enquanto o robô não conclui.
-    const { data: pedido } = await svc.from('escavador_pedido').upsert({
+    const { data: pedido, error: ePedido } = await svc.from('escavador_pedido').upsert({
       id: pedidoId,
       numero_cnj: numeroCnj,
       kommo_lead_id: Number(corpo.lead_id) || null,
@@ -231,9 +233,14 @@ Deno.serve(async (req: Request) => {
       criado_por: caller.id,
       atualizado_em: new Date().toISOString(),
     }, { onConflict: 'id' }).select().maybeSingle()
+    // O PEDIDO JÁ FOI PAGO: a falha de gravá-lo não pode sair como sucesso
+    // (Varredura E, 23/10/2026). Sem a linha, o "pedido em aberto não vira dois"
+    // acima não a vê, e o próximo clique paga de novo — então a tela é avisada
+    // com o id, para ninguém repetir.
+    if (ePedido) console.error('[escavador-autos] pedido não registrado', pedidoId, ePedido.message)
 
     if (centavos > 0) {
-      await svc.from('escavador_consumo').insert({
+      const { error: eConsumo } = await svc.from('escavador_consumo').insert({
         kommo_lead_id: Number(corpo.lead_id) || null,
         operacao: tipo === 'autos' ? 'autos_pedido' : 'publicos_pedido',
         alvo: numeroCnj,
@@ -242,6 +249,7 @@ Deno.serve(async (req: Request) => {
         processos: 1,
         criado_por: caller.id,
       })
+      if (eConsumo) console.error('[escavador-autos] consumo não registrado', pedidoId, centavos, eConsumo.message)
     }
 
     return jsonResponse({
@@ -250,6 +258,13 @@ Deno.serve(async (req: Request) => {
       centavos,
       mensagem:
         'Pedido enviado. O Escavador avisa quando terminar, e os documentos aparecem aqui.',
+      ...(ePedido
+        ? {
+          aviso:
+            `O pedido ${pedidoId} foi feito e pago, mas não ficou registrado aqui (${ePedido.message}). ` +
+            'Não peça de novo: confira o andamento no painel do Escavador.',
+        }
+        : {}),
     })
   } catch (err) {
     return jsonResponse({ erro: (err as Error).message }, 500)

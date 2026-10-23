@@ -32,13 +32,21 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
-import { ESFORCO_PADRAO_DO_OPUS, textoDaResposta, type PedidoAoOpus } from '../_shared/respostaDoClaude.ts'
+import {
+  ESFORCO_PADRAO_DO_OPUS,
+  motivoDaRespostaIncompleta,
+  textoDaResposta,
+  type PedidoAoOpus,
+} from '../_shared/respostaDoClaude.ts'
+import { mensagemDoErroDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import { TITULO_DO_DESFECHO, garantirTitulo, type Desfecho } from '../_shared/desfecho.ts'
 
 const CLAUDE_MODEL = 'claude-opus-5-5'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const inicio = Date.now()
 
   try {
     const usuario = await getCallerAtivo(req, serviceClient())
@@ -98,7 +106,13 @@ Deno.serve(async (req: Request) => {
         'ou o que impede o pagamento. Quando o obstáculo for removível, diga o que teria de ' +
         'mudar para o crédito voltar a ser viável.'
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // COM TETO (Varredura E, 23/10/2026): a redação é curta, mas a Anthropic
+    // sobrecarregada pode segurar a conexão — e sem sinal a função morria calada
+    // nos ~150 s, com a pessoa olhando o botão girar.
+    let res: Response
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+      signal: sinalAteOTeto(inicio),
       method: 'POST',
       headers: {
         'x-api-key': chave,
@@ -153,15 +167,23 @@ Deno.serve(async (req: Request) => {
           },
         ],
       } satisfies PedidoAoOpus),
-    })
-    const resposta = await res.json().catch(() => null)
-    if (!res.ok) {
-      return jsonResponse({ error: `A IA recusou a redação (HTTP ${res.status}).`, resposta }, 502)
+      })
+    } catch (e) {
+      if (!estourouOTempo(e)) throw e
+      return jsonResponse({ error: 'A redação passou do tempo de uma chamada e foi interrompida. Tente de novo.' }, 504)
     }
-    // CORTADA NÃO VAI PARA O CRM: metade de uma anotação parece inteira para
-    // quem lê o feed.
-    if (resposta?.stop_reason === 'max_tokens') {
-      return jsonResponse({ error: 'A redação da anotação saiu cortada. Tente de novo.' }, 502)
+    const resposta = await res.json().catch(() => null)
+    // O MOTIVO DA ANTHROPIC NO `error`, que é o campo que a tela lê (Varredura
+    // E, 23/10/2026): ia cru em `resposta`, e a pessoa via só "HTTP 400".
+    if (!res.ok) {
+      return jsonResponse({ error: mensagemDoErroDaAnthropic(res.status, resposta, 'a redação') }, 502)
+    }
+    // CORTADA OU RECUSADA NÃO VAI PARA O CRM: metade de uma anotação parece
+    // inteira para quem lê o feed. A recusa (filtro de segurança) também pode vir
+    // com texto parcial — antes ela passava e ia ao card como redação pronta.
+    const incompleta = motivoDaRespostaIncompleta(resposta?.stop_reason)
+    if (incompleta) {
+      return jsonResponse({ error: `${incompleta} A anotação não foi redigida; tente de novo.` }, 502)
     }
 
     const texto = textoDaResposta(resposta?.content, '\n')

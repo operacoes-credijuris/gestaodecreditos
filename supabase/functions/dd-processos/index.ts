@@ -114,6 +114,7 @@ async function apurarAlvo(
   alvo: Alvo,
   cnjDoCredito: string,
   memoria: MemoriaDeBusca,
+  prazo: number,
 ): Promise<Apuracao> {
   const base = {
     papel: alvo.papel,
@@ -162,7 +163,7 @@ async function apurarAlvo(
     const chaveDaBusca = documento || 'nome:' + nome.toLowerCase()
     const jaPedida = memoria.get(chaveDaBusca)
     const reusada = Boolean(jaPedida)
-    const promessa = jaPedida ?? processosDoEnvolvido(chave, { documento, nome, polo: 'PASSIVO' })
+    const promessa = jaPedida ?? processosDoEnvolvido(chave, { documento, nome, polo: 'PASSIVO' }, prazo)
     memoria.set(chaveDaBusca, promessa)
     const busca = await promessa
     if (reusada) {
@@ -376,6 +377,7 @@ async function gravarApuracao(
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const inicio = Date.now()
 
   try {
     // PORTÃO DE ACESSO. Esta função gasta crédito da API a cada chamada, e o
@@ -429,10 +431,12 @@ Deno.serve(async (req: Request) => {
       : []
 
     if (alvos.length === 0) {
-      const { data: sujeitos } = await svc
+      const { data: sujeitos, error: eSujeitos } = await svc
         .from('dd_sujeito')
         .select('id, papel, nome, documento')
         .eq('kommo_lead_id', leadId)
+      // LEITURA QUE FALHA NÃO É "NENHUM SUJEITO" (Varredura E, 23/10/2026).
+      if (eSujeitos) return jsonResponse({ erro: `dd_sujeito: ${eSujeitos.message}`, gravado: false }, 500)
       alvos = (sujeitos ?? []).map((s) => ({
         papel: s.papel as Papel,
         nome: s.nome,
@@ -453,11 +457,39 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    // UM TETO DE ALVOS POR CLIQUE (Varredura E, 23/10/2026). Cada alvo é uma
+    // busca PAGA de até cinco páginas, e a lista vinha do corpo sem limite: um
+    // corpo com cinquenta alvos eram cinquenta buscas cobradas de uma vez. Os
+    // quatro papéis, mais folga para dois do mesmo papel, cabem em oito.
+    const MAX_ALVOS = 8
+    if (alvos.length > MAX_ALVOS) {
+      return jsonResponse(
+        { erro: `São ${alvos.length} sujeitos; apure no máximo ${MAX_ALVOS} por vez.`, gravado: false },
+        400,
+      )
+    }
+
+    // O SUJEITO_ID DO CORPO SÓ VALE SE FOR DESTE CARD (Varredura E, 23/10/2026).
+    // A coluna tem FK para dd_sujeito: um id que não existe fazia o insert do
+    // histórico falhar DEPOIS de a busca ter sido paga; e um id de outro card
+    // ligava a apuração ao sujeito errado.
+    if (alvos.some((a) => a.sujeito_id)) {
+      const { data: doCard, error: eDoCard } = await svc
+        .from('dd_sujeito')
+        .select('id')
+        .eq('kommo_lead_id', leadId)
+      if (eDoCard) return jsonResponse({ erro: `dd_sujeito: ${eDoCard.message}`, gravado: false }, 500)
+      const validos = new Set((doCard ?? []).map((s) => String(s.id)))
+      for (const a of alvos) if (a.sujeito_id && !validos.has(String(a.sujeito_id))) a.sujeito_id = null
+    }
+
     // Em paralelo: são chamadas de rede independentes, e a Edge Function tem
-    // 150 s de teto de relógio.
+    // 150 s de teto de relógio. As páginas seguintes de cada busca só são
+    // pedidas até 90 s do começo, para sobrar tempo de gravar o que foi pago.
+    const prazo = inicio + 90_000
     const memoria: MemoriaDeBusca = new Map()
     const apuracoes = await Promise.all(
-      alvos.map((a) => apurarAlvo(chave, a, cnjDoCredito, memoria)),
+      alvos.map((a) => apurarAlvo(chave, a, cnjDoCredito, memoria, prazo)),
     )
 
     // ---------------------------------------------------------------------

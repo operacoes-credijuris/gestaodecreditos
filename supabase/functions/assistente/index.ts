@@ -21,25 +21,16 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { resolverModeloDoAssistente } from '../_shared/modeloDoAssistente.ts'
 import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
-
-/**
- * Chave da Anthropic, gravada pela tela de Configurações (mesmo caminho do
- * ADVBOX e do Kommo). A leitura usa a service_role porque a tabela não tem
- * policy nenhuma — é justamente o que impede o cliente de ler a chave.
- *
- * O secret de ambiente ANTHROPIC_API_KEY continua valendo como alternativa,
- * para quem preferir configurar por fora do sistema.
- */
-async function chaveAnthropic(): Promise<string | null> {
-  const doAmbiente = Deno.env.get('ANTHROPIC_API_KEY')
-  if (doAmbiente) return doAmbiente
-  const { data } = await serviceClient()
-    .from('integracao_anthropic_secret')
-    .select('token')
-    .eq('id', 1)
-    .maybeSingle()
-  return data?.token ?? null
-}
+// A CHAVE DA ANTHROPIC VEM DO MÓDULO DE SEGREDOS (varredura de 23/10/2026): havia
+// aqui uma cópia idêntica da função, que é o tipo de cópia que diverge no dia em
+// que uma das duas muda. Mesma regra: ambiente primeiro, depois a tabela.
+import { chaveAnthropic } from '../_shared/segredos.ts'
+import { estourouOTempo, sinalAteOTeto, tempoAteOTeto } from '../_shared/relogioDaInvocacao.ts'
+import {
+  lerTodasAsLinhas,
+  type LeituraCompleta,
+  type PaginaDoBanco,
+} from '../_shared/leituraPaginada.ts'
 
 /** Teto de idas e voltas com o modelo. Barreira contra laço infinito. */
 const MAX_RODADAS = 8
@@ -742,28 +733,72 @@ async function carregarPainel(
   svc: SupabaseClient,
 ): Promise<{ painel: ReturnType<typeof montarPainel> } | { erro: string }> {
   const [creditos, parametros] = await Promise.all([
-    svc.from('processos').select(COLUNAS_PAINEL),
+    // PAGINADO (23/10/2026): o painel é a carteira INTEIRA, e um select sem
+    // range para em 1000 linhas sem avisar — o panorama sairia com números
+    // menores, apresentados como os da tela.
+    lerTudo(() => svc.from('processos').select(COLUNAS_PAINEL), ['id']),
     svc
       .from('parametros_atualizacao')
       .select('selic_aa, ipca_12m_aa, data_referencia')
       .eq('id', 1)
       .maybeSingle(),
   ])
-  if (creditos.error) return { erro: creditos.error.message }
+  if (creditos.erro) return { erro: creditos.erro }
+  if (creditos.cortada) return { erro: LEITURA_CORTADA }
   // Em Brasília, como desde()/daqui() abaixo: das 21h em diante o UTC já é amanhã.
   const hoje = hojeEmBrasilia()
   return {
     painel: montarPainel(
-      (creditos.data ?? []) as unknown as CreditoBruto[],
+      creditos.linhas as unknown as CreditoBruto[],
       (parametros.data ?? undefined) as Parameters<typeof montarPainel>[1],
       hoje,
     ),
   }
 }
 
+/**
+ * O `limite` que o modelo mandou, entre 1 e LIMITE_MAX.
+ *
+ * INTEIRO E FINITO (23/10/2026): `limite: 7.5` ia como `limit=7.5` e o
+ * PostgREST recusava a consulta inteira; `NaN` passava pelo min/max como NaN.
+ * O modelo lê o erro e tenta de novo — uma rodada a mais, por nada.
+ */
 function limite(valor: unknown): number {
-  const n = typeof valor === 'number' ? valor : 20
+  const n = typeof valor === 'number' && Number.isFinite(valor) ? Math.floor(valor) : 20
   return Math.min(Math.max(n, 1), LIMITE_MAX)
+}
+
+/** O que dizer quando a leitura bateu no teto de páginas e não terminou. */
+const LEITURA_CORTADA =
+  'A leitura passou do teto de páginas e ficou incompleta — o total não seria exato.'
+
+/** O mínimo do construtor do supabase-js que a leitura paginada usa. */
+interface ConsultaPaginavel {
+  order: (coluna: string, opcoes?: { ascending?: boolean }) => ConsultaPaginavel
+  range: (de: number, ate: number) => PromiseLike<PaginaDoBanco<Record<string, unknown>>>
+}
+
+/**
+ * A tabela INTEIRA, página a página (varredura de 23/10/2026).
+ *
+ * O PostgREST devolve no máximo 1000 linhas e NÃO AVISA que cortou. As
+ * ferramentas que somam ou contam a carteira (painel, resumo financeiro,
+ * cessões, investidores, paralisados) liam com um select cru e, passado esse
+ * tamanho, respondiam um total menor COMO EXATO — o pior jeito de errar aqui.
+ *
+ * `montar` devolve a consulta já com select e filtros, nova a cada página;
+ * `ordem` são colunas que formam chave — sem ordem estável, uma linha pode cair
+ * em duas páginas e outra em nenhuma.
+ */
+async function lerTudo(
+  montar: () => unknown,
+  ordem: string[],
+): Promise<LeituraCompleta<Record<string, unknown>>> {
+  return await lerTodasAsLinhas<Record<string, unknown>>((de, ate) => {
+    let q = montar() as ConsultaPaginavel
+    for (const c of ordem) q = q.order(c, { ascending: true })
+    return q.range(de, ate)
+  })
 }
 
 /**
@@ -985,19 +1020,26 @@ async function executar(
 
     case 'resumo_financeiro_creditos': {
       // Sem limite: são somas, e amostra daria total errado apresentado como
-      // exato. O acervo é de centenas de linhas, não de milhões.
-      const { query, avisos } = aplicarFiltrosGenericos(
-        svc
-          .from('processos')
-          .select(
-            'status, especie_requisitorio, originador, cessionario, tribunal, ' +
-              'entidade_devedora, capital_investido, valor_face, ja_recebido, ' +
-              'valor_estimado_complementar, data_liquidacao',
-          ),
-        args.filtros,
-      )
-      const { data, error } = await query
-      if (error) return JSON.stringify({ erro: error.message })
+      // exato. E PAGINADO (23/10/2026): "sem limite" num select cru ainda era o
+      // teto calado de 1000 linhas do PostgREST.
+      let avisos: string[] = []
+      const leitura = await lerTudo(() => {
+        const r = aplicarFiltrosGenericos(
+          svc
+            .from('processos')
+            .select(
+              'status, especie_requisitorio, originador, cessionario, tribunal, ' +
+                'entidade_devedora, capital_investido, valor_face, ja_recebido, ' +
+                'valor_estimado_complementar, data_liquidacao',
+            ),
+          args.filtros,
+        )
+        avisos = r.avisos
+        return r.query
+      }, ['id'])
+      if (leitura.erro) return JSON.stringify({ erro: leitura.erro })
+      if (leitura.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
+      const data = leitura.linhas
 
       const dimensao = String(args.agrupar_por ?? 'nenhum')
       const grupos: Record<string, Record<string, number>> = {}
@@ -1348,7 +1390,11 @@ async function executar(
       // que já passou (defeito relatado: lista de "conclusos" incluía
       // processos que já teriam avançado). Busca o andamento mais recente de
       // verdade de cada processo da amostra, SEM filtro de texto, e compara.
-      const CAP_VERIFICACAO = 2000
+      // MIL, E NÃO DOIS MIL (23/10/2026): o PostgREST devolve no máximo 1000
+      // linhas, então `.limit(2000)` voltava com 1000 e o `>= 2000` abaixo nunca
+      // acendia — processo da amostra empurrado para fora do corte por outros
+      // mais ativos saía como "sem andamento mais recente", sem aviso nenhum.
+      const CAP_VERIFICACAO = 1000
       const numerosDaAmostra = [
         ...new Set(amostra.map((a) => a.numero_processo).filter(Boolean)),
       ]
@@ -1464,10 +1510,19 @@ async function executar(
     }
 
     case 'resumo_cessoes': {
-      const { data, error } = await svc
-        .from('cessoes')
-        .select('status, valor_face, valor_aquisicao, valor_cessao')
-      if (error) return JSON.stringify({ erro: error.message })
+      // PAGINADO (23/10/2026): são totais, e o select cru parava em 1000 linhas.
+      const leitura = await lerTudo(
+        () => svc.from('cessoes').select('status, valor_face, valor_aquisicao, valor_cessao'),
+        ['id'],
+      )
+      if (leitura.erro) return JSON.stringify({ erro: leitura.erro })
+      if (leitura.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
+      const data = leitura.linhas as {
+        status: string | null
+        valor_face: unknown
+        valor_aquisicao: unknown
+        valor_cessao: unknown
+      }[]
       const porStatus: Record<
         string,
         { quantidade: number; valor_face: number; valor_aquisicao: number; valor_cessao: number }
@@ -1644,25 +1699,35 @@ async function executar(
     }
 
     case 'listar_investidores': {
-      let q = svc
-        .from('investidor_dados')
-        // SEM cpf, rg, conta, agência e Pix: nenhuma pergunta de análise precisa
-        // do valor desses campos, e mandá-los para fora do sistema seria expor
-        // dado bancário sem necessidade. O que vai é se estão PREENCHIDOS.
-        .select('tipo, nome_exibicao, nome_chave, cpf, rg, banco, agencia, conta, pix, cidade, uf, representante')
-        .limit(LIMITE_MAX)
-      if (args.papel) q = q.eq('tipo', args.papel)
-      if (args.nome) q = q.ilike('nome_exibicao', `%${args.nome}%`)
-      const { data, error } = await q
-      if (error) return JSON.stringify({ erro: error.message })
+      // TODAS AS FICHAS, E NÃO AS 50 PRIMEIRAS (23/10/2026): o teto era aplicado
+      // ANTES do filtro `ficha_incompleta`, feito em memória — "quem está com
+      // ficha incompleta" olhava só 50 fichas em ordem qualquer e dizia "todas
+      // completas" sobre as outras. O teto vale agora só no que volta ao modelo.
+      const fichas = await lerTudo(() => {
+        let q = svc
+          .from('investidor_dados')
+          // SEM cpf, rg, conta, agência e Pix: nenhuma pergunta de análise precisa
+          // do valor desses campos, e mandá-los para fora do sistema seria expor
+          // dado bancário sem necessidade. O que vai é se estão PREENCHIDOS.
+          .select('tipo, nome_exibicao, nome_chave, cpf, rg, banco, agencia, conta, pix, cidade, uf, representante')
+        if (args.papel) q = q.eq('tipo', args.papel)
+        if (args.nome) q = q.ilike('nome_exibicao', `%${args.nome}%`)
+        return q
+      }, ['tipo', 'nome_chave'])
+      if (fichas.erro) return JSON.stringify({ erro: fichas.erro })
+      const data = fichas.linhas
 
-      // Quantos créditos cada pessoa tem, no papel dela.
-      const { data: procs } = await svc
-        .from('processos')
-        .select('cessionario, originador')
+      // Quantos créditos cada pessoa tem, no papel dela — da carteira INTEIRA,
+      // paginada: o select cru parava em 1000 créditos e contava a menos.
+      const creditos = await lerTudo(
+        () => svc.from('processos').select('cessionario, originador'),
+        ['id'],
+      )
+      if (creditos.erro) return JSON.stringify({ erro: creditos.erro })
+      const procs = creditos.linhas
       const conta = (campo: 'cessionario' | 'originador') => {
         const m = new Map<string, number>()
-        for (const p of (procs ?? []) as Record<string, unknown>[]) {
+        for (const p of procs) {
           const n = String(p[campo] ?? '').trim().toLowerCase()
           if (n) m.set(n, (m.get(n) ?? 0) + 1)
         }
@@ -1753,8 +1818,13 @@ async function executar(
       // Os textos já escritos pela plataforma, juntados ao crédito. Duas
       // consultas, e não um join: `carteira_resumos` referencia processo_id, e o
       // filtro é do lado do crédito.
+      // O TETO VAI NA CONSULTA (23/10/2026): lia-se a carteira inteira (até as
+      // 1000 do PostgREST) para usar só as `limite` primeiras.
       const { query: alvo, avisos } = aplicarFiltrosGenericos(
-        svc.from('processos').select('id, numero_cnj, cedente, cessionario, status'),
+        svc
+          .from('processos')
+          .select('id, numero_cnj, cedente, cessionario, status')
+          .limit(limite(args.limite)),
         args.filtros,
       )
       const { data: procs, error } = await alvo
@@ -2064,20 +2134,33 @@ async function executar(
       const diasCorte = typeof args.dias === 'number' ? args.dias : 20
       const corte = desde(diasCorte)
 
+      // PAGINADO (23/10/2026): o `.limit(5000)` não valia — o PostgREST para em
+      // 1000 de qualquer jeito, e o processo que ficasse fora do corte não
+      // aparecia como parado, com `total_parados` dado como exato.
       const [statusRows, processosAtivos] = await Promise.all([
-        svc.from('advbox_processo_status').select('numero_processo, ultima_movimentacao').limit(5000),
-        svc
-          .from('processos')
-          .select('numero_cnj, cedente, cessionario, status')
-          .in('status', ['ativo', 'complementar']),
+        lerTudo(
+          () => svc.from('advbox_processo_status').select('numero_processo, ultima_movimentacao'),
+          ['numero_processo'],
+        ),
+        lerTudo(
+          () =>
+            svc
+              .from('processos')
+              .select('numero_cnj, cedente, cessionario, status')
+              .in('status', ['ativo', 'complementar']),
+          ['id'],
+        ),
       ])
-      if (statusRows.error) return JSON.stringify({ erro: statusRows.error.message })
-      if (processosAtivos.error) return JSON.stringify({ erro: processosAtivos.error.message })
+      if (statusRows.erro) return JSON.stringify({ erro: statusRows.erro })
+      if (processosAtivos.erro) return JSON.stringify({ erro: processosAtivos.erro })
+      if (statusRows.cortada || processosAtivos.cortada) {
+        return JSON.stringify({ erro: LEITURA_CORTADA })
+      }
 
       // Prefixo de 7 dígitos do CNJ, mesmo padrão de casamento usado no resto
       // deste arquivo (advbox_movimentacoes guarda o número em formato solto).
       const porDigitos = new Map(
-        ((processosAtivos.data ?? []) as Record<string, unknown>[]).map((p) => [
+        processosAtivos.linhas.map((p) => [
           String(p.numero_cnj).replace(/\D/g, '').slice(0, 7),
           p,
         ]),
@@ -2090,7 +2173,7 @@ async function executar(
         ultima_movimentacao: string | null
       }
       const parados: Parado[] = []
-      for (const s of (statusRows.data ?? []) as {
+      for (const s of statusRows.linhas as unknown as {
         numero_processo: string
         ultima_movimentacao: string | null
       }[]) {
@@ -2351,6 +2434,23 @@ async function skillsAtivas(
 }
 
 /**
+ * O nome de um arquivo, do jeito que a chave do Storage aceita: sem acento, sem
+ * barra e só com os caracteres que o Supabase Storage admite — o resto vira `_`.
+ * Barra sai também por segurança: o nome vem do código que o modelo escreveu, e
+ * não pode abrir subpasta dentro da pasta da pessoa.
+ */
+function nomeParaOStorage(nome: string): string {
+  const limpo = nome
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Za-z0-9._\- ()]/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .trim()
+    .slice(0, 120)
+  return limpo || 'arquivo'
+}
+
+/**
  * Baixa os arquivos que uma Skill gerou dentro do container de code execution
  * e sobe pro Storage, num bucket privado por usuário — o assistente nunca
  * repassa o link da Anthropic direto pro navegador: aquele link não é de
@@ -2364,17 +2464,20 @@ async function extrairArquivosGerados(
   content: unknown[],
   apiKey: string,
   userId: string,
+  sinal?: AbortSignal,
 ): Promise<{ nome: string; url: string; caminho: string }[]> {
-  const fileIds: string[] = []
+  // SEM REPETIR o mesmo arquivo: a varredura agora cobre todas as rodadas da
+  // pergunta, e o mesmo file_id pode aparecer em mais de uma.
+  const fileIds = new Set<string>()
   for (const bloco of content as Record<string, unknown>[]) {
-    if (bloco.type !== 'bash_code_execution_tool_result') continue
+    if (bloco?.type !== 'bash_code_execution_tool_result') continue
     const inner = (bloco.content ?? {}) as Record<string, unknown>
     if (inner.type !== 'bash_code_execution_result') continue
     for (const saida of (inner.content ?? []) as Record<string, unknown>[]) {
-      if (typeof saida.file_id === 'string') fileIds.push(saida.file_id)
+      if (typeof saida.file_id === 'string') fileIds.add(saida.file_id)
     }
   }
-  if (fileIds.length === 0) return []
+  if (fileIds.size === 0) return []
 
   const svc = serviceClient()
   const cabecalhos = { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
@@ -2383,21 +2486,36 @@ async function extrairArquivosGerados(
     try {
       const meta = await fetch(`https://api.anthropic.com/v1/files/${fileId}`, {
         headers: cabecalhos,
+        signal: sinal,
       }).then((r) => (r.ok ? r.json() : null))
       const nome = (meta?.filename as string | undefined) || `arquivo-${fileId}`
 
       const conteudo = await fetch(
         `https://api.anthropic.com/v1/files/${fileId}/content`,
-        { headers: cabecalhos },
+        { headers: cabecalhos, signal: sinal },
       )
       if (!conteudo.ok) continue
       const bytes = new Uint8Array(await conteudo.arrayBuffer())
 
-      const caminho = `${userId}/${fileId}-${nome}`
+      // O NOME VAI LIMPO PARA A CHAVE DO STORAGE (23/10/2026). O Storage só
+      // aceita ASCII na chave: "Relatório de créditos.xlsx" — o nome normal de
+      // um arquivo pedido em português — era recusado ("Invalid key"), o
+      // `continue` abaixo engolia a recusa e a pessoa recebia o texto dizendo
+      // "segue o arquivo" sem arquivo nenhum. O nome de exibição (`nome`)
+      // continua o original. E com o tipo: sem `contentType`, o supabase-js
+      // grava texto puro, e a planilha baixava como texto.
+      const caminho = `${userId}/${fileId}-${nomeParaOStorage(nome)}`
       const { error } = await svc.storage
         .from('assistente-arquivos')
-        .upload(caminho, bytes, { upsert: true })
-      if (error) continue
+        .upload(caminho, bytes, {
+          upsert: true,
+          contentType:
+            (typeof meta?.mime_type === 'string' && meta.mime_type) || 'application/octet-stream',
+        })
+      if (error) {
+        console.error('[assistente] arquivo gerado não subiu ao Storage:', error.message)
+        continue
+      }
 
       const { data: assinado } = await svc.storage
         .from('assistente-arquivos')
@@ -2495,6 +2613,13 @@ async function anexarArquivosDeEntrada(
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
+  // O RELÓGIO DA INVOCAÇÃO (23/10/2026): até 8 rodadas com o modelo, em esforço
+  // alto quando há texto jurídico a interpretar, e o SDK com 10 minutos de
+  // timeout por chamada. A Edge Function morre por volta de 150 s, calada — a
+  // tela recebia um erro de rede genérico, sem dizer que a pergunta era grande
+  // demais. Contado daqui, e não de cada chamada.
+  const inicio = Date.now()
+
   try {
     const caller = await getCallerAtivo(req, serviceClient())
     if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
@@ -2582,6 +2707,13 @@ Deno.serve(async (req: Request) => {
     // upload de novo a cada rodada custaria caro sem necessidade — o texto da
     // pergunta daquele turno continua contando a conversa, só o arquivo em si
     // não volta a ser lido depois da rodada em que foi anexado.
+    //
+    // TEXTO VAZIO SAI, E A CONVERSA COMEÇA PELA PESSOA (23/10/2026). Um turno
+    // de texto vazio é recusado pela API (400, "text content blocks must be
+    // non-empty") e derrubava a pergunta nova por causa de uma velha. E uma
+    // pergunta que falhou fica na tela sem resposta: o corte de 20 deixa de
+    // cair num par e pode começar por uma resposta do assistente — que sai
+    // aqui, para o histórico abrir sempre com a pessoa.
     const mensagens: Anthropic.MessageParam[] = Array.isArray(historico)
       ? historico
           .slice(-20)
@@ -2589,11 +2721,13 @@ Deno.serve(async (req: Request) => {
             (m: unknown): m is { role: 'user' | 'assistant'; content: string } =>
               !!m &&
               typeof (m as { content?: unknown }).content === 'string' &&
+              ((m as { content: string }).content.trim() !== '') &&
               ((m as { role?: unknown }).role === 'user' ||
                 (m as { role?: unknown }).role === 'assistant'),
           )
           .map((m) => ({ role: m.role, content: m.content }))
       : []
+    while (mensagens.length > 0 && mensagens[0].role === 'assistant') mensagens.shift()
 
     if (arquivosAnexados.length > 0) {
       const { blocos, erro } = await anexarArquivosDeEntrada(
@@ -2609,6 +2743,9 @@ Deno.serve(async (req: Request) => {
     } else {
       mensagens.push({ role: 'user', content: pergunta })
     }
+    // Daqui em diante, tudo o que entra em `mensagens` é desta pergunta — é o
+    // trecho em que se procuram os arquivos gerados (ver o fim do laço).
+    const inicioDestaPergunta = mensagens.length
 
     const ferramentasUsadas: string[] = []
     // Promoção é de mão única: uma vez em texto livre, a conversa inteira
@@ -2638,6 +2775,11 @@ Deno.serve(async (req: Request) => {
     // O container da execução de código PAUSADA: a retomada tem de voltar a ele.
     let containerPausado: string | undefined
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
+      // NÃO COMEÇA UMA RODADA QUE NÃO CABE: com menos de 25 s até o teto, a
+      // chamada seria cortada no meio de qualquer jeito.
+      if (tempoAteOTeto(inicio, Date.now(), { minimoMs: 0 }) < 25_000) {
+        return jsonResponse({ error: PERGUNTA_LONGA_DEMAIS }, 504)
+      }
       const params: ParametrosMensagem = {
         model: modeloResolvido,
         // 16000 e não 8000: com thinking adaptativo o orçamento é dividido entre
@@ -2679,8 +2821,11 @@ Deno.serve(async (req: Request) => {
       // ponto de chamada — o `Omit` acima não basta ali. Cast duplo só aqui,
       // no menor escopo possível, mantendo `resposta` como `Message` (não a
       // união com `Stream<...>`) para o resto da função.
+      // COM O SINAL DO TETO: a chamada é interrompida antes de a função morrer,
+      // e a pessoa recebe o motivo (o `catch` do fim) em vez de um erro de rede.
       const resposta = await anthropic.messages.create(
         params as unknown as Anthropic.MessageCreateParamsNonStreaming,
+        { signal: sinalAteOTeto(inicio) },
       )
 
       if (resposta.stop_reason === 'refusal') {
@@ -2715,12 +2860,31 @@ Deno.serve(async (req: Request) => {
         // Resposta INTERROMPIDA por limite de tokens não pode ser entregue como
         // se estivesse inteira: uma tabela de 60 processos cortada na linha 35
         // parece completa, e quem lê usa o pedaço como se fosse o todo.
-        const truncada = resposta.stop_reason === 'max_tokens' || resposta.stop_reason === 'pause_turn'
+        // A janela de contexto cheia também corta a resposta (stop_reason
+        // `model_context_window_exceeded`) — mesma marca de interrompida.
+        const motivo: string = resposta.stop_reason ?? ''
+        const truncada =
+          motivo === 'max_tokens' || motivo === 'pause_turn' || motivo === 'model_context_window_exceeded'
         // Arquivo gerado por Skill: só existe quando há skills ativas, então
         // a varredura do content não custa nada nas conversas sem nenhuma.
+        //
+        // EM TODAS AS RODADAS DESTA PERGUNTA, e não só na última (23/10/2026):
+        // o arquivo nasce na rodada em que o código roda — muitas vezes uma
+        // pausada (`pause_turn`) ou uma que ainda chamou ferramenta nossa —, e a
+        // rodada final só traz o texto. Olhando só ela, o "segue a planilha"
+        // chegava sem a planilha.
+        const blocosDestaPergunta = mensagens
+          .slice(inicioDestaPergunta)
+          .filter((m) => m.role === 'assistant' && Array.isArray(m.content))
+          .flatMap((m) => m.content as unknown[])
         const arquivos =
           skills.length > 0
-            ? await extrairArquivosGerados(resposta.content, apiKey, caller.id)
+            ? await extrairArquivosGerados(
+                blocosDestaPergunta,
+                apiKey,
+                caller.id,
+                sinalAteOTeto(inicio, { folgaMs: 5_000, minimoMs: 1_000 }),
+              )
             : []
         return jsonResponse({
           resposta:
@@ -2799,18 +2963,21 @@ Deno.serve(async (req: Request) => {
       mensagens.push({ role: 'user', content: resultados })
     }
 
-    return jsonResponse(
-      {
-        error:
-          'A consulta ficou longa demais e foi interrompida. Tente uma ' +
-          'pergunta mais específica.',
-      },
-      504,
-    )
+    return jsonResponse({ error: PERGUNTA_LONGA_DEMAIS }, 504)
   } catch (err) {
+    // O TETO DE TEMPO DISPAROU (o sinal da chamada ao modelo): é a mesma
+    // situação das rodadas esgotadas, e merece a mesma frase — não o "Request
+    // was aborted." cru do SDK.
+    if (err instanceof Anthropic.APIUserAbortError || estourouOTempo(err)) {
+      return jsonResponse({ error: PERGUNTA_LONGA_DEMAIS }, 504)
+    }
     return jsonResponse({ error: mensagemDeErro(err) }, 500)
   }
 })
+
+/** Rodadas ou tempo esgotados: a frase é a mesma, porque o remédio é o mesmo. */
+const PERGUNTA_LONGA_DEMAIS =
+  'A consulta ficou longa demais e foi interrompida. Tente uma pergunta mais específica.'
 
 /**
  * Traduz a falha para algo acionável. O erro cru da Anthropic chega como

@@ -13,8 +13,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Acesso restrito ao administrador.' }, 403)
     }
 
-    const { token } = await req.json()
-    if (!token || typeof token !== 'string') {
+    const corpo = await req.json().catch(() => ({}))
+    // APARADO (Varredura E, 23/10/2026), como os das outras integrações: o token
+    // colado com a quebra de linha do fim era gravado assim, e a quebra dentro
+    // do header Authorization fazia TODA chamada à ADVBOX falhar com "invalid
+    // header value" — longe deste campo, onde se corrige.
+    const token = typeof corpo?.token === 'string' ? corpo.token.trim() : ''
+    if (!token) {
       return jsonResponse({ error: 'Token inválido.' }, 400)
     }
 

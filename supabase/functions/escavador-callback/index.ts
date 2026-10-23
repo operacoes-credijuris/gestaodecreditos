@@ -43,6 +43,9 @@ interface Resposta {
 async function pedirAoEscavador(chave: string, caminho: string): Promise<Resposta> {
   const res = await fetch(`${BASE_ESCAVADOR}${caminho}`, {
     headers: { Authorization: `Bearer ${chave}`, Accept: 'application/json' },
+    // COM TETO (Varredura E, 23/10/2026): uma conexão parada segurava o
+    // recolhimento até a invocação morrer, e o evento nunca era marcado.
+    signal: AbortSignal.timeout(30_000),
   })
   const txt = await res.text()
   let corpo: unknown = txt
@@ -72,6 +75,17 @@ async function recolher(numeroCnj: string, uuidEvento: string) {
 
   // 1. O ESTADO DE VERDADE vem da API, não do corpo do evento.
   const st = await pedirAoEscavador(chave, `/processos/numero_cnj/${numeroCnj}/status-atualizacao`)
+  // A RECUSA DA API É ERRO, não "estado DESCONHECIDO" (Varredura E, 23/10/2026):
+  // um 401 (token trocado) ou um 5xx deles marcava o evento como tratado, sem
+  // erro, e os cards que esperavam ficavam esperando a próxima meia hora sem
+  // ninguém saber por quê.
+  if (st.status < 200 || st.status >= 300) {
+    const detalhe = typeof st.corpo === 'string' ? st.corpo : JSON.stringify(st.corpo)
+    await svc.from('escavador_callback').update({
+      erro: `Escavador respondeu HTTP ${st.status} ao conferir o estado: ${String(detalhe).slice(0, 200)}`,
+    }).eq('uuid', uuidEvento)
+    return
+  }
   const verificacao = (st.corpo as { ultima_verificacao?: Record<string, unknown> } | null)
     ?.ultima_verificacao ?? {}
   const pedidoId = Number(verificacao.id ?? 0) || null
@@ -95,16 +109,24 @@ async function recolher(numeroCnj: string, uuidEvento: string) {
       .update({ verificado_em: null })
       .eq('numero_cnj', numeroCnj)
       .eq('estado', 'AGUARDANDO')
+  }
+
+  // TRATADO ANTES DE ACORDAR A ROTINA (Varredura E, 23/10/2026). A marca vinha
+  // depois do `await` na rotina — que roda até ~150 s e só então responde. Esta
+  // invocação morria no mesmo teto antes de chegar aqui, o evento ficava sem
+  // `tratado_em`, e cada reenvio do Escavador acordava a rotina de novo. O que
+  // este evento tinha a fazer (conferir o estado e liberar os cards) já foi feito.
+  await svc.from('escavador_callback')
+    .update({ tratado_em: new Date().toISOString() })
+    .eq('uuid', uuidEvento)
+
+  if (pedidoEncerrado(status)) {
     await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/escavador-autos-rotina`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '' },
       body: '{}',
     }).catch(() => null)
   }
-
-  await svc.from('escavador_callback')
-    .update({ tratado_em: new Date().toISOString() })
-    .eq('uuid', uuidEvento)
 }
 
 Deno.serve(async (req: Request) => {

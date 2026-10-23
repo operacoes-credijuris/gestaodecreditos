@@ -17,6 +17,18 @@ import {
   lerSaidaEstruturada,
   type NoFormatoDoOpus,
 } from '../_shared/respostaDoClaude.ts'
+import { chaveAnthropic } from '../_shared/segredos.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
+
+/**
+ * O TETO DO TEXTO MANDADO À IA (Varredura E, 23/10/2026). Sem ele, uma pasta
+ * com planilhas grandes passava da janela do modelo e a Anthropic respondia 400
+ * "prompt is too long" — que a tela mostrava em inglês, depois de esperar. Um
+ * milhão de tokens são uns 3 milhões de caracteres; 1,5 milhão deixa folga para
+ * o sistema e a resposta. Passando, a tela recebe o motivo e escolhe menos
+ * arquivos — cortar aqui em silêncio tiraria justamente o documento do valor.
+ */
+const MAX_CARACTERES = 1_500_000
 
 /**
  * OPUS, e não Sonnet como no resto da plataforma.
@@ -33,16 +45,9 @@ import {
  */
 const MODELO = 'claude-opus-5-5'
 
-async function chaveAnthropic(): Promise<string | null> {
-  const doAmbiente = Deno.env.get('ANTHROPIC_API_KEY')
-  if (doAmbiente) return doAmbiente
-  const { data } = await serviceClient()
-    .from('integracao_anthropic_secret')
-    .select('token')
-    .eq('id', 1)
-    .maybeSingle()
-  return data?.token ?? null
-}
+// A CHAVE VEM DE _shared/segredos.ts (Varredura E, 23/10/2026): esta função
+// tinha uma cópia própria da leitura, que é o tipo de coisa que envelhece torto
+// — a próxima mudança de onde a chave mora entraria lá e não aqui.
 
 const SISTEMA = `Você lê documentos de uma operação de compra de crédito judicial (precatório ou RPV) e extrai os campos do cadastro.
 
@@ -100,6 +105,7 @@ Responda só com o JSON do formato pedido, sem texto antes ou depois.`
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const inicio = Date.now()
   try {
     const caller = await getCallerAtivo(req, serviceClient())
     if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
@@ -141,8 +147,23 @@ Deno.serve(async (req: Request) => {
           }`,
       )
       .join('\n')
+    if (corpo.length > MAX_CARACTERES) {
+      return jsonResponse(
+        {
+          error:
+            `Os ${documentos.length} documentos somam ${Math.round(corpo.length / 1000)} mil caracteres, ` +
+            `mais do que a IA lê de uma vez (${MAX_CARACTERES / 1000} mil). Tire da pasta os arquivos ` +
+            'que não são do cadastro (autos inteiros, planilhas auxiliares) e tente de novo.',
+        },
+        413,
+      )
+    }
 
-    const anthropic = new Anthropic({ apiKey: chave })
+    // O TETO DA INVOCAÇÃO E UMA SÓ TENTATIVA (Varredura E, 23/10/2026). O SDK
+    // espera até 10 minutos e repete duas vezes por conta própria em 429/5xx;
+    // somado, passava fácil dos ~150 s, e a função morria sem resposta — a tela
+    // ficava em "Lendo os documentos com a IA…" até o erro de rede genérico.
+    const anthropic = new Anthropic({ apiKey: chave, maxRetries: 1 })
     const r = await anthropic.messages.create({
       model: MODELO,
       // 16000, e não os 4000 de antes: no Opus 5.5 o raciocínio está sempre
@@ -167,7 +188,7 @@ Deno.serve(async (req: Request) => {
           content: `O que já se sabe com certeza (da estrutura de pastas):\n${contexto}\n\nDocumentos:\n${corpo}`,
         },
       ],
-    } satisfies NoFormatoDoOpus<Anthropic.MessageCreateParamsNonStreaming>)
+    } satisfies NoFormatoDoOpus<Anthropic.MessageCreateParamsNonStreaming>, { signal: sinalAteOTeto(inicio) })
 
     const lida = lerSaidaEstruturada(r)
     if (!lida.ok) {
@@ -189,6 +210,14 @@ Deno.serve(async (req: Request) => {
       lidos: documentos.map((d) => d.nome ?? '?'),
     })
   } catch (err) {
+    // O SDK interrompido pelo sinal lança APIUserAbortError, e não o
+    // TimeoutError do fetch — por isso as duas conferências.
+    if (estourouOTempo(err) || err instanceof Anthropic.APIUserAbortError) {
+      return jsonResponse(
+        { error: 'A leitura da IA passou do tempo de uma chamada e foi interrompida. Tente com menos documentos.' },
+        504,
+      )
+    }
     return jsonResponse({ error: (err as Error).message }, 500)
   }
 })
