@@ -458,9 +458,11 @@ export function CaixaDeAnotacao({
     <div className="relative" onDragEnter={sobre} onDragOver={sobre} onDragLeave={saiu} onDrop={soltou}>
       {/* O NOME DO CAMPO, O MESMO DAS JANELAS QUE MOVEM ("Anotação no card"),
           e o que ele NÃO faz (revisão de UX de 20/10/2026): quem chegava novo
-          não sabia se anotar mudava o card de coluna. */}
+          não sabia se anotar mudava o card de coluna.
+          NUMA LINHA SÓ (varredura de 23/10/2026): na caixa de 360px a frase
+          quebrava em duas, e o "vai para o Kommo" já está no botão que a abriu. */}
       <label htmlFor={idDoTexto} className="mb-s1.5 block text-sm font-semibold text-texto">
-        Anotação no card <span className="font-normal text-texto-3">— vai para o Kommo, sem mover o card</span>
+        Anotação no card <span className="font-normal text-texto-3">— não move o card</span>
       </label>
       {/* O TEXTO E, À DIREITA, A COLUNA DAS IMAGENS. A coluna não dá altura à
           linha (fica `absolute` numa faixa de 64px): quem manda é o texto, que
@@ -527,11 +529,12 @@ export function CaixaDeAnotacao({
             {/* AS TECLAS SÓ ONDE HÁ TECLADO E MOUSE (revisão visual de
                 07/10/2026): no celular não há Ctrl nem arrastar, e a dica era
                 ruído logo acima do Enviar. */}
+            {/* MAIS CURTA (23/10/2026): eram duas linhas de dica sobre o
+                rodapé; "cole" já diz o Ctrl+V a quem tem teclado. */}
             <span className="[@media(pointer:coarse)]:hidden">
-              <Tecla>Ctrl</Tecla> + <Tecla>Enter</Tecla> envia · arraste ou cole (Ctrl+V) arquivos aqui,{' '}
+              <Tecla>Ctrl</Tecla> + <Tecla>Enter</Tecla> envia · cole ou arraste arquivos (até 100 MB)
             </span>
-            <span className="hidden [@media(pointer:coarse)]:inline">Arquivos </span>
-            até 100 MB cada
+            <span className="hidden [@media(pointer:coarse)]:inline">Arquivos até 100 MB cada</span>
           </>
         )}
       </p>

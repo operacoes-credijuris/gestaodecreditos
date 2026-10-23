@@ -2986,7 +2986,12 @@ export function PainelCertidoes({
           <div
             className={cn(
               'mt-4 rounded-campo border px-3 py-2',
-              residenciaLevantada ? 'border-borda bg-superficie-2' : 'border-aviso-borda bg-aviso-fundo',
+              // NO ESCURO, O ÂMBAR SÓ NO CONTORNO (auditoria visual, E7, como a
+              // linha das lacunas): o `aviso-fundo` de lá era uma faixa marrom
+              // na largura da janela (varredura de 23/10/2026).
+              residenciaLevantada
+                ? 'border-borda bg-superficie-2'
+                : 'border-aviso-borda bg-aviso-fundo dark:bg-superficie-2',
             )}
           >
             <div className="flex flex-wrap items-center justify-between gap-x-3">

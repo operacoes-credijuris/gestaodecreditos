@@ -92,6 +92,14 @@ describe('as janelas com a gravação no ar', () => {
     expect(fonte).toContain("onClick={() => void fechar()} disabled={seguindo}")
   })
 
+  it('a análise de RPV que não abriu oferece ler de novo, só sem análise na tela e sem leitura no ar', () => {
+    const fonte = ler('../../components/AnaliseRpvModal.tsx')
+    expect(fonte).toContain('}, [open, lerArquivos, notasKommo, dadosDoCard, leitura])')
+    expect(fonte).toContain('{!atual && !passo && (')
+    const i = fonte.indexOf('function lerDeNovo()')
+    expect(fonte.slice(i, fonte.indexOf('}', i))).toContain('rodou.current = false')
+  })
+
   it('reler o cadastro do banco apaga o "Preenchi do processo" do formulário anterior', () => {
     const fonte = ler('../../components/PainelCertidoes.tsx')
     const i = fonte.indexOf('const recarregar = useCallback(')

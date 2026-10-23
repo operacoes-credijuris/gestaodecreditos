@@ -1367,6 +1367,20 @@ export function AnaliseRpvModal({
   // quer: a preliminar não é rascunho salvo, é leitura fresca.
   const rodou = useRef(false)
   /**
+   * QUANTAS VEZES A LEITURA FOI PEDIDA NESTA JANELA (23/10/2026): o "Tentar de
+   * novo" do erro de abertura a refaz sem fechar e reabrir — que era a única
+   * saída, e que a pessoa precisava adivinhar. É o mesmo clique pago do
+   * "Executar análise", e só existe enquanto não há análise na tela.
+   */
+  const [leitura, setLeitura] = useState(0)
+  function lerDeNovo() {
+    rodou.current = false
+    setErro(null)
+    setFases([])
+    setPasso('Lendo os anexos do card…')
+    setLeitura((n) => n + 1)
+  }
+  /**
    * A JANELA AINDA ESTÁ ABERTA?
    *
    * A abertura é uma cadeia longa: renderizar as páginas, subir as imagens,
@@ -1812,7 +1826,7 @@ export function AnaliseRpvModal({
         if (!soltou) setPasso(null)
       }
     })()
-  }, [open, lerArquivos, notasKommo, dadosDoCard])
+  }, [open, lerArquivos, notasKommo, dadosDoCard, leitura])
 
   useEffect(() => {
     fimDoChat.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -2469,7 +2483,18 @@ export function AnaliseRpvModal({
       {erro && (
         <CaixaDeAviso tom="perigo" role="alert" className="mb-4">
           <div className="flex flex-wrap items-center gap-3">
-            <p className="m-0 min-w-0 flex-1 basis-64">{erro}</p>
+            {/* SEM ANÁLISE NA TELA, O ERRO É DA LEITURA (23/10/2026): dito como
+                tal, com a saída ao lado — antes vinha só a mensagem crua da
+                função, e a janela ficava sem nada a fazer além de fechar. */}
+            <p className="m-0 min-w-0 flex-1 basis-64">
+              {!atual && <b className="font-semibold">A leitura do crédito não terminou. </b>}
+              {erro}
+            </p>
+            {!atual && !passo && (
+              <Button size="sm" variant="secondary" className="ml-auto" onClick={lerDeNovo}>
+                Tentar de novo
+              </Button>
+            )}
             {/* A SAÍDA, junto do erro que a pediu. O mínimo de R$ 20 mil é regra
                 da casa, e quem analisa enxerga o que ela não enxerga: carteira do
                 mesmo cedente, crédito que fecha junto com outro, prazo curto que
