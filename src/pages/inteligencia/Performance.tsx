@@ -20,7 +20,7 @@ import { AlertTriangle } from 'lucide-react'
 import { Segmented } from '@/components/ui/Segmented'
 import { Table, THead, TH, TBody, TR, TD, EmptyState } from '@/components/ui/Table'
 import { cn } from '@/lib/cn'
-import { formatDate, formatCNJ } from '@/lib/format'
+import { contar, formatDate, formatCNJ } from '@/lib/format'
 import { distribuicaoDoRetorno } from '@/lib/graficosDoQuadro'
 import {
   usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Ressalva, Painel, Metricas,
@@ -50,6 +50,12 @@ const DIZ = {
   metadeCentralPrazo:
     'Descarta o quarto mais rápido e o quarto mais demorado. Metade das operações levou ' +
     'um prazo dentro desta faixa.',
+  // A DICA DO PRAZO É DO PRAZO (23/10/2026): a linha "Mais rápida – mais
+  // demorada" usava a da rentabilidade, que manda procurar as duas na primeira
+  // e na última linha da tabela — ordenada por rentabilidade, não por prazo.
+  maisRapidaDemorada:
+    'São duas operações reais da carteira, não estimativas: a que foi paga mais depressa ' +
+    'depois da compra e a que mais demorou. A coluna Prazo da tabela abaixo mostra o de cada uma.',
   extremoSubconjunto:
     'Não são operações a mais: já estão contadas no total. São as que ficaram fora do ' +
     'intervalo interquartil ampliado da taxa ANUALIZADA — quase sempre por prazo muito ' +
@@ -108,11 +114,12 @@ export default function Performance() {
     <div className="space-y-s4">
       <CabecalhoDaAba
         titulo="Performance"
+        // A FRASE DE APOIO MAIS CURTA (23/10/2026): eram cinco linhas no celular
+        // antes do primeiro número. O critério por extenso (status, as duas
+        // datas, capital e recebido) continua no vazio da lista, lá embaixo.
         apoio={
-          `${carteira.n} operações encerradas — status encerrado, com data de aquisição, ` +
-          'data de liquidação, capital investido e valor recebido preenchidos. As de ' +
-          'realização parcial (aguardando complementar) ficam de fora: o resultado final ' +
-          'delas ainda não é conhecido.'
+          `${contar(carteira.n, 'operação encerrada', 'operações encerradas')}, com datas, capital e valor ` +
+          'recebido preenchidos. As que aguardam complementar ficam de fora: o resultado delas ainda não é conhecido.'
         }
       />
       <AvisoParametros />
@@ -181,7 +188,7 @@ export default function Performance() {
           <LinhaMetrica
             rotulo="Mais rápida – mais demorada"
             valor={`${dias(carteira.prazo.minimo)} – ${dias(carteira.prazo.maximo)}`}
-            explicacao={DIZ.piorMelhor}
+            explicacao={DIZ.maisRapidaDemorada}
           />
         </Metrica>
       </div>

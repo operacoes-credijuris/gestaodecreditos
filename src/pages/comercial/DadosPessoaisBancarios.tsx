@@ -384,9 +384,16 @@ export default function DadosPessoaisBancarios() {
     setBuscandoCnpj(false)
     setRetornoCnpj(null)
     if (!municipios) {
-      const m = await import('@/lib/municipios')
-      setMunicipios(m.MUNICIPIOS_POR_UF)
-      setUfs(m.UFS)
+      // A LISTA QUE NÃO CHEGA NÃO VIRA ERRO SOLTO (23/10/2026): o import que
+      // falha (rede, versão nova publicada) rejeitava sem ninguém ouvir, e a
+      // ficha abria com a UF e a cidade vazias, sem dizer por quê.
+      try {
+        const m = await import('@/lib/municipios')
+        setMunicipios(m.MUNICIPIOS_POR_UF)
+        setUfs(m.UFS)
+      } catch {
+        toast.error('Não foi possível carregar a lista de cidades. Recarregue a página para escolher UF e cidade.')
+      }
     }
   }
 
@@ -460,6 +467,10 @@ export default function DadosPessoaisBancarios() {
       } else if (!e.logradouro) {
         setAvisoCep('Este CEP não tem logradouro. Preencha a rua à mão.')
       }
+    } catch {
+      // O PEDAÇO DA BUSCA QUE NÃO CHEGA (rede, versão nova) diz que não buscou,
+      // em vez de rejeitar sem ninguém ouvir (23/10/2026).
+      if (valendo()) setAvisoCep('Não foi possível buscar o CEP agora. Preencha à mão.')
     } finally {
       // Só a busca que vale desliga o "Buscando…": a atrasada desligaria o da nova.
       if (meuId === reqCepRef.current) setBuscandoCep(false)
@@ -524,6 +535,9 @@ export default function DadosPessoaisBancarios() {
       // a função de atualização não pode ter efeito (o StrictMode a roda duas vezes).
       const { aviso } = ufCidadeDoCnpj(form, e, m)
       if (aviso) toast.info(aviso)
+    } catch {
+      // Mesma regra da busca por CEP: o que não deu para buscar, se diz.
+      if (valendo()) setRetornoCnpj('Não foi possível consultar a Receita agora. Preencha o endereço à mão.')
     } finally {
       if (meuId === reqCnpjRef.current) setBuscandoCnpj(false)
     }
@@ -578,10 +592,15 @@ export default function DadosPessoaisBancarios() {
       anterior: dados.data?.get(chavePessoa(tipo, chave)),
       paraContrato: tipo === 'investidor' ? paraContrato : undefined,
     })
+    // A FICHA QUE FOI SALVA, e só ela, fecha no fim (23/10/2026): a gravação
+    // leva um instante, e quem fechava esta janela e abria a de outra pessoa
+    // nesse meio-tempo via a NOVA fechar sozinha quando a primeira terminava —
+    // com o que já tivesse digitado nela.
+    const idDaJanela = editando.id
     try {
       await salvar.mutateAsync(ficha)
       toast.success(editando.novo ? `${visao.rotulo} cadastrado.` : 'Dados salvos.')
-      setEditando(null)
+      setEditando((atual) => (atual?.id === idDaJanela ? null : atual))
     } catch (e) {
       toast.error((e as Error).message)
     }

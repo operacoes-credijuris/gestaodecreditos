@@ -74,7 +74,10 @@ export function GraficoEvolucao({ pontos }: { pontos: PontoDaEvolucao[] }) {
               interval="preserveStartEnd"
               minTickGap={12}
             />
-            <YAxis tick={EIXO} tickLine={false} axisLine={false} width={64} tickFormatter={brlAbreviado} />
+            {/* 76PX DE EIXO (23/10/2026): com 64, "R$ 650 mil" não cabia e o
+                Recharts o quebrava em duas linhas ("R$ 650" / "mil"), a única
+                marca do eixo em dois andares. */}
+            <YAxis tick={EIXO} tickLine={false} axisLine={false} width={76} tickFormatter={brlAbreviado} />
             <Tooltip
               cursor={{ stroke: CHART.label, strokeWidth: 1 }}
               content={(p) => (

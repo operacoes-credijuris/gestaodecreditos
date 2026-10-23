@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { nomesParecidos, normalizarBusca, normalizarNome, onlyDigits } from '@/lib/format'
@@ -45,8 +45,29 @@ function casa(opcao: OpcaoCombo, consulta: string): boolean {
     })
 }
 
+/** O `id` de cada opção da lista, para o `aria-activedescendant` do campo. */
+const idDaOpcao = (idDaLista: string, i: number) => `${idDaLista}-op-${i}`
+
+/**
+ * OS ATRIBUTOS DE COMBOBOX DO CAMPO (23/10/2026). Sem eles o leitor de tela
+ * anunciava só "edição": não dizia que havia uma lista aberta, e a opção
+ * destacada pelas setas mudava em silêncio — quem não enxerga a tela escolhia
+ * às cegas. O foco continua no campo; a opção destacada é apontada por
+ * `aria-activedescendant`, como na busca geral (Ctrl+K).
+ */
+function atributosDoCampo(idDaLista: string, aberto: boolean, destaque: number) {
+  return {
+    role: 'combobox',
+    'aria-autocomplete': 'list' as const,
+    'aria-expanded': aberto,
+    'aria-controls': aberto ? idDaLista : undefined,
+    'aria-activedescendant': aberto && destaque >= 0 ? idDaOpcao(idDaLista, destaque) : undefined,
+  }
+}
+
 /** Lista suspensa compartilhada pelos dois comboboxes. */
 function Lista({
+  id,
   opcoes,
   destaque,
   onDestacar,
@@ -54,6 +75,8 @@ function Lista({
   vazio,
   truncada,
 }: {
+  /** O `id` da lista: o campo aponta para ela (`aria-controls`). */
+  id: string
   opcoes: OpcaoCombo[]
   destaque: number
   onDestacar: (i: number) => void
@@ -74,7 +97,11 @@ function Lista({
 
   if (opcoes.length === 0) {
     return (
-      <div className="absolute z-20 mt-1 w-full rounded-campo border border-borda bg-superficie px-4 py-2 text-xs text-texto-2 shadow-nivel-2">
+      <div
+        id={id}
+        role="status"
+        className="absolute z-20 mt-1 w-full rounded-campo border border-borda bg-superficie px-4 py-2 text-xs text-texto-2 shadow-nivel-2"
+      >
         {vazio}
       </div>
     )
@@ -82,12 +109,27 @@ function Lista({
   return (
     <ul
       ref={ulRef}
+      id={id}
+      role="listbox"
+      // A LISTA TAMBÉM FICA FORA DO TAB: caixa que rola (`overflow-auto`) é
+      // focável pelo teclado no Chrome, e era nela que o Tab caía antes de ela
+      // sumir — o mesmo foco perdido das opções, logo abaixo.
+      tabIndex={-1}
       className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-campo border border-borda bg-superficie py-1 shadow-nivel-2 scrollbar-thin"
     >
       {opcoes.map((o, i) => (
-        <li key={o.id}>
+        <li key={o.id} role="presentation">
           <button
             type="button"
+            id={idDaOpcao(id, i)}
+            role="option"
+            aria-selected={i === destaque}
+            // FORA DA ORDEM DO TAB (23/10/2026): com a lista aberta, o Tab saía do
+            // campo para a PRIMEIRA OPÇÃO — que o blur do campo desmontava no
+            // mesmo instante. O foco caía no <body>, e dentro de uma janela o
+            // próximo Tab recomeçava do primeiro campo. As opções se escolhem
+            // pelas setas (o foco fica no campo) ou pelo mouse.
+            tabIndex={-1}
             // onMouseDown e não onClick: o clique precisa registrar antes do
             // blur do input, senão a lista fecha e a escolha se perde.
             onMouseDown={(e) => {
@@ -120,7 +162,7 @@ function Lista({
           existe: sem busca, a lista de MG mostrava 50 de 853 e terminava em
           "Arinos", sem Belo Horizonte e sem dizer que havia mais. */}
       {truncada && (
-        <li className="border-t border-borda px-4 py-1.5 text-xs text-texto-3">
+        <li role="presentation" className="border-t border-borda px-4 py-1.5 text-xs text-texto-3">
           Mostrando os {opcoes.length} primeiros. Digite para refinar.
         </li>
       )}
@@ -250,6 +292,7 @@ export function Combobox({
     (i) => filtradas[i] && escolher(filtradas[i]),
   )
   const boxRef = useCliqueFora(aberto, () => setAberto(false))
+  const idDaLista = useId()
 
   // Com opção escolhida o input mostra o título dela; ao focar, esvazia para a
   // pessoa digitar outra busca sem precisar apagar o texto antes.
@@ -258,6 +301,7 @@ export function Combobox({
   return (
     <div ref={boxRef} className="relative">
       <Input
+        {...atributosDoCampo(idDaLista, aberto, destaque)}
         value={textoInput}
         autoComplete="off"
         placeholder={placeholder}
@@ -288,6 +332,7 @@ export function Combobox({
       )}
       {aberto && (
         <Lista
+          id={idDaLista}
           opcoes={filtradas}
           destaque={destaque}
           onDestacar={setDestaque}
@@ -392,10 +437,14 @@ export function ComboboxTexto({
     false,
   )
   const boxRef = useCliqueFora(aberto, () => setAberto(false))
+  const idDaLista = useId()
+  // A lista só aparece com algo a mostrar (ver o fim do componente).
+  const listaAVista = aberto && (filtradas.length > 0 || !!consulta)
 
   return (
     <div ref={boxRef} className="relative">
       <Input
+        {...atributosDoCampo(idDaLista, listaAVista, destaque)}
         value={valor}
         autoComplete="off"
         placeholder={placeholder}
@@ -441,8 +490,9 @@ export function ComboboxTexto({
       {/* Sem nada digitado e sem nada a mostrar, não abre: no primeiro
           originador da plataforma a lista está vazia, e um balão dizendo
           "nenhum parecido" ao só clicar no campo é ruído. */}
-      {aberto && (filtradas.length > 0 || consulta) && (
+      {listaAVista && (
         <Lista
+          id={idDaLista}
           opcoes={filtradas}
           destaque={destaque}
           onDestacar={setDestaque}
@@ -503,6 +553,7 @@ export function MultiCombobox({
     (i) => filtradas[i] && adicionar(filtradas[i]),
   )
   const boxRef = useCliqueFora(aberto, () => setAberto(false))
+  const idDaLista = useId()
 
   return (
     <div ref={boxRef} className="relative">
@@ -527,6 +578,7 @@ export function MultiCombobox({
         </div>
       )}
       <Input
+        {...atributosDoCampo(idDaLista, aberto, destaque)}
         value={busca}
         autoComplete="off"
         placeholder={placeholder}
@@ -549,6 +601,7 @@ export function MultiCombobox({
       />
       {aberto && (
         <Lista
+          id={idDaLista}
           opcoes={filtradas}
           destaque={destaque}
           onDestacar={setDestaque}

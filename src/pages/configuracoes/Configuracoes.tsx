@@ -3,7 +3,7 @@ import { usePreferencia, umaDas } from '@/lib/preferencias'
 import { Pencil } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { usePistaLateral } from '@/lib/rolagemLateral'
-import { formatBRL } from '@/lib/format'
+import { contar, formatBRL } from '@/lib/format'
 import type { ConfigKommo } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -138,7 +138,9 @@ export default function Configuracoes() {
       // eles vieram (`configurado && c`), e o menu segue a mesma regra.
       catalogo.data?.creditos,
       catalogo.error,
-      (c) => textoDoPlanoBullai(c.restantes),
+      // O PLURAL CERTO, como no cabeçalho da seção ("180 consultas"), e não o
+      // "consulta(s)" (revisão UX de 09/10/2026, `contar`). Ilimitado segue igual.
+      (c) => (c.restantes == null ? textoDoPlanoBullai(null) : contar(c.restantes, 'consulta', 'consultas')),
       'Plano da BullAI',
     ),
   }

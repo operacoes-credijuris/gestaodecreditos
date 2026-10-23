@@ -31,6 +31,7 @@ import {
   textoDaConversa,
 } from '@/lib/conversaDoAssistente'
 import { formatDateTime } from '@/lib/format'
+import { copiarTexto } from '@/lib/copiar'
 import { haDialogoAberto } from '@/lib/dialogo'
 import { pecaSobDemanda } from '@/lib/telaSobDemanda'
 import {
@@ -590,10 +591,12 @@ export function Assistente({
    * depois de já ter mudado de janela.
    */
   async function abrirWhatsapp(contato: ContatoSugerido) {
-    try {
-      await navigator.clipboard.writeText(contato.mensagem)
+    // PELO COPIAR DA PLATAFORMA (lib/copiar.ts, 23/10/2026), que cai no jeito
+    // antigo quando o navegador recusa a área de transferência moderna — com o
+    // `navigator.clipboard` direto, ali a mensagem simplesmente não ia.
+    if (await copiarTexto(contato.mensagem)) {
       toast.success('Mensagem copiada — cole no WhatsApp que abriu.')
-    } catch {
+    } else {
       toast.error('Não consegui copiar a mensagem automaticamente; copie manualmente.')
     }
     const digitos = contato.whatsapp.replace(/\D/g, '')

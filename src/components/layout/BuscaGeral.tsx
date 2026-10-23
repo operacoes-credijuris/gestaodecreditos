@@ -244,7 +244,11 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') {
                 e.preventDefault()
-                setSel(Math.min(resultados.length - 1, atual + 1))
+                // NUNCA ABAIXO DE ZERO (23/10/2026): com a lista ainda vazia (a
+                // consulta no ar), a seta para baixo punha o destaque em -1, e
+                // quando os resultados chegavam nenhum ficava destacado — o
+                // Enter não abria nada até a pessoa apertar outra seta.
+                setSel(Math.max(0, Math.min(resultados.length - 1, atual + 1)))
               } else if (e.key === 'ArrowUp') {
                 e.preventDefault()
                 setSel(Math.max(0, atual - 1))
@@ -345,7 +349,10 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
           <span className="inline-flex items-center gap-s1">
             <Tecla>Ctrl</Tecla> <Tecla>Enter</Tecla> aba nova
           </span>
-          <span className="hidden sm:inline">créditos, cards, contatos e telas da plataforma</span>
+          {/* À DIREITA, NA MESMA LINHA DAS TECLAS (23/10/2026): com "da
+              plataforma" o texto não cabia nos 620px e descia sozinho para uma
+              segunda linha do rodapé. */}
+          <span className="ml-auto hidden sm:inline">créditos, cards, contatos e telas</span>
         </div>
       </div>
     </div>,
