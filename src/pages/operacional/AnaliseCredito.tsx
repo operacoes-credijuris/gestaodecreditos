@@ -70,6 +70,7 @@ import {
   MessageSquarePlus,
   Paperclip,
   Receipt,
+  Plus,
   Scale,
   ScrollText,
   Tag,
@@ -1896,7 +1897,17 @@ const ATRASO_DE_FECHAR = 150
  * - O FOCO DO TECLADO abre, e sair dele fecha (a não ser que ela esteja presa);
  * - Esc e o clique fora fecham (`useFecharFora`): não há nada digitado a perder.
  */
-function BotaoVerPropostas({ lead }: { lead: KommoLead }) {
+function BotaoVerPropostas({
+  lead,
+  onCotar,
+  ocupado = false,
+}: {
+  lead: KommoLead
+  /** O "+" ao lado: registrar ou alterar a cotação de um fundo, sem etiqueta. */
+  onCotar?: (fundo: string) => void
+  /** Uma cotação ou etiqueta deste card em gravação: o "+" espera. */
+  ocupado?: boolean
+}) {
   const propostas = propostasCadastradas(lead)
   const [aberto, setAberto] = useState(false)
   /** Aberta pelo clique, pelo toque ou pelo Enter: sair com o mouse não fecha. */
@@ -1922,55 +1933,130 @@ function BotaoVerPropostas({ lead }: { lead: KommoLead }) {
   const ajuste = useCaixaNaTela(flutuante, aberto)
   useEffect(() => limpar, [])
 
-  if (propostas.length === 0) return null
+  // SEM NENHUMA PROPOSTA, só o "+" (quando há): é por ele que a primeira entra.
+  if (propostas.length === 0) {
+    return onCotar ? <BotaoCotarProposta lead={lead} onCotar={onCotar} ocupado={ocupado} vazio /> : null
+  }
   const rotulo = `Ver propostas cadastradas (${propostas.length})`
   return (
-    <div
-      className="relative"
-      ref={caixa}
-      onPointerEnter={(e) => {
-        if (e.pointerType === 'mouse') depois(ATRASO_DE_ABRIR, () => setAberto(true))
-      }}
-      onPointerLeave={(e) => {
-        if (e.pointerType === 'mouse' && !presa.current) depois(ATRASO_DE_FECHAR, fechar)
-      }}
-    >
+    // A PÍLULA E O "+" JUNTOS: o "+" é o que muda o que a pílula mostra.
+    <div className="flex items-center gap-s1">
+      <div
+        className="relative"
+        ref={caixa}
+        onPointerEnter={(e) => {
+          if (e.pointerType === 'mouse') depois(ATRASO_DE_ABRIR, () => setAberto(true))
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType === 'mouse' && !presa.current) depois(ATRASO_DE_FECHAR, fechar)
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            limpar()
+            if (aberto && presa.current) fechar()
+            else {
+              presa.current = true
+              setAberto(true)
+            }
+          }}
+          onFocus={(e) => {
+            // SÓ O FOCO DO TECLADO: o clique também foca, e quem decide ali é o clique.
+            if (e.currentTarget.matches(':focus-visible')) {
+              limpar()
+              setAberto(true)
+            }
+          }}
+          onBlur={(e) => {
+            if (!presa.current && !caixa.current?.contains(e.relatedTarget as Node | null)) fechar()
+          }}
+          aria-expanded={aberto}
+          aria-controls={aberto ? id : undefined}
+          aria-label={rotulo}
+          title={rotulo}
+          // NA COR DA MARCA, EM PÍLULA (07/10/2026, pedido do dono): em cinza ele
+          // sumia no meio do texto cinza da linha de metadados.
+          className={cn(
+            LINK_BTN,
+            'ml-0 rounded-full border border-marca-viva/45 bg-marca-leve px-s2.5 text-marca-texto hover:border-marca-viva',
+            aberto && 'border-marca-viva ring-[3px] ring-marca-viva/15',
+          )}
+        >
+          <Scale className={IC} aria-hidden />
+          <span className="whitespace-nowrap tabular-nums">{rotuloDasPropostas(propostas.length)}</span>
+        </button>
+
+        {aberto && (
+          <div
+            ref={flutuante}
+            id={id}
+            role="dialog"
+            aria-modal="false"
+            aria-labelledby={`${id}-titulo`}
+            className={cn(CAIXA_FLUTUANTE, posicaoDaCaixa(ajuste), 'left-0 w-[360px] max-w-[calc(100vw-24px)]')}
+            style={deslocamentoDaCaixa(ajuste)}
+          >
+            <ListaDeCotacoes titulo="Propostas cadastradas" tituloId={`${id}-titulo`} linhas={propostas} />
+            <p className="px-s3 pb-s1.5 pt-s1 text-xs text-texto-3">
+              Dos campos do card no Kommo (aba {NOME_DO_GRUPO_DAS_COTACOES}).
+            </p>
+          </div>
+        )}
+      </div>
+      {onCotar && <BotaoCotarProposta lead={lead} onCotar={onCotar} ocupado={ocupado} />}
+    </div>
+  )
+}
+
+/**
+ * O "+" DAS PROPOSTAS (23/10/2026, pedido do dono): na Produção de proposta e
+ * na Negociação chega proposta nova depois que o card saiu da precificação.
+ * Abre a lista de TODOS os fundos (a mesma da "Escolher proposta"), e o fundo
+ * clicado abre a janela da cotação — que grava só o campo do card, SEM
+ * ETIQUETA: as etiquetas ficam na precificação.
+ */
+function BotaoCotarProposta({
+  lead,
+  onCotar,
+  ocupado,
+  vazio = false,
+}: {
+  lead: KommoLead
+  onCotar: (fundo: string) => void
+  ocupado: boolean
+  /** O card ainda não tem proposta: o botão diz "Proposta", e não só "+". */
+  vazio?: boolean
+}) {
+  const [aberto, setAberto] = useState(false)
+  const caixa = useRef<HTMLDivElement>(null)
+  const flutuante = useRef<HTMLDivElement>(null)
+  const id = useId()
+  const fechar = useCallback(() => setAberto(false), [])
+  useFecharFora(aberto, fechar, caixa)
+  const ajuste = useCaixaNaTela(flutuante, aberto)
+  const rotulo = vazio ? 'Adicionar uma proposta' : 'Adicionar ou alterar uma proposta'
+  return (
+    <div className="relative" ref={caixa}>
       <button
         type="button"
-        onClick={() => {
-          limpar()
-          if (aberto && presa.current) fechar()
-          else {
-            presa.current = true
-            setAberto(true)
-          }
-        }}
-        onFocus={(e) => {
-          // SÓ O FOCO DO TECLADO: o clique também foca, e quem decide ali é o clique.
-          if (e.currentTarget.matches(':focus-visible')) {
-            limpar()
-            setAberto(true)
-          }
-        }}
-        onBlur={(e) => {
-          if (!presa.current && !caixa.current?.contains(e.relatedTarget as Node | null)) fechar()
-        }}
+        onClick={() => setAberto((v) => !v)}
+        disabled={ocupado}
         aria-expanded={aberto}
         aria-controls={aberto ? id : undefined}
         aria-label={rotulo}
         title={rotulo}
-        // NA COR DA MARCA, EM PÍLULA (07/10/2026, pedido do dono): em cinza ele
-        // sumia no meio do texto cinza da linha de metadados.
+        // NA COR DA PÍLULA DAS PROPOSTAS, para se ler como parte dela.
         className={cn(
           LINK_BTN,
-          'ml-0 rounded-full border border-marca-viva/45 bg-marca-leve px-s2.5 text-marca-texto hover:border-marca-viva',
+          'ml-0 rounded-full border border-marca-viva/45 bg-marca-leve text-marca-texto hover:border-marca-viva disabled:opacity-50',
+          vazio ? 'px-s2.5' : 'w-[28px] justify-center px-0',
           aberto && 'border-marca-viva ring-[3px] ring-marca-viva/15',
         )}
       >
-        <Scale className={IC} aria-hidden />
-        <span className="whitespace-nowrap tabular-nums">{rotuloDasPropostas(propostas.length)}</span>
+        <Plus className={IC} aria-hidden />
+        {vazio && <span className="whitespace-nowrap">Proposta</span>}
       </button>
-
       {aberto && (
         <div
           ref={flutuante}
@@ -1981,9 +2067,17 @@ function BotaoVerPropostas({ lead }: { lead: KommoLead }) {
           className={cn(CAIXA_FLUTUANTE, posicaoDaCaixa(ajuste), 'left-0 w-[360px] max-w-[calc(100vw-24px)]')}
           style={deslocamentoDaCaixa(ajuste)}
         >
-          <ListaDeCotacoes titulo="Propostas cadastradas" tituloId={`${id}-titulo`} linhas={propostas} />
+          <ListaDeCotacoes
+            titulo="Adicionar ou alterar"
+            tituloId={`${id}-titulo`}
+            linhas={linhasDasCotacoes(lead)}
+            onEscolher={(fundo) => {
+              setAberto(false)
+              onCotar(fundo)
+            }}
+          />
           <p className="px-s3 pb-s1.5 pt-s1 text-xs text-texto-3">
-            Dos campos do card no Kommo (aba {NOME_DO_GRUPO_DAS_COTACOES}).
+            Grava no campo do fundo no Kommo. As etiquetas não mudam.
           </p>
         </div>
       )}
@@ -3089,6 +3183,7 @@ function CardCredito({
   onEscolherProposta,
   onSemProposta,
   verPropostas = false,
+  onCotarProposta,
   anexarEMover,
   envioAosFundos,
   onCertidoes,
@@ -3185,6 +3280,11 @@ function CardCredito({
    * funis (`mostraAsPropostas`).
    */
   verPropostas?: boolean
+  /**
+   * O "+" ao lado das propostas (23/10/2026): registra ou altera a cotação de
+   * um fundo sem mexer nas etiquetas (ver `cotarSemEtiqueta`).
+   */
+  onCotarProposta?: (l: KommoLead, fundo: string) => void
   /** O botão de anexar e mover, onde a aba o declara (o Memorando do Externo). */
   anexarEMover?: {
     rotulo: string
@@ -3705,7 +3805,13 @@ function CardCredito({
           {/* AS PROPOSTAS CADASTRADAS, só para ver (Produção de proposta e
               Negociação): ao lado do "Abrir no Kommo", porque é o que se ia ver
               lá. Sem nenhuma, nada aparece. */}
-          {verPropostas && <BotaoVerPropostas lead={lead} />}
+          {verPropostas && (
+            <BotaoVerPropostas
+              lead={lead}
+              onCotar={onCotarProposta ? (fundo) => onCotarProposta(lead, fundo) : undefined}
+              ocupado={etiquetaEmVoo !== null}
+            />
+          )}
           <DatasDoCard lead={lead} diasAoLado={dias !== null && Boolean(quandoNaEtapa)} />
         </div>
       </div>
@@ -5553,7 +5659,13 @@ export default function AnaliseCredito() {
    * A JANELA DA COTAÇÃO aberta, ou null: o card e a etiqueta "Cotado ‹fundo›"
    * que entra quando ela for enviada.
    */
-  const [cotando, setCotando] = useState<{ lead: KommoLead; etiqueta: string; fundo: string } | null>(null)
+  const [cotando, setCotando] = useState<{
+    lead: KommoLead
+    etiqueta: string
+    fundo: string
+    /** Só a cotação, sem etiqueta: a Produção de proposta e a Negociação (ver `cotarSemEtiqueta`). */
+    semEtiqueta?: boolean
+  } | null>(null)
   /**
    * A TRAVA DA COTAÇÃO, num ref: o estado `etiquetaEmVoo` só muda no próximo
    * render, e um duplo clique em Enviar cabe antes dele — gravaria duas vezes e
@@ -5566,6 +5678,55 @@ export default function AnaliseCredito() {
     const e = ETIQUETAS_DA_PRECIFICACAO.find((x) => mesmaEtiqueta(x.nome, etiqueta))
     if (!e || e.ato !== 'Cotado') return
     setCotando({ lead, etiqueta: e.nome, fundo: e.destino })
+  }
+
+  /**
+   * O "+" DAS PROPOSTAS (23/10/2026, pedido do dono): na Produção de proposta e
+   * na Negociação chega proposta nova depois que o card saiu da precificação.
+   * Abre a mesma janela da cotação, mas SEM ETIQUETA — elas ficam só na
+   * precificação.
+   */
+  function cotarSemEtiqueta(lead: KommoLead, fundo: string) {
+    const e = ETIQUETAS_DA_PRECIFICACAO.find((x) => x.ato === 'Cotado' && x.destino === fundo)
+    if (!e) return
+    setCotando({ lead, etiqueta: e.nome, fundo, semEtiqueta: true })
+  }
+
+  /**
+   * GRAVA SÓ A COTAÇÃO (`acao: 'cotar'` na kommo-etiquetar): o campo do fundo
+   * no card e a nota de quem fez; as etiquetas não mudam. LANÇA com a mensagem
+   * quando falha — a janela a mostra e fica aberta.
+   */
+  async function gravarSoACotacao(lead: KommoLead, etiqueta: string, fundo: string, cotacao: Cotacao) {
+    const id = lead.kommo_lead_id
+    if (cotacaoEmVoo.current.has(id) || etiquetaEmVoo[id] !== undefined) {
+      throw new Error('Há uma cotação ou etiqueta deste card sendo gravada — espere terminar.')
+    }
+    cotacaoEmVoo.current.add(id)
+    setEtiquetaEmVoo((m) => comecarNoCard(m, id, etiqueta))
+    try {
+      const r = await invokeFunction<{
+        aviso: string | null
+        mensagem?: string
+        cotacao?: { texto: string; campo: { id: number; name: string; type: string } }
+        campos?: ValorDeCampo[] | null
+      }>('kommo-etiquetar', { leadId: id, etiqueta, acao: 'cotar', cotacao })
+      qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+        antes?.map((l) => {
+          if (l.kommo_lead_id !== id) return l
+          const campos =
+            r?.campos ??
+            (r?.cotacao ? comCotacaoGravada(l.raw?.custom_fields_values, r.cotacao.campo, r.cotacao.texto) : null)
+          return campos ? { ...l, raw: { ...(l.raw ?? {}), custom_fields_values: campos } } : l
+        }),
+      )
+      if (r?.aviso) toast.error(r.aviso)
+      else toast.success(r?.mensagem ?? `Cotação ${fundo} gravada no card.`)
+      setCotando(null)
+    } finally {
+      cotacaoEmVoo.current.delete(id)
+      setEtiquetaEmVoo((m) => terminarNoCard(m, id))
+    }
   }
 
   /**
@@ -6689,6 +6850,8 @@ export default function AnaliseCredito() {
                   // AS PROPOSTAS CADASTRADAS, só para ver — a Produção de
                   // proposta e a Negociação dos três funis (`mostraAsPropostas`).
                   verPropostas={mostraAsPropostas(abaAtual?.statusIds)}
+                  // O "+" DAS PROPOSTAS: a cotação sem etiqueta (23/10/2026).
+                  onCotarProposta={mostraAsPropostas(abaAtual?.statusIds) ? cotarSemEtiqueta : undefined}
                   // OS CHECKS DO ENVIO AOS FUNDOS, onde a aba os declara — a Remessa.
                   envioAosFundos={
                     abaAtual?.envioAosFundos
@@ -6822,8 +6985,13 @@ export default function AnaliseCredito() {
           atual={cotacoesDoCard(cotando.lead.raw?.custom_fields_values)[cotando.fundo] ?? null}
           // A BASE DO SPREAD: o valor líquido validado da nota de oportunidade.
           liquido={liquidoValidadoDasNotas(cotando.lead.notas)}
+          semEtiqueta={cotando.semEtiqueta}
           enviando={etiquetaEmVoo[cotando.lead.kommo_lead_id] !== undefined}
-          onEnviar={(c) => enviarCotacao(cotando.lead, cotando.etiqueta, c)}
+          onEnviar={(c) =>
+            cotando.semEtiqueta
+              ? gravarSoACotacao(cotando.lead, cotando.etiqueta, cotando.fundo, c)
+              : enviarCotacao(cotando.lead, cotando.etiqueta, c)
+          }
           onFechar={() => setCotando(null)}
         />
       )}

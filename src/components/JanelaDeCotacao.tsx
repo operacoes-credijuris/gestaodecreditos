@@ -584,6 +584,7 @@ export function JanelaDeCotacao({
   etiqueta,
   atual,
   liquido = null,
+  semEtiqueta = false,
   enviando,
   onEnviar,
   onFechar,
@@ -595,6 +596,12 @@ export function JanelaDeCotacao({
   atual: CotacaoLida | null
   /** O valor líquido validado da nota de oportunidade do card — a base do spread (ou null). */
   liquido?: LiquidoDaNota | null
+  /**
+   * SÓ A COTAÇÃO (23/10/2026): na Produção de proposta e na Negociação a
+   * proposta nova entra no campo do fundo, e nenhuma etiqueta muda — elas são
+   * da precificação.
+   */
+  semEtiqueta?: boolean
   enviando: boolean
   /** Grava; LANÇA com a mensagem quando falha — a janela a mostra e fica aberta. */
   onEnviar: (c: Cotacao) => Promise<void>
@@ -635,11 +642,12 @@ export function JanelaDeCotacao({
       }}
       dirty={edicao.sujo && !enviando}
       size="md"
-      title={etiqueta}
+      title={semEtiqueta ? `Cotação ${fundo}` : etiqueta}
       description={
         <>
           O valor vai para o campo <strong className="font-semibold text-texto">{fundo}</strong> da aba “
-          {NOME_DO_GRUPO_DAS_COTACOES}” do card, e a etiqueta entra junto.
+          {NOME_DO_GRUPO_DAS_COTACOES}” do card
+          {semEtiqueta ? ', e nenhuma etiqueta muda.' : ', e a etiqueta entra junto.'}
         </>
       }
       footer={

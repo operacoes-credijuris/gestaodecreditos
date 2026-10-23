@@ -81,6 +81,7 @@ import {
   datasDasEtiquetas,
 } from '../_shared/etiquetasDoFundo.ts'
 import { trilhaDoPipeline } from '../_shared/trilhasDoPrecatorio.ts'
+import { FUNIL_RPV } from '../_shared/autosParaOKommo.ts'
 import {
   type CampoDoKommo,
   campoDoFundo,
@@ -155,6 +156,111 @@ async function camposDaConta(base: string, headers: Record<string, string>, forc
   return mapaDosCampos
 }
 
+/**
+ * SÓ A COTAÇÃO, SEM ETIQUETA (`acao: 'cotar'`, 23/10/2026, pedido do dono): na
+ * Produção de proposta e na Negociação chega proposta nova depois que o card
+ * saiu da precificação, e é preciso registrá-la ou alterá-la — mas as
+ * etiquetas são da precificação, e ali só poluiriam o card. Grava o campo do
+ * fundo, atualiza o espelho e anota quem fez; nenhuma etiqueta é lida, posta ou
+ * tirada.
+ */
+async function gravarSoACotacao(o: {
+  base: string
+  headers: Record<string, string>
+  svc: ReturnType<typeof serviceClient>
+  leadId: number
+  rawAntes: { custom_fields_values?: ValorDeCampo[] | null }
+  campo: CampoDoKommo
+  textoDoCampo: string
+  cotacao: Cotacao
+  fundo: string
+  autor: string
+}): Promise<Response> {
+  const { base, headers, svc, leadId, rawAntes, campo, textoDoCampo, cotacao, fundo, autor } = o
+  // O QUE O CAMPO TINHA decide a palavra da nota: "registrada" ou "alterada".
+  const antes = (rawAntes.custom_fields_values ?? [])
+    .find((c) => Number(c?.field_id) === Number(campo.id))?.values?.[0]?.value
+  const tinha = String(antes ?? '').trim() !== ''
+
+  // O PATCH SÓ COM O CAMPO: os outros campos e as etiquetas ficam como estão.
+  // Idempotente (o mesmo texto no mesmo campo): repetível depois de 429 ou 5xx.
+  const res = await kommoFetch(
+    `${base}/leads/${leadId}`,
+    {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ custom_fields_values: [{ field_id: campo.id, values: [{ value: textoDoCampo }] }] }),
+    },
+    { idempotente: true },
+  )
+  if (!res.ok) {
+    return jsonResponse(
+      {
+        error: `Kommo recusou a cotação (HTTP ${res.status}); nada foi gravado no card.`,
+        detalhe: (await res.text().catch(() => '')).slice(0, 300),
+        gravado: false,
+      },
+      502,
+    )
+  }
+
+  // OS CAMPOS RELIDOS do Kommo vão para o espelho; sem a releitura, só o
+  // campo gravado é trocado no que o espelho tinha.
+  let campos: ValorDeCampo[] | null = null
+  try {
+    const r = await kommoFetch(`${base}/leads/${leadId}`, { headers })
+    if (r.ok) {
+      const lead = (await r.json()) as { custom_fields_values?: ValorDeCampo[] | null }
+      campos = Array.isArray(lead?.custom_fields_values) ? lead.custom_fields_values : []
+    }
+  } catch { /* fica o cálculo local */ }
+  if (!campos) campos = comCotacaoGravada(rawAntes.custom_fields_values, campo, textoDoCampo)
+  let aviso: string | null = null
+  const { error: eEspelho } = await svc
+    .from('kommo_leads')
+    .update({ raw: { ...rawAntes, custom_fields_values: campos } })
+    .eq('kommo_lead_id', leadId)
+  if (eEspelho) {
+    aviso = `A cotação foi gravada no Kommo, mas o espelho local não atualizou (${String(eEspelho.message ?? '').slice(0, 120)}); corrige no próximo sync.`
+  }
+
+  // QUEM FEZ, no card: escrita por API aparece no Kommo sem pessoa nenhuma.
+  const doSpread = spreadDaCotacao(cotacao)
+  const sobre = doSpread
+    ? `, sobre o ${doSpread.sobreLiquido ? 'valor líquido validado' : 'valor da proposta'} de ${formatarReais(doSpread.baseCentavos)}`
+    : ''
+  const texto = `Cotação ${fundo} ${tinha ? 'alterada' : 'registrada'} por ${autor}: ${textoDoCampo}${sobre}.`
+  try {
+    const resNota = await kommoFetch(`${base}/leads/notes`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify([
+        {
+          entity_id: leadId,
+          note_type: 'service_message',
+          params: { service: SERVICO, text: texto },
+          is_need_to_trigger_digital_pipeline: false,
+        },
+      ]),
+    })
+    if (!resNota.ok) {
+      const motivo = `A cotação foi gravada, mas o registro de quem a gravou não subiu (HTTP ${resNota.status}: ${(await resNota.text().catch(() => '')).slice(0, 200)}).`
+      aviso = aviso ? `${aviso} ${motivo}` : motivo
+    }
+  } catch (e) {
+    const motivo = `A cotação foi gravada, mas o registro de quem a gravou não subiu (falha de rede: ${((e as Error)?.message ?? String(e)).slice(0, 120)}).`
+    aviso = aviso ? `${aviso} ${motivo}` : motivo
+  }
+
+  return jsonResponse({
+    ok: true,
+    aviso,
+    mensagem: `Cotação ${fundo} ${tinha ? 'alterada' : 'registrada'}: ${textoDoCampo}.`,
+    cotacao: { texto: textoDoCampo, campo: { id: campo.id, name: campo.name, type: campo.type } },
+    campos,
+  })
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -173,8 +279,8 @@ Deno.serve(async (req: Request) => {
     const leadId = Number(body.leadId)
     const acao = String(body.acao ?? '')
     if (!leadId) return jsonResponse({ error: 'Informe leadId.' }, 400)
-    if (acao !== 'adicionar' && acao !== 'remover') {
-      return jsonResponse({ error: 'A ação precisa ser "adicionar" ou "remover".' }, 400)
+    if (acao !== 'adicionar' && acao !== 'remover' && acao !== 'cotar') {
+      return jsonResponse({ error: 'A ação precisa ser "adicionar", "remover" ou "cotar".' }, 400)
     }
 
     // A LISTA DE PERMISSÃO, e o motivo de ela existir: o Kommo CRIA a etiqueta
@@ -203,8 +309,13 @@ Deno.serve(async (req: Request) => {
     // meia gravação no card.
     let cotacao: Cotacao | null = null
     const daLista = ETIQUETAS_DA_PRECIFICACAO.find((e) => e.nome === etiqueta)
+    // "COTAR" É SÓ A COTAÇÃO (ver `gravarSoACotacao`): pede o valor, e o fundo
+    // vem pelo nome da etiqueta "Cotado ‹fundo›", que não é posta.
+    if (acao === 'cotar' && (body.cotacao === undefined || body.cotacao === null)) {
+      return jsonResponse({ error: 'Informe a cotação.', gravado: false }, 400)
+    }
     if (body.cotacao !== undefined && body.cotacao !== null) {
-      if (acao !== 'adicionar' || daLista?.ato !== 'Cotado') {
+      if ((acao !== 'adicionar' && acao !== 'cotar') || daLista?.ato !== 'Cotado') {
         return jsonResponse(
           { error: 'A cotação só acompanha a etiqueta "Cotado" de um fundo, ao pô-la.', gravado: false },
           400,
@@ -231,7 +342,11 @@ Deno.serve(async (req: Request) => {
     if (!espelho) {
       return jsonResponse({ error: 'Card não encontrado no espelho local.' }, 404)
     }
-    if (!trilhaDoPipeline(Number(espelho.pipeline_id))) {
+    // SÓ A COTAÇÃO vale também no RPV, que mostra as propostas na Produção de
+    // proposta e na Negociação; etiqueta continua só nos funis de precatório.
+    const funilAceito =
+      !!trilhaDoPipeline(Number(espelho.pipeline_id)) || (acao === 'cotar' && Number(espelho.pipeline_id) === FUNIL_RPV)
+    if (!funilAceito) {
       return jsonResponse({ error: 'Este card não é de um funil de precatório.' }, 400)
     }
 
@@ -290,6 +405,27 @@ Deno.serve(async (req: Request) => {
       }
       textoDoCampo = textoDaCotacao(cotacao)
     }
+
+    if (acao === 'cotar' && campo && textoDoCampo && cotacao && daLista) {
+      const { data: perfil } = await svc.from('profiles').select('nome, email').eq('id', caller.id).maybeSingle()
+      return await gravarSoACotacao({
+        base,
+        headers,
+        svc,
+        leadId,
+        rawAntes: ((espelho as { raw?: Record<string, unknown> | null }).raw ?? {}) as {
+          custom_fields_values?: ValorDeCampo[] | null
+        },
+        campo,
+        textoDoCampo,
+        cotacao,
+        fundo: daLista.destino,
+        autor: perfil?.nome?.trim() || perfil?.email || caller.email || 'usuário do sistema',
+      })
+    }
+    // "COTAR" NUNCA SEGUE PARA AS ETIQUETAS: sem campo achado, a resposta já
+    // saiu acima; isto só fecha a porta.
+    if (acao === 'cotar') return jsonResponse({ error: 'Não consegui gravar a cotação.', gravado: false }, 500)
 
     // AS ETIQUETAS QUE O CARD TEM AGORA, lidas do Kommo: só elas podem sair
     // (ver `etiquetasATirar` — tirar uma que não existe na conta faz o Kommo
