@@ -111,6 +111,10 @@ function Lista({
       ref={ulRef}
       id={id}
       role="listbox"
+      // A LISTA TAMBÉM FICA FORA DO TAB: caixa que rola (`overflow-auto`) é
+      // focável pelo teclado no Chrome, e era nela que o Tab caía antes de ela
+      // sumir — o mesmo foco perdido das opções, logo abaixo.
+      tabIndex={-1}
       className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-campo border border-borda bg-superficie py-1 shadow-nivel-2 scrollbar-thin"
     >
       {opcoes.map((o, i) => (

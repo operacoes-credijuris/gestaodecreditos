@@ -49,6 +49,9 @@ describe('combobox: o Tab não perde o foco, e o leitor de tela ouve a lista', (
   it('as opções ficam fora da ordem do Tab (o blur do campo as desmontava com o foco nelas)', () => {
     expect(src).toMatch(/role="option"[\s\S]{0,700}tabIndex=\{-1\}/)
   })
+  it('a lista que rola também fica fora (no Chrome, caixa com overflow recebe o Tab)', () => {
+    expect(src).toMatch(/role="listbox"[\s\S]{0,300}tabIndex=\{-1\}/)
+  })
   it('lista e campo com os papéis de combobox, nos três componentes', () => {
     expect(src).toMatch(/role="listbox"/)
     expect(src).toMatch(/role: 'combobox'/)
