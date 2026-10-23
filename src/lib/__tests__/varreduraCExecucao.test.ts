@@ -153,3 +153,25 @@ describe('Ficha e atalhos', () => {
     expect(tar).not.toMatch(/setInterval\(sincronizar/)
   })
 })
+
+describe('Varredura C (UI/UX): fluxos mais curtos', () => {
+  it('a ficha do crédito e a do requerimento editam pelo rodapé', () => {
+    const drawer = ler('../../components/CreditoDrawer.tsx')
+    expect(drawer).toMatch(/onClick=\{\(\) => onEditar\(processo\)\}/)
+    const proc = ler('../../pages/operacional/execucao/Processos.tsx')
+    expect(proc).toMatch(/onEditar=\{setFormCredito\}/)
+    const pub = ler('../../pages/operacional/execucao/PublicacoesMovimentacoes.tsx')
+    expect(pub).toMatch(/onEditar=\{setEditando\}/)
+    const req = ler('../../pages/operacional/execucao/Requerimentos.tsx')
+    expect(req).toMatch(/onClick=\{\(\) => abrirForm\(detalhe\)\}/)
+  })
+  it('o cartão de fase escolhido, clicado de novo, fecha a lista', () => {
+    const fase = ler('../../pages/operacional/execucao/FaseProcessual.tsx')
+    expect(fase).toMatch(/setFiltro\(ativo \? null : \{ tipo: 'fase', codigo \}\)/)
+  })
+  it('a nova tarefa aponta a falta no campo, e não num aviso que some', () => {
+    const tar = ler('../../pages/operacional/execucao/TarefasAdvbox.tsx')
+    expect(tar).not.toMatch(/return toast\.error\('Selecione/)
+    expect(tar).toMatch(/error=\{erros\.lawsuit_id\}/)
+  })
+})

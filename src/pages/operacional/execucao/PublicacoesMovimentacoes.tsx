@@ -24,6 +24,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { CreditoDrawer } from '@/components/CreditoDrawer'
+import { CreditoFormModal } from '@/components/CreditoFormModal'
 import { Aviso, CampoDeBusca, Partes, TituloDoGrupo } from '@/components/operacional/Pecas'
 import type { Processo } from '@/lib/types'
 import {
@@ -35,6 +36,7 @@ import {
   type FaixaParalisado,
 } from '@/lib/paralisados'
 import {
+  contar,
   formatCNJ,
   formatDate,
   formatDateTime,
@@ -297,6 +299,7 @@ export default function PublicacoesMovimentacoes() {
 function FaseProcessualTab() {
   const { data, isLoading, isError, error, refetch } = processosCrud.useList()
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
+  const [editando, setEditando] = useState<Processo | null>(null)
   // A LEITURA EM CURSO TAMBÉM NÃO É ZERO (varredura C, 23/10/2026): enquanto os
   // créditos chegavam, a trilha dizia "Ativos 0 · Complementares 0" e os cartões
   // das fases, 0 crédito — afirmação feita antes de olhar.
@@ -311,7 +314,9 @@ function FaseProcessualTab() {
   return (
     <>
       <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
-      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} />
+      {/* O "Editar crédito" da ficha vale aqui também: é a mesma ficha de Créditos. */}
+      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} onEditar={setEditando} />
+      {editando && <CreditoFormModal inicial={editando} onClose={() => setEditando(null)} />}
     </>
   )
 }
@@ -1188,6 +1193,12 @@ function ProcessoMovimentacoes({
 }) {
   const [aberto, setAberto] = useState(false)
   const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
+  // O ÚLTIMO ANDAMENTO À VISTA, SEM ABRIR (varredura C, 23/10/2026): fechado, o
+  // cartão dizia só "3 andamentos" — saber o que andou pedia um clique por
+  // processo. Agora a data (com o "há quanto tempo", como nas Publicações) fica
+  // no canto, e a primeira linha do andamento mais recente, embaixo.
+  const ultimo = movs[0]
+  const decorrido = tempoDecorrido(ultimo?.data ?? null)
   return (
     // SEM `overflow-hidden` E SEM A BORDA ESQUERDA NEUTRA (auditoria visual, C5):
     // o recorte prendia o que fosse fixo dentro do cartão, e a borda grossa
@@ -1203,17 +1214,34 @@ function ProcessoMovimentacoes({
           aberto && 'rounded-b-none',
         )}
       >
-        <div className="flex flex-wrap items-center gap-s2">
+        <div className="flex flex-wrap items-center gap-x-s2 gap-y-s1">
           <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
           <SeloDoVinculo info={info} />
-          <Badge tone="gray">
-            {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
+          {/* No celular a contagem desce para a linha da data: sozinha, ela
+              ocupava uma linha inteira do cartão. */}
+          <Badge tone="gray" className="max-sm:hidden">
+            {contar(movs.length, 'andamento', 'andamentos')}
           </Badge>
-          <span className="inline-flex items-center gap-s1 text-sm font-semibold text-marca-texto">
-            {aberto ? 'ocultar' : 'ver andamentos'}
+          {/* A data e a seta no canto, como a data das Publicações: no celular,
+              uma linha inteira, com a seta na ponta. */}
+          <span className="ml-auto flex items-center gap-s2 max-sm:ml-0 max-sm:w-full">
+            <span className="whitespace-nowrap text-sm tabular-nums text-texto-2 max-sm:mr-auto">
+              {ultimo?.data && (
+                <>
+                  <span className="sr-only">Último andamento: </span>
+                  {formatDate(ultimo.data)}
+                  {decorrido && <span className="text-texto-3"> · {decorrido}</span>}
+                </>
+              )}
+              <span className="text-texto-3 sm:hidden">
+                {ultimo?.data ? ' · ' : ''}
+                {contar(movs.length, 'andamento', 'andamentos')}
+              </span>
+            </span>
+            <span className="sr-only">{aberto ? 'Ocultar os andamentos' : 'Ver os andamentos'}</span>
             <ChevronDown
               aria-hidden="true"
-              className={cn('h-[16px] w-[16px] transition-transform', aberto && 'rotate-180')}
+              className={cn('h-[16px] w-[16px] shrink-0 text-texto-3 transition-transform', aberto && 'rotate-180')}
             />
           </span>
         </div>
@@ -1221,6 +1249,9 @@ function ProcessoMovimentacoes({
           <div className="mt-s0.5 text-corpo text-texto-2">
             <Partes a={info.cedente} b={info.cessionario} />
           </div>
+        )}
+        {!aberto && ultimo?.conteudo && (
+          <span className="mt-s1 line-clamp-1 break-words text-corpo text-texto-2">{ultimo.conteudo}</span>
         )}
       </button>
 

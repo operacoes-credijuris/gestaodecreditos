@@ -450,14 +450,18 @@ export function useApensosManager(parentField: ParentField) {
           }
           footer={
             ficha && (
+              // O MESMO RODAPÉ DAS FICHAS DO CRÉDITO E DO REQUERIMENTO (varredura C,
+              // 23/10/2026): secundário e dizendo o quê — a ficha é de leitura, e o
+              // azul cheio competia com ela.
               <Button
+                variant="secondary"
                 icon={<Pencil className="h-[16px] w-[16px]" />}
                 onClick={() => {
                   setFicha(null)
                   abrirForm(ficha)
                 }}
               >
-                Editar
+                Editar apenso
               </Button>
             )
           }

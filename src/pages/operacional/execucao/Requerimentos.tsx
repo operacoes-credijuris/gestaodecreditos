@@ -593,12 +593,26 @@ export default function Requerimentos() {
         )}
       </Modal>
 
-      {/* Ficha do requerimento — abre ao clicar na linha. Editar e excluir o
-          requerimento ficam nos botões da própria linha; as ações dos apensos,
+      {/* Ficha do requerimento — abre ao clicar na linha. Editar fica no rodapé
+          dela (e no "⋯" da linha); excluir, só no "⋯"; as ações dos apensos,
           aqui dentro. */}
       <Drawer
         open={!!detalhe}
         onClose={() => setDetalhe(null)}
+        // EDITAR NO RODAPÉ, como na ficha do crédito (varredura C, 23/10/2026):
+        // corrigir o que se acabou de ler não pede mais fechar a ficha e achar o
+        // "⋯" da linha. Excluir continua só lá.
+        footer={
+          detalhe ? (
+            <Button
+              variant="secondary"
+              icon={<Pencil className="h-[16px] w-[16px]" aria-hidden="true" />}
+              onClick={() => abrirForm(detalhe)}
+            >
+              Editar requerimento
+            </Button>
+          ) : undefined
+        }
         title={
           detalhe && (
             // Subtítulo com as PARTES, e não com tribunal · órgão: é o mesmo

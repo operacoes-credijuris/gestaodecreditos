@@ -413,7 +413,9 @@ function SituacaoSelect({
               )}
             />
           )}
-          <span className="truncate">{situacaoAtual?.nome ?? '—'}</span>
+          {/* SEM SITUAÇÃO, O CONVITE (varredura C, 23/10/2026): o "—" sozinho
+              num campo com seta não dizia o que se escolhe ali. */}
+          <span className="truncate">{situacaoAtual?.nome ?? 'Definir situação'}</span>
         </span>
         <ChevronDown className="h-[16px] w-[16px] shrink-0" aria-hidden="true" />
       </button>
@@ -906,7 +908,12 @@ export function FaseProcessual({
         // O RELÓGIO DO SERVIDOR acabou antes de todos (21/10/2026): os que faltam
         // entram na próxima rodada — o cron diário, ou um novo "Atualizar fases".
         toast.info(
-          `${r.gerados} crédito(s) atualizado(s); ${r.adiados} ficaram para a próxima rodada — clique em "Atualizar fases" de novo para continuar.`,
+          // O PLURAL CERTO (varredura C, 23/10/2026), sem "crédito(s)".
+          `${contar(r.gerados, 'crédito atualizado', 'créditos atualizados')}; ${contar(
+            r.adiados,
+            'ficou',
+            'ficaram',
+          )} para a próxima rodada. Clique em "Atualizar fases" de novo para continuar.`,
         )
       } else {
         toast.success('Classificação atualizada.')
@@ -989,15 +996,21 @@ export function FaseProcessual({
               ordem.length + 1 <= 7 ? 'xl:grid-cols-7' : 'xl:grid-cols-5',
             )}
           >
-            {ordem.map((codigo) => (
-              <CartaoDaFase
-                key={codigo}
-                rotulo={getLabel(FASE_PROCESSUAL, codigo).label}
-                n={contagem.porFase[codigo] ?? 0}
-                ativo={filtro?.tipo === 'fase' && filtro.codigo === codigo}
-                onClick={() => setFiltro({ tipo: 'fase', codigo })}
-              />
-            ))}
+            {/* O CARTÃO ESCOLHIDO, CLICADO DE NOVO, FECHA A LISTA (varredura C,
+                23/10/2026): ele já é um botão de liga/desliga (`aria-pressed`), e
+                não havia como voltar à visão só dos quadros sem trocar de trilha. */}
+            {ordem.map((codigo) => {
+              const ativo = filtro?.tipo === 'fase' && filtro.codigo === codigo
+              return (
+                <CartaoDaFase
+                  key={codigo}
+                  rotulo={getLabel(FASE_PROCESSUAL, codigo).label}
+                  n={contagem.porFase[codigo] ?? 0}
+                  ativo={ativo}
+                  onClick={() => setFiltro(ativo ? null : { tipo: 'fase', codigo })}
+                />
+              )
+            })}
             {/* Concluso não é posição na esteira — card à parte, filtro sobre o
                 atributo conclusao_pendente, somado à fase substantiva de cada
                 processo (mesmo processo pode aparecer aqui e no card da fase). */}
@@ -1005,7 +1018,7 @@ export function FaseProcessual({
               rotulo="Concluso"
               n={contagem.conclusos}
               ativo={filtro?.tipo === 'concluso'}
-              onClick={() => setFiltro({ tipo: 'concluso' })}
+              onClick={() => setFiltro(filtro?.tipo === 'concluso' ? null : { tipo: 'concluso' })}
               aviso
             />
           </div>

@@ -782,13 +782,29 @@ export function NovaTarefaModal({
     onError: (e) => toast.error((e as Error).message),
   })
 
+  // O QUE FALTA, JUNTO DO CAMPO (varredura C, 23/10/2026), como nos outros
+  // formulários da plataforma: o toast dizia uma falta por vez, sumia em
+  // segundos e não apontava o campo. O toast fica para o erro do ADVBOX.
+  const [erros, setErros] = useState<Partial<Record<keyof FormState, string>>>({})
+  useEffect(() => {
+    if (!open) setErros({})
+  }, [open])
+  /** Muda o formulário e apaga o erro do campo mexido. */
+  function alterar(campo: keyof FormState, mudanca: (f: FormState) => FormState) {
+    setForm(mudanca)
+    setErros((e) => (e[campo] ? { ...e, [campo]: undefined } : e))
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!form.lawsuit_id) return toast.error('Selecione um processo da lista.')
-    if (!form.tasks_id) return toast.error('Selecione o tipo de tarefa.')
-    if (!form.start_date) return toast.error('Informe a data.')
-    if (!form.from) return toast.error('Selecione o remetente.')
-    if (form.guests.length === 0) return toast.error('Selecione ao menos um responsável.')
+    const faltas: Partial<Record<keyof FormState, string>> = {}
+    if (!form.lawsuit_id) faltas.lawsuit_id = 'Escolha o processo na lista.'
+    if (!form.tasks_id) faltas.tasks_id = 'Escolha o tipo de tarefa.'
+    if (!form.start_date) faltas.start_date = 'Informe a data.'
+    if (!form.from) faltas.from = 'Escolha o remetente.'
+    if (form.guests.length === 0) faltas.guests = 'Escolha ao menos um responsável.'
+    setErros(faltas)
+    if (Object.keys(faltas).length > 0 || !form.lawsuit_id) return
     criar.mutate(form.lawsuit_id)
   }
 
@@ -908,31 +924,34 @@ export function NovaTarefaModal({
         <form id="form-nova-tarefa" onSubmit={handleSubmit} className="grid gap-s4 sm:grid-cols-2">
           {/* O PROCESSO SÓ DA LISTA DO ADVBOX (crédito, requerimento ou apenso
               cadastrados aqui): texto digitado sem escolher não conta. */}
-          <Field label="Processo" required className="sm:col-span-2">
+          <Field label="Processo" required error={erros.lawsuit_id} className="sm:col-span-2">
             <Combobox
               opcoes={opcoesProcesso}
               valor={form.lawsuit_id}
-              onChange={(id) => setForm((f) => ({ ...f, lawsuit_id: id }))}
+              onChange={(id) => alterar('lawsuit_id', (f) => ({ ...f, lawsuit_id: id }))}
               placeholder="Digite o número do processo…"
               vazio="Nenhum processo encontrado."
             />
           </Field>
 
-          <Field label="Tipo de tarefa" required className="sm:col-span-2">
+          <Field label="Tipo de tarefa" required error={erros.tasks_id} className="sm:col-span-2">
             <Combobox
               opcoes={opcoesTarefa}
               valor={form.tasks_id ? Number(form.tasks_id) : null}
-              onChange={(id) => setForm((f) => ({ ...f, tasks_id: id ? String(id) : '' }))}
+              onChange={(id) => alterar('tasks_id', (f) => ({ ...f, tasks_id: id ? String(id) : '' }))}
               placeholder="Digite parte do nome…"
               vazio="Nenhum tipo encontrado."
             />
           </Field>
 
-          <Field label="Data" required>
+          <Field label="Data" required error={erros.start_date}>
             <Input
               type="date"
               value={form.start_date}
-              onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+              onChange={(e) => {
+                const v = e.target.value
+                alterar('start_date', (f) => ({ ...f, start_date: v }))
+              }}
             />
           </Field>
           <Field label="Prazo">
@@ -948,22 +967,22 @@ export function NovaTarefaModal({
               perfil. Para o resto é sempre a própria pessoa, e um campo com uma
               resposta só é campo a menos para preencher. */}
           {escolheRemetente && (
-            <Field label="Remetente" required>
+            <Field label="Remetente" required error={erros.from}>
               <Combobox
                 opcoes={opcoesUsuario}
                 valor={form.from ? Number(form.from) : null}
-                onChange={(id) => setForm((f) => ({ ...f, from: id ? String(id) : '' }))}
+                onChange={(id) => alterar('from', (f) => ({ ...f, from: id ? String(id) : '' }))}
                 placeholder="Digite o nome…"
                 vazio="Nenhum usuário encontrado."
               />
             </Field>
           )}
 
-          <Field label="Responsáveis" required className={escolheRemetente ? undefined : 'sm:col-span-2'}>
+          <Field label="Responsáveis" required error={erros.guests} className={escolheRemetente ? undefined : 'sm:col-span-2'}>
             <MultiCombobox
               opcoes={opcoesUsuario}
               valores={form.guests}
-              onChange={(ids) => setForm((f) => ({ ...f, guests: ids }))}
+              onChange={(ids) => alterar('guests', (f) => ({ ...f, guests: ids }))}
               placeholder="Digite o nome e escolha…"
               vazio="Nenhum usuário encontrado."
             />

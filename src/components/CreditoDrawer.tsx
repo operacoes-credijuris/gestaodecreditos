@@ -12,8 +12,10 @@
 //   - os apensos com as ações de cada um e "Adicionar apenso" sempre à vista.
 // O que ela mostra e o que grava continuam os mesmos.
 import { useMemo } from 'react'
+import { Pencil } from 'lucide-react'
 import { Drawer } from '@/components/ui/Drawer'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { DrawerHistorico } from '@/components/Movimentacoes'
 import { FaseDrawerSection } from '@/pages/operacional/execucao/FaseProcessual'
 import { useApensosManager } from '@/components/Apensos'
@@ -57,9 +59,12 @@ const valor = (v: number | null | undefined) => (v == null ? '—' : formatBRL(v
 export function CreditoDrawer({
   processo,
   onClose,
+  onEditar,
 }: {
   processo: Processo | null
   onClose: () => void
+  /** Abre a janela de edição do crédito (o rodapé "Editar crédito"). */
+  onEditar?: (p: Processo) => void
 }) {
   // OS APENSOS COM AS AÇÕES DELES, aqui dentro. Um gerenciador próprio da ficha
   // (as janelas de editar, excluir e a ficha do apenso abrem por cima desta), que
@@ -102,8 +107,21 @@ export function CreditoDrawer({
             />
           )
         }
-        // Sem footer: editar e excluir o crédito ficam nos botões da própria
-        // linha da tabela; as ações dos apensos, aqui dentro.
+        // EDITAR NO RODAPÉ DA FICHA (varredura C, 23/10/2026): quem lê a ficha e
+        // acha o dado errado corrigia fechando a ficha e caçando o "⋯" da linha.
+        // A janela de edição abre por cima e, ao salvar, a ficha mostra o novo.
+        // Excluir continua só no "⋯" da linha — longe da leitura, de propósito.
+        footer={
+          processo && onEditar ? (
+            <Button
+              variant="secondary"
+              icon={<Pencil className="h-[16px] w-[16px]" aria-hidden="true" />}
+              onClick={() => onEditar(processo)}
+            >
+              Editar crédito
+            </Button>
+          ) : undefined
+        }
       >
         {processo && (
           <div className="space-y-s5">
