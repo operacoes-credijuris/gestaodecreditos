@@ -24,6 +24,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { CreditoDrawer } from '@/components/CreditoDrawer'
+import { CreditoFormModal } from '@/components/CreditoFormModal'
 import { Aviso, CampoDeBusca, Partes, TituloDoGrupo } from '@/components/operacional/Pecas'
 import type { Processo } from '@/lib/types'
 import {
@@ -35,6 +36,7 @@ import {
   type FaixaParalisado,
 } from '@/lib/paralisados'
 import {
+  contar,
   formatCNJ,
   formatDate,
   formatDateTime,
@@ -43,6 +45,8 @@ import {
   tempoDecorrido,
 } from '@/lib/format'
 import { BotaoCopiar } from '@/components/BotaoCopiar'
+import { useHojeQueAnda } from '@/lib/hojeQueAnda'
+import { lerTodasAsPaginas, type PaginaDaLeitura } from '@/lib/leituraPaginada'
 
 // Teto de linhas por consulta, para a tela não puxar a tabela inteira. Bater no
 // teto ESCONDE registro — e publicação escondida é intimação que ninguém leu —,
@@ -65,20 +69,10 @@ const LIMITE_LINHAS = 1000
  * disso, o aviso de corte continua valendo (ele compara com a contagem exata).
  */
 const MAX_PAGINAS_DA_LISTA = 5
-async function lerEmPaginas<T>(
-  pagina: (de: number, ate: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
-): Promise<T[]> {
-  const todas: T[] = []
-  for (let i = 0; i < MAX_PAGINAS_DA_LISTA; i++) {
-    const de = i * LIMITE_LINHAS
-    const { data, error } = await pagina(de, de + LIMITE_LINHAS - 1)
-    if (error) throw new Error(error.message)
-    const lote = (data ?? []) as T[]
-    todas.push(...lote)
-    if (lote.length < LIMITE_LINHAS) break
-  }
-  return todas
-}
+// O laço é o de lib/leituraPaginada.ts (varredura C, 23/10/2026), com o teto
+// de páginas desta tela.
+const lerEmPaginas = <T,>(pagina: PaginaDaLeitura): Promise<T[]> =>
+  lerTodasAsPaginas<T>(pagina, { porPagina: LIMITE_LINHAS, maxPaginas: MAX_PAGINAS_DA_LISTA })
 
 /**
  * Quantos registros existem na janela (contagem leve: head:true não baixa
@@ -110,6 +104,21 @@ function useContagem(tabela: string, campoData: string, desde: string) {
 // dupla pela contagem da pílula e pela lista, que precisam andar juntas.
 const isoDiasAtras = (n: number) =>
   new Date(Date.now() - n * 86400000).toLocaleDateString('sv-SE')
+
+/**
+ * O COMEÇO DA JANELA ANDA COM O DIA (varredura C, 23/10/2026). Era um
+ * `useMemo(..., [])`: a pílula (montada com a página) e a lista (montada de novo
+ * a cada troca de aba) congelavam a data cada uma no SEU momento. Atravessada a
+ * meia-noite, as duas janelas divergiam por um dia — a contagem era de uma, a
+ * lista de outra, e o aviso "mostrando N de M… ficaram de fora" disparava sem
+ * corte nenhum. Com o mesmo relógio (lib/hojeQueAnda.ts), as duas viram juntas.
+ */
+function useInicioDaJanela(dias: number): string {
+  const hoje = useHojeQueAnda()
+  // `hoje` é o gatilho: a data muda, a janela recalcula.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => isoDiasAtras(dias), [hoje, dias])
+}
 
 // Dispara a sincronização UMA vez ao montar (o guard por ref preserva o
 // comportamento no StrictMode). Compartilhado pelas abas Publicações e
@@ -225,8 +234,8 @@ export default function PublicacoesMovimentacoes() {
   const [aba, setAba] = useState<'publicacoes' | 'movimentacoes' | 'fase'>('publicacoes')
   const [busca, setBusca] = useState('')
 
-  const ini30 = useMemo(() => isoDiasAtras(30), [])
-  const ini20 = useMemo(() => isoDiasAtras(20), [])
+  const ini30 = useInicioDaJanela(30)
+  const ini20 = useInicioDaJanela(20)
   const nPub = useContagem('djen_publicacoes', 'data_disponibilizacao', ini30)
   const nMov = useContagem('advbox_movimentacoes', 'data', ini20)
 
@@ -288,8 +297,13 @@ export default function PublicacoesMovimentacoes() {
  * divergindo aos poucos.
  */
 function FaseProcessualTab() {
-  const { data, isError, error, refetch } = processosCrud.useList()
+  const { data, isLoading, isError, error, refetch } = processosCrud.useList()
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
+  const [editando, setEditando] = useState<Processo | null>(null)
+  // A LEITURA EM CURSO TAMBÉM NÃO É ZERO (varredura C, 23/10/2026): enquanto os
+  // créditos chegavam, a trilha dizia "Ativos 0 · Complementares 0" e os cartões
+  // das fases, 0 crédito — afirmação feita antes de olhar.
+  if (isLoading) return <Loading label="Carregando créditos…" />
   // SEM ISTO A FALHA VIRAVA ZERO: lista de créditos que não carregou chegava como
   // lista vazia, e toda fase aparecia com 0 crédito.
   if (isError)
@@ -300,7 +314,9 @@ function FaseProcessualTab() {
   return (
     <>
       <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
-      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} />
+      {/* O "Editar crédito" da ficha vale aqui também: é a mesma ficha de Créditos. */}
+      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} onEditar={setEditando} />
+      {editando && <CreditoFormModal inicial={editando} onClose={() => setEditando(null)} />}
     </>
   )
 }
@@ -339,7 +355,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
   const resolve = useResolveProcesso()
 
   // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
-  const ini30 = useMemo(() => isoDiasAtras(30), [])
+  const ini30 = useInicioDaJanela(30)
   // Mesma chave da pílula: o React Query devolve o valor já em cache, sem
   // segunda requisição. Serve para saber se a lista abaixo veio truncada.
   const total = useContagem('djen_publicacoes', 'data_disponibilizacao', ini30)
@@ -925,7 +941,7 @@ function Movimentacoes({ busca }: { busca: string }) {
   const resolve = useResolveProcesso()
 
   // Janela de 20 dias (data do andamento >= hoje - 20, horário local).
-  const ini20 = useMemo(() => isoDiasAtras(20), [])
+  const ini20 = useInicioDaJanela(20)
   const total = useContagem('advbox_movimentacoes', 'data', ini20)
 
   const lista = useQuery({
@@ -945,16 +961,21 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   // Status por processo (última movimentação) — grupo Paralisados. Se a tabela
   // ainda não existir, falha em silêncio (paralisados = []) sem quebrar a aba.
+  //
+  // PAGINADO (varredura C, 23/10/2026): o `.limit(5000)` parava no teto de 1000
+  // linhas do servidor, calado — passando disso, processo parado de verdade
+  // simplesmente não aparecia em Paralisados, que é a pior lista para esconder.
   const status = useQuery({
     queryKey: ['advbox_processo_status'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('advbox_processo_status')
-        .select('*')
-        .limit(5000)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as StatusRow[]
-    },
+    queryFn: () =>
+      lerTodasAsPaginas<StatusRow>((de, ate) =>
+        supabase
+          .from('advbox_processo_status')
+          .select('numero_processo, ultima_movimentacao')
+          // Ordem estável entre as páginas (uma linha por processo).
+          .order('numero_processo')
+          .range(de, ate),
+      ),
     retry: false,
   })
 
@@ -1172,6 +1193,12 @@ function ProcessoMovimentacoes({
 }) {
   const [aberto, setAberto] = useState(false)
   const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
+  // O ÚLTIMO ANDAMENTO À VISTA, SEM ABRIR (varredura C, 23/10/2026): fechado, o
+  // cartão dizia só "3 andamentos" — saber o que andou pedia um clique por
+  // processo. Agora a data (com o "há quanto tempo", como nas Publicações) fica
+  // no canto, e a primeira linha do andamento mais recente, embaixo.
+  const ultimo = movs[0]
+  const decorrido = tempoDecorrido(ultimo?.data ?? null)
   return (
     // SEM `overflow-hidden` E SEM A BORDA ESQUERDA NEUTRA (auditoria visual, C5):
     // o recorte prendia o que fosse fixo dentro do cartão, e a borda grossa
@@ -1187,17 +1214,34 @@ function ProcessoMovimentacoes({
           aberto && 'rounded-b-none',
         )}
       >
-        <div className="flex flex-wrap items-center gap-s2">
+        <div className="flex flex-wrap items-center gap-x-s2 gap-y-s1">
           <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
           <SeloDoVinculo info={info} />
-          <Badge tone="gray">
-            {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
+          {/* No celular a contagem desce para a linha da data: sozinha, ela
+              ocupava uma linha inteira do cartão. */}
+          <Badge tone="gray" className="max-sm:hidden">
+            {contar(movs.length, 'andamento', 'andamentos')}
           </Badge>
-          <span className="inline-flex items-center gap-s1 text-sm font-semibold text-marca-texto">
-            {aberto ? 'ocultar' : 'ver andamentos'}
+          {/* A data e a seta no canto, como a data das Publicações: no celular,
+              uma linha inteira, com a seta na ponta. */}
+          <span className="ml-auto flex items-center gap-s2 max-sm:ml-0 max-sm:w-full">
+            <span className="whitespace-nowrap text-sm tabular-nums text-texto-2 max-sm:mr-auto">
+              {ultimo?.data && (
+                <>
+                  <span className="sr-only">Último andamento: </span>
+                  {formatDate(ultimo.data)}
+                  {decorrido && <span className="text-texto-3"> · {decorrido}</span>}
+                </>
+              )}
+              <span className="text-texto-3 sm:hidden">
+                {ultimo?.data ? ' · ' : ''}
+                {contar(movs.length, 'andamento', 'andamentos')}
+              </span>
+            </span>
+            <span className="sr-only">{aberto ? 'Ocultar os andamentos' : 'Ver os andamentos'}</span>
             <ChevronDown
               aria-hidden="true"
-              className={cn('h-[16px] w-[16px] transition-transform', aberto && 'rotate-180')}
+              className={cn('h-[16px] w-[16px] shrink-0 text-texto-3 transition-transform', aberto && 'rotate-180')}
             />
           </span>
         </div>
@@ -1205,6 +1249,9 @@ function ProcessoMovimentacoes({
           <div className="mt-s0.5 text-corpo text-texto-2">
             <Partes a={info.cedente} b={info.cessionario} />
           </div>
+        )}
+        {!aberto && ultimo?.conteudo && (
+          <span className="mt-s1 line-clamp-1 break-words text-corpo text-texto-2">{ultimo.conteudo}</span>
         )}
       </button>
 

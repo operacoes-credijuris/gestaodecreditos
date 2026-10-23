@@ -400,10 +400,17 @@ export default function Processos() {
                   }
                   linhas={[
                     <Partes a={p.cedente} b={p.cessionario} />,
-                    <span>
+                    // A EXPECTATIVA COM O MESMO SELO DA TABELA (varredura C,
+                    // 23/10/2026): no cartão ela era texto corrido, e a vencida
+                    // passava pelo celular sem o vermelho que a denuncia.
+                    <span className="inline-flex flex-wrap items-center gap-x-s1.5 gap-y-s1">
                       {p.entidade_devedora || '—'}
                       {p.expectativa_liquidacao && (
-                        <span className="tabular-nums"> · expectativa {formatDate(p.expectativa_liquidacao)}</span>
+                        <SeloExpectativa
+                          data={p.expectativa_liquidacao}
+                          hoje={hoje}
+                          limiteAlerta={limiteAlerta}
+                        />
                       )}
                     </span>,
                   ]}
@@ -593,7 +600,7 @@ export default function Processos() {
       )}
 
       {/* Ficha completa do crédito — abre ao clicar na linha da tabela. */}
-      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} />
+      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} onEditar={setFormCredito} />
 
       <ConfirmDialog
         open={!!toDelete}

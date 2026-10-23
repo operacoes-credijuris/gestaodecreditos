@@ -106,9 +106,19 @@ export function useAbrirPastaDoCredito(processo: Processo | null) {
     if (!processo || abrindo) return
 
     // Caminho rápido: id já conhecido, abre na hora sem tocar no Drive.
+    //
+    // A ABA BLOQUEADA TAMBÉM AQUI (varredura C, 23/10/2026): o `import()` antes da
+    // abertura gasta o tempo do clique, e o bloqueador de pop-up podia engolir a
+    // aba sem aviso nenhum — o clique "não fazia nada". Mesma saída do caminho
+    // lento: o link num botão do aviso.
     if (processo.drive_pasta_id) {
       const { linkDaPasta } = await import('@/lib/peticaoPasta')
-      window.open(linkDaPasta(processo.drive_pasta_id), '_blank', 'noopener,noreferrer')
+      const link = linkDaPasta(processo.drive_pasta_id)
+      if (!abrirEmNovaAba(link)) {
+        toast.info('O navegador bloqueou a aba nova.', {
+          action: { label: 'Abrir a pasta', onClick: () => window.open(link, '_blank', 'noopener,noreferrer') },
+        })
+      }
       return
     }
 

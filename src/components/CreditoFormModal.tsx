@@ -395,7 +395,9 @@ export function CreditoFormModal({
                 required
                 error={erros.numero_cnj}
                 hint="É a chave do crédito no ADVBOX e no Drive."
-                className="sm:col-span-2"
+                // METADE DA LINHA, AO LADO DA ESPÉCIE (varredura C, 23/10/2026): o
+                // número tem 25 caracteres, e na largura inteira sobrava um campo
+                // longo e vazio — e a espécie ficava sozinha na linha de baixo.
               >
                 <Input
                   className="tabular-nums"

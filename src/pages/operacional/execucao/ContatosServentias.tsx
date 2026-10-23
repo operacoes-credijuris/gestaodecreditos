@@ -37,7 +37,7 @@ import {
 } from '@/components/operacional/Pecas'
 import { vazioNull } from '@/lib/format'
 import { casaBusca } from '@/lib/buscaDaTela'
-import { formatTelefone, telefoneIncompleto, waLink } from '@/lib/telefone'
+import { digitosTelefoneBR, formatTelefone, telefoneIncompleto, waLink } from '@/lib/telefone'
 import { perguntarDescarte } from '@/lib/descarte'
 
 // Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
@@ -172,7 +172,7 @@ function SubLinha({
 }
 
 /** Os contatos do órgão: as duas sublinhas do julgador, a única do auxiliar. */
-function ContatosDoOrgao({ row }: { row: OrgaoRow }) {
+function ContatosDoOrgao({ row, onAdicionar }: { row: OrgaoRow; onAdicionar: () => void }) {
   const c = row.contato
   const algum =
     !!c &&
@@ -185,11 +185,25 @@ function ContatosDoOrgao({ row }: { row: OrgaoRow }) {
       c.gabinete_email,
     ].some(Boolean)
   // Órgão sem nenhum contato: uma linha só, e não duas sublinhas de traços.
+  //
+  // E A SAÍDA NA PRÓPRIA LINHA (varredura C, 23/10/2026): "Nenhum contato
+  // cadastrado" em cinza constatava a falta e deixava o caminho no "›" da
+  // ponta. Agora a frase diz o que fazer, e o clique nela abre o formulário.
   if (!algum) {
     return (
       <div className={cn(GRADE_CONTATOS, 'min-h-[28px]')}>
         <span aria-hidden="true" />
-        <span className="col-span-3 text-texto-3">Nenhum contato cadastrado</span>
+        <span className="col-span-3 flex flex-wrap items-center gap-x-s2 text-texto-3">
+          Nenhum contato cadastrado ·
+          <button
+            type="button"
+            onClick={onAdicionar}
+            className="inline-flex min-h-[28px] items-center gap-s1 rounded-controle font-semibold text-marca-texto hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+          >
+            <Plus className="h-[16px] w-[16px]" aria-hidden="true" />
+            Adicionar
+          </button>
+        </span>
       </div>
     )
   }
@@ -261,19 +275,24 @@ export default function ContatosServentias() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
+  // Filtro por tribunal — 'todos' mostra todos os órgãos.
+  const [filtroTribunal, setFiltroTribunal] = useState('todos')
 
   // VEIO DA BUSCA GERAL (Ctrl+K) com um contato escolhido: a lista já abre
   // filtrada pelo órgão dele. O pedido sai do histórico logo depois.
+  //
+  // O FILTRO DE TRIBUNAL VOLTA A "TODOS" (varredura C, 23/10/2026): com o
+  // Ctrl+K usado já nesta tela, um tribunal escolhido antes escondia o órgão
+  // pedido, e a busca geral levava a "Nenhum órgão corresponde".
   const location = useLocation()
   const navigate = useNavigate()
   const { filtrarContatos } = lerPedidoDaBusca(location.state)
   useEffect(() => {
     if (!filtrarContatos) return
     setBusca(filtrarContatos)
+    setFiltroTribunal('todos')
     navigate(location.pathname, { replace: true, state: null })
   }, [filtrarContatos, navigate, location.pathname])
-  // Filtro por tribunal — 'todos' mostra todos os órgãos.
-  const [filtroTribunal, setFiltroTribunal] = useState('todos')
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
   const [toDelete, setToDelete] = useState<ContatoServentia | null>(null)
   // Erros de validação por campo (mensagens inline nos <Field>).
@@ -539,7 +558,9 @@ export default function ContatosServentias() {
       <Card>
         <FerramentasDoPainel
           fim={
-            <span className="inline-flex items-center gap-s1.5">
+            // SÓ ONDE HÁ O BOTÃO DE COPIAR (varredura C, 23/10/2026): os cartões do
+            // celular não o têm — lá o número é link de ligar —, e a dica mentia.
+            <span className="hidden items-center gap-s1.5 md:inline-flex">
               <Copy className="h-[16px] w-[16px]" aria-hidden="true" />
               copia o contato com um clique
             </span>
@@ -627,8 +648,30 @@ export default function ContatosServentias() {
           <ListaNoCelular rotulo="Órgãos">
             {linhas.map((row) => {
               const c = row.contato
-              const primeiro =
-                c?.serventia_telefone || c?.gabinete_telefone || c?.serventia_email || c?.gabinete_email
+              const telefone = c?.serventia_telefone || c?.gabinete_telefone
+              const email = c?.serventia_email || c?.gabinete_email
+              // NO CELULAR, O CONTATO É LINK (varredura C, 23/10/2026): é no
+              // celular que se liga para a vara, e o número era texto — copiar à
+              // mão para o discador. O toque no link não abre a edição do cartão.
+              const primeiro = telefone ? (
+                <a
+                  href={`tel:+55${digitosTelefoneBR(telefone)}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex min-h-[24px] items-center gap-s1 font-semibold tabular-nums text-marca-texto"
+                >
+                  <Phone className="h-[14px] w-[14px]" aria-hidden="true" />
+                  {telefone}
+                </a>
+              ) : email ? (
+                <a
+                  href={`mailto:${email}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex min-h-[24px] max-w-full items-center gap-s1 font-semibold text-marca-texto"
+                >
+                  <Mail className="h-[14px] w-[14px] shrink-0" aria-hidden="true" />
+                  <span className="truncate">{email}</span>
+                </a>
+              ) : null
               return (
                 <CartaoNoCelular
                   key={row.key}
@@ -681,7 +724,7 @@ export default function ContatosServentias() {
                   </TD>
                   <TD curto className="text-texto-2">{row.tribunal || '—'}</TD>
                   <TD className="py-s2">
-                    <ContatosDoOrgao row={row} />
+                    <ContatosDoOrgao row={row} onAdicionar={() => abrirEdicao(row)} />
                   </TD>
                   {/* O "›" abre a edição dos contatos; o "⋯" traz Editar e, no
                       auxiliar, Excluir — em vermelho, por último, e não mais

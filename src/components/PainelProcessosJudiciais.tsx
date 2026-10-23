@@ -62,7 +62,7 @@ import { Check, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-r
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
-import { formatCpfCnpjInput, mesAno, onlyDigits } from '@/lib/format'
+import { contar, formatCpfCnpjInput, mesAno, onlyDigits } from '@/lib/format'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import { apuracaoMaisRecente } from '@/lib/apuracaoMaisRecente'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
@@ -527,7 +527,7 @@ export function PainelProcessosJudiciais({
         toast.success(
           achados === 0
             ? 'Apurado: nenhum processo em nome dos sujeitos.'
-            : `Apurado: ${achados} processo(s) encontrado(s).`,
+            : `Apurado: ${contar(achados, 'processo encontrado', 'processos encontrados')}.`,
         )
       }
       await carregar()
@@ -1193,7 +1193,7 @@ export function PainelProcessosJudiciais({
                         limpar
                       </button>
                       <span className="text-xs tabular-nums text-texto-3">
-                        {listados.length} de {daAba.length} processo(s) ·{' '}
+                        {listados.length} de {contar(daAba.length, 'processo', 'processos')} ·{' '}
                         {brl(somaDasCausas(listados))} de {brl(somaDasCausas(daAba))}
                       </span>
                     </>
