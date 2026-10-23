@@ -620,7 +620,10 @@ export function JanelaDeCotacao({
     try {
       await onEnviar(cotacao)
     } catch (e) {
-      setErro((e as Error).message)
+      // O QUE NÃO É Error TAMBÉM APARECE (23/10/2026): com `.message` só, uma
+      // rejeição com texto cru deixava o erro vazio — a caixa nem surgia, e a
+      // janela parecia ter gravado.
+      setErro((e as Error)?.message || String(e))
     }
   }
 
@@ -674,7 +677,10 @@ export function JanelaDeCotacao({
           void enviar()
         }}
       >
-        <CamposDaCotacao edicao={edicao} fundo={fundo} tentou={tentou} />
+        {/* OS CAMPOS TRAVAM ENQUANTO GRAVA (23/10/2026), como na janela do envio
+            ao BTG: digitado no meio da gravação, o valor novo não ia ao Kommo —
+            a janela fechava com ele na tela, e o card ficava com o anterior. */}
+        <CamposDaCotacao edicao={edicao} fundo={fundo} tentou={tentou} desligado={enviando} />
 
         {/* A MESMA CAIXA DE ERRO DA JANELA DO ENVIO AO BTG: as duas pedem a
             cotação, e são da mesma família. */}

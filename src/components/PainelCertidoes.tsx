@@ -1370,6 +1370,11 @@ export function PainelCertidoes({
       setMunicipiosAnteriores((ced?.municipios_anteriores ?? []).join(', '))
       setEditando(listaS.length === 0)
       setMexeu(false)
+      // O "PREENCHI DO PROCESSO" É DO FORMULÁRIO QUE ACABOU DE SER TROCADO PELO
+      // BANCO (23/10/2026): depois de gravar ou de cancelar a edição, ele seguia
+      // na tela, e o "Editar" seguinte dizia ter preenchido do processo campos
+      // que agora vinham do cadastro gravado.
+      setPreenchido([])
       setAchadosAbertos(null)
       setResidenciaAberta(false)
       setConjugeAberto(false)
@@ -2981,7 +2986,12 @@ export function PainelCertidoes({
           <div
             className={cn(
               'mt-4 rounded-campo border px-3 py-2',
-              residenciaLevantada ? 'border-borda bg-superficie-2' : 'border-aviso-borda bg-aviso-fundo',
+              // NO ESCURO, O ÂMBAR SÓ NO CONTORNO (auditoria visual, E7, como a
+              // linha das lacunas): o `aviso-fundo` de lá era uma faixa marrom
+              // na largura da janela (varredura de 23/10/2026).
+              residenciaLevantada
+                ? 'border-borda bg-superficie-2'
+                : 'border-aviso-borda bg-aviso-fundo dark:bg-superficie-2',
             )}
           >
             <div className="flex flex-wrap items-center justify-between gap-x-3">

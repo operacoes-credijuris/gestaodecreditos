@@ -384,7 +384,9 @@ export function EmissaoBullai({
             loading={pedindo}
             icon={<Download className="h-[16px] w-[16px]" aria-hidden />}
           >
-            Extrair {consultas} {consultas === 1 ? 'certidão' : 'certidões'}
+            {/* SEM NADA MARCADO, SEM O ZERO (23/10/2026): "Extrair 0 certidões"
+                num botão apagado se lia como defeito. */}
+            {consultas === 0 ? 'Extrair certidões' : `Extrair ${consultas} ${consultas === 1 ? 'certidão' : 'certidões'}`}
           </Button>
         </div>
       </div>

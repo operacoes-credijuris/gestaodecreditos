@@ -291,9 +291,12 @@ export function DueDiligence({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      // NÃO FECHA COM O "SEGUIR" NO AR (23/10/2026), como a janela do desfecho:
+      // fechada no meio, a liberação voltava depois e abria a análise seguinte
+      // (`onSeguir`) por cima de uma tela de onde a pessoa já tinha saído.
+      onClose={seguindo ? () => undefined : onClose}
       size="xl"
-      dirty={sujo}
+      dirty={sujo && !seguindo}
       title="Due diligence do crédito"
       // O CARD DE QUE SE FALA, sob o título (o "apoio" da amostra): a janela
       // cobre a lista, e sem isto não há na tela nada que diga de qual crédito
@@ -322,7 +325,7 @@ export function DueDiligence({
         <>
           {/* PERGUNTA COMO O X: o formulário do cedente mexido e não salvo ia
               embora com um clique no Fechar. */}
-          <Button variant="ghost" onClick={() => void fechar()}>
+          <Button variant="ghost" onClick={() => void fechar()} disabled={seguindo}>
             Fechar
           </Button>
           {/* SEGUIR NÃO MOVE O CARD, e por isso não sai da lista de ações da

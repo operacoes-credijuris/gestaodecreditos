@@ -19,7 +19,7 @@
 // sequestro não é juntar planilha para fins de sequestro, e protocolar a peça
 // errada custa mais que um clique a mais.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Download, FileText, Pencil, RefreshCw, Send, Sparkles } from 'lucide-react'
+import { Copy, Download, FileText, Pencil, RefreshCw, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
@@ -697,7 +697,9 @@ export function PeticaoModal({
             {/* "Salvar", e não "Gerar petição": repetir o título da janela no
                 botão não informa nada, e o que o clique faz é salvar a peça no
                 Drive. */}
-            {gerando ? (passo ?? 'Gerando…') : 'Salvar'}
+            {/* "SALVAR NO DRIVE" (23/10/2026), o mesmo rótulo da análise de RPV:
+                "Salvar" sozinho não dizia onde a peça ia parar. */}
+            {gerando ? (passo ?? 'Gerando…') : 'Salvar no Drive'}
           </Button>
         </>
       }
@@ -718,7 +720,9 @@ export function PeticaoModal({
               {/* ---------- Panorama ---------- */}
               <section>
                 <div className="mb-s2 flex items-center justify-between gap-s3">
-                  <h4 className="font-display text-xs font-bold uppercase tracking-wide text-marca-texto">
+                  {/* O RÓTULO DE SEÇÃO DA CASA (§0.5): cinza, e não azul — em azul
+                      ele se lia como link, ao lado do "Analisar de novo". */}
+                  <h4 className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
                     Panorama do caso
                   </h4>
                   {panorama.data && (
@@ -749,7 +753,9 @@ export function PeticaoModal({
                 ) : panorama.isError ? (
                   // FALHA DE LEITURA É ERRO (revisão visual 2): era âmbar, com um link.
                   <Aviso tom="erro">
-                    <p>{(panorama.error as Error).message}</p>
+                    {/* DE QUE É O ERRO (23/10/2026): vinha só a mensagem da
+                        função, sem dizer que era a leitura do processo. */}
+                    <p>Não consegui ler o histórico do processo: {(panorama.error as Error).message}</p>
                     <Button
                       type="button"
                       size="sm"
@@ -784,15 +790,19 @@ export function PeticaoModal({
                   onChange={(e) => setInstrucao(e.target.value)}
                 />
                 <div className="mt-s2 flex justify-end">
+                  {/* O QUE O CLIQUE FAZ, e não "Enviar" (23/10/2026): na janela
+                      que termina em salvar no Drive, "Enviar" se lia como mandar
+                      a peça a algum lugar. É a IA redigindo, como nas janelas
+                      de desfecho; refeito, o texto de baixo é substituído. */}
                   <Button
                     size="sm"
                     variant="secondary"
-                    icon={<Send className="h-[16px] w-[16px]" />}
+                    icon={<Sparkles className="h-[16px] w-[16px]" aria-hidden />}
                     loading={redigindo}
                     disabled={!instrucao.trim() || redigindo}
                     onClick={() => void redigir()}
                   >
-                    {redigindo ? 'Redigindo…' : 'Enviar'}
+                    {redigindo ? 'Redigindo…' : redacao ? 'Redigir de novo' : 'Redigir com a IA'}
                   </Button>
                 </div>
               </section>

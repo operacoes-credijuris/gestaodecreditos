@@ -313,7 +313,10 @@ export function JanelaDeDesfecho({
       // O CARD DE QUE SE FALA, sob o título (o apoio da amostra): a janela abre
       // por cima de outra, e é este texto que diz qual crédito vai ser movido.
       description={subtitulo ? <IdentificacaoDoCard titulo={subtitulo} /> : undefined}
-      dirty={sujo}
+      // SEM A PERGUNTA COM A MOVIMENTAÇÃO NO AR (23/10/2026): o X perguntava
+      // "Descartar alterações?" e, respondido o sim, não fechava nada — a janela
+      // fica até o Kommo responder, e a pergunta prometia o que não fazia.
+      dirty={sujo && !enviando}
       // O RODAPÉ NA ORDEM ÚNICA DAS JANELAS (auditoria visual de 03/10/2026,
       // §0.6/C8): `[Cancelar] [Confirmar]`, à direita, o ato por último. Antes o
       // Cancelar ficava sozinho na outra ponta — a terceira ordem de rodapé da

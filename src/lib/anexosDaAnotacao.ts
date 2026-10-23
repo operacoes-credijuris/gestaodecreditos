@@ -165,8 +165,11 @@ export async function enviarAnotacao(
   // TEXTO E ARQUIVO NUMA NOTA SÓ (22/10/2026): o primeiro arquivo sobe sem nota,
   // e a nota dele leva o texto. Não subindo o arquivo, a sequência de antes
   // segue (o texto sozinho, e os outros arquivos), e ele fica para tentar de novo.
+  // O QUE JÁ ESTÁ NO CARD VEM PRIMEIRO (23/10/2026): é a nota dele que falhou,
+  // e é nela que o texto tem de ir — com outro arquivo à frente na lista, ele
+  // subiria de novo pelo caminho comum, e o card ficava com o arquivo duas vezes.
   const primeiro = t && passos.subir && passos.anotarComArquivo
-    ? anexos.find((a) => a.arquivo.size <= LIMITE_DO_ANEXO)
+    ? (anexos.find((a) => a.noDrive) ?? anexos.find((a) => a.arquivo.size <= LIMITE_DO_ANEXO))
     : undefined
   if (primeiro && passos.subir && passos.anotarComArquivo) {
     fila = anexos.filter((a) => a !== primeiro)
@@ -212,6 +215,15 @@ export async function enviarAnotacao(
     }
   }
   for (const a of fila) {
+    // JÁ NO CARD, SEM O TEXTO DESTA VEZ (23/10/2026): a nota com texto falhou, e
+    // a pessoa apagou o texto antes de tentar de novo. O arquivo está na aba
+    // Arquivos do card — subi-lo outra vez o duplicava. Conta como entregue, e a
+    // linha "Arquivo anexado: …" de baixo diz quem o pôs.
+    if (a.noDrive) {
+      r.enviados.push(a.arquivo.name)
+      onEstado(a.chave, { fase: 'gravando' })
+      continue
+    }
     // A PORTA DE NOVO, aqui: a lista é da tela, e um arquivo que passasse do
     // limite seria recusado pela função só depois de subir inteiro.
     if (a.arquivo.size > LIMITE_DO_ANEXO) {
