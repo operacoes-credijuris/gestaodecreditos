@@ -47,6 +47,8 @@ describe('corpoEditavel e textoEditado', () => {
     expect(f).toContain("if (!nota || Number(nota.entity_id) !== leadId)")
     expect(f).toContain("if (nota.note_type !== 'common')")
     expect(f).toContain('if (ehNotaNossa(original, criadaEm))')
+    // O Kommo exige o card no PATCH da nota (400 FieldMissing: entity_id, 23/10/2026).
+    expect(f).toContain("JSON.stringify({ entity_id: leadId, note_type: 'common', params: { text: texto } })")
     const t = readFileSync(join(__dirname, '..', '..', 'pages/operacional/AnaliseCredito.tsx'), 'utf8')
     expect(t).toContain('onEditarNota={editarNotaDoCard}')
   })

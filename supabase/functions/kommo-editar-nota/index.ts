@@ -69,7 +69,10 @@ Deno.serve(async (req: Request) => {
     const texto = textoEditado(original, novoCorpo, editor, new Date())
     const res = await kommoFetch(
       `${base}/leads/notes/${notaId}`,
-      { method: 'PATCH', headers, body: JSON.stringify({ note_type: 'common', params: { text: texto } }) },
+      // O `entity_id` É OBRIGATÓRIO (23/10/2026): sem ele o Kommo devolvia 400
+      // "FieldMissing: entity_id" — a documentação do PATCH não o lista, mas a
+      // validação do Kommo o exige. É o card já conferido acima.
+      { method: 'PATCH', headers, body: JSON.stringify({ entity_id: leadId, note_type: 'common', params: { text: texto } }) },
       { idempotente: true },
     )
     if (!res.ok) {
