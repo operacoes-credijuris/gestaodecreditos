@@ -261,19 +261,24 @@ export default function ContatosServentias() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
+  // Filtro por tribunal — 'todos' mostra todos os órgãos.
+  const [filtroTribunal, setFiltroTribunal] = useState('todos')
 
   // VEIO DA BUSCA GERAL (Ctrl+K) com um contato escolhido: a lista já abre
   // filtrada pelo órgão dele. O pedido sai do histórico logo depois.
+  //
+  // O FILTRO DE TRIBUNAL VOLTA A "TODOS" (varredura C, 23/10/2026): com o
+  // Ctrl+K usado já nesta tela, um tribunal escolhido antes escondia o órgão
+  // pedido, e a busca geral levava a "Nenhum órgão corresponde".
   const location = useLocation()
   const navigate = useNavigate()
   const { filtrarContatos } = lerPedidoDaBusca(location.state)
   useEffect(() => {
     if (!filtrarContatos) return
     setBusca(filtrarContatos)
+    setFiltroTribunal('todos')
     navigate(location.pathname, { replace: true, state: null })
   }, [filtrarContatos, navigate, location.pathname])
-  // Filtro por tribunal — 'todos' mostra todos os órgãos.
-  const [filtroTribunal, setFiltroTribunal] = useState('todos')
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
   const [toDelete, setToDelete] = useState<ContatoServentia | null>(null)
   // Erros de validação por campo (mensagens inline nos <Field>).

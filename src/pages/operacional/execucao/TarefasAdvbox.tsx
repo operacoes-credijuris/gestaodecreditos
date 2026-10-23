@@ -41,6 +41,7 @@ import { formatCNJ, formatNome, hojeISO, onlyDigits as dig, sentenceCase } from 
 import { perguntarDescarte } from '@/lib/descarte'
 import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
 import { BotaoCopiar } from '@/components/BotaoCopiar'
+import { useHojeQueAnda } from '@/lib/hojeQueAnda'
 
 const VISOES_DO_PRAZO = ['fatais', 'sem_prazo'] as const
 
@@ -191,7 +192,6 @@ function iniciais(nome: string): string {
 }
 
 export default function TarefasAdvbox() {
-  const qc = useQueryClient()
   const toast = useToast()
 
   // Lista ao vivo do ADVBOX — recarrega ao abrir a página e ao focar a aba.
@@ -208,22 +208,11 @@ export default function TarefasAdvbox() {
   // e uma data fixa deixaria os dados frescos sendo medidos por uma régua
   // velha — tarefa que vence hoje seguiria marcada "amanhã", e vencida
   // seguiria na lista. Só um F5 corrigia.
-  const [hoje, setHoje] = useState(() => new Date().toLocaleDateString('sv-SE'))
-  useEffect(() => {
-    const sincronizar = () => setHoje(new Date().toLocaleDateString('sv-SE'))
-    document.addEventListener('visibilitychange', sincronizar)
-    window.addEventListener('focus', sincronizar)
-    // Os eventos acima só disparam se alguém interagir; o intervalo cobre o
-    // caso real do painel deixado aberto e visível a noite toda. Rechamar com
-    // a mesma string é no-op no React, então nos outros 1439 minutos do dia
-    // isto não provoca re-render.
-    const timer = setInterval(sincronizar, 60_000)
-    return () => {
-      document.removeEventListener('visibilitychange', sincronizar)
-      window.removeEventListener('focus', sincronizar)
-      clearInterval(timer)
-    }
-  }, [])
+  //
+  // O RELÓGIO É O DA PLATAFORMA (lib/hojeQueAnda.ts, varredura C, 23/10/2026):
+  // esta tela tinha uma cópia própria dele — a mesma conferência ao voltar à aba
+  // e a cada minuto —, e duas cópias divergem na primeira correção.
+  const hoje = useHojeQueAnda()
   // Tarefas com prazo vencido NÃO são mais escondidas: em Fatais elas ficam
   // no grupo "Vencidas", abaixo das pendentes (mesmo padrão de Publicações,
   // com Novas e Tratadas). Sumir com prazo estourado escondia o problema.
@@ -614,7 +603,6 @@ export default function TarefasAdvbox() {
         open={novo}
         onClose={() => setNovo(false)}
         onCreated={() => {
-          qc.invalidateQueries({ queryKey: ['advbox-tarefas'] })
           setNovo(false)
           toast.success('Tarefa criada no ADVBOX.')
         }}
@@ -666,6 +654,7 @@ export function NovaTarefaModal({
   processoNumero?: string | null
 }) {
   const toast = useToast()
+  const qc = useQueryClient()
   const { profile, isAdmin } = useAuth()
   const [form, setForm] = useState<FormState>({ ...FORM_VAZIO })
   /**
@@ -782,6 +771,11 @@ export function NovaTarefaModal({
         comments: form.comments || null,
       }),
     onSuccess: () => {
+      // A LISTA DE TAREFAS SE ATUALIZA DAQUI (varredura C, 23/10/2026), e não de
+      // quem abriu a janela: só a tela de Tarefas invalidava, e a tarefa criada
+      // pela Publicação deixava o cache da lista para trás. Na janela, vale para
+      // as duas portas sem cada uma ter de lembrar.
+      void qc.invalidateQueries({ queryKey: ['advbox-tarefas'] })
       setForm({ ...FORM_VAZIO })
       onCreated()
     },

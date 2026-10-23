@@ -424,7 +424,9 @@ export function useApensosManager(parentField: ParentField) {
           danger
           loading={remove.isPending}
           title="Excluir apenso"
-          message={`Excluir o apenso ${toDelete?.numero || ''}?`}
+          // O número FORMATADO, como no cartão de onde se pediu a exclusão: cru,
+          // ele não se parecia com o que se acabou de ler.
+          message={`Excluir o apenso ${formatCNJ(toDelete?.numero ?? '')}?`}
           confirmLabel="Excluir"
           onConfirm={confirmDelete}
           onClose={() => setToDelete(null)}

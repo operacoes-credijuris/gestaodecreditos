@@ -84,7 +84,13 @@ export default function Requerimentos() {
   const [editing, setEditing] = useState<Partial<Requerimento> | null>(null)
   const [toDelete, setToDelete] = useState<Requerimento | null>(null)
   // Requerimento com a ficha aberta no painel lateral (clique na linha).
-  const [detalhe, setDetalhe] = useState<Requerimento | null>(null)
+  const [detalheClicado, setDetalhe] = useState<Requerimento | null>(null)
+  // A FICHA LÊ A VERSÃO MAIS NOVA DA LISTA, como a de Créditos (varredura C,
+  // 23/10/2026): com a cópia do clique, a recarga da lista (outra pessoa editou,
+  // a janela voltou ao foco) não chegava à ficha aberta.
+  const detalhe = detalheClicado
+    ? (data?.find((r) => r.id === detalheClicado.id) ?? detalheClicado)
+    : null
   // Erros de validação por campo (mensagens inline nos <Field>).
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de dirty.
@@ -217,7 +223,7 @@ export default function Requerimentos() {
         )
       // sem_numero NÃO é falha: é o estado normal de um requerimento que ainda não
       // tem número. Mas preencher depois NÃO cadastra — a edição nunca escreve na
-      // ADVBOX (ver handleSalvar) —, e o aviso não pode prometer o contrário.
+      // ADVBOX (ver handleSubmit) —, e o aviso não pode prometer o contrário.
       else if (r.motivo === 'sem_numero')
         toast.info('Sem número, não cadastrei na ADVBOX. Preencher depois não cadastra: faça na ADVBOX, à mão.')
       else if (r.aviso) toast.error(r.aviso)

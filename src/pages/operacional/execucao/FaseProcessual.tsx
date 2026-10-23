@@ -17,8 +17,14 @@ import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } 
 import { contar, formatCNJ, formatDate } from '@/lib/format'
 import type { Processo } from '@/lib/types'
 import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
-import { aplicarSituacao, dataIncompleta, type PedidoDeSituacao } from '@/lib/situacaoDaFase'
+import {
+  aplicarSituacao,
+  dataIncompleta,
+  localizarPorDigitos,
+  type PedidoDeSituacao,
+} from '@/lib/situacaoDaFase'
 import { isoDiasAtras } from '@/lib/contadoresDoMenu'
+import { lerTodasAsPaginas } from '@/lib/leituraPaginada'
 
 /** Selo de texto longo que quebra em vez de vazar da tela (ver a lista de movimentações). */
 const SELO_QUE_QUEBRA = 'h-auto min-h-[20px] max-w-full whitespace-normal py-s0.5'
@@ -79,11 +85,13 @@ const dig = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 function useFaseData() {
   return useQuery({
     queryKey: ['processos_fase'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('processos_fase').select('*').limit(5000)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as FaseRow[]
-    },
+    // PAGINADO (varredura C, 23/10/2026): o `.limit(5000)` de antes parava no
+    // teto de 1000 linhas do servidor, calado — passando disso, os créditos de
+    // fora da página caíam em "ainda sem fase" (lib/leituraPaginada.ts).
+    queryFn: () =>
+      lerTodasAsPaginas<FaseRow>((de, ate) =>
+        supabase.from('processos_fase').select('*').order('processo_id').range(de, ate),
+      ),
   })
 }
 
@@ -194,12 +202,15 @@ function useDefinirSituacao() {
  */
 function useMovimentacoesRecentes(processos: Processo[]) {
   const apensos = useQuery({
-    queryKey: ['apensos_fase_processual'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('apensos').select('processo_id, numero').limit(5000)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as { processo_id: string | null; numero: string | null }[]
-    },
+    // SOB A RAIZ 'apensos' (varredura C, 23/10/2026): criar ou excluir apenso
+    // invalida ['apensos'], e com a chave antiga ('apensos_fase_processual') esta
+    // lista seguia com o apenso apagado — a movimentação dele ainda caía no
+    // crédito. Paginada pelo mesmo teto calado de 1000 linhas.
+    queryKey: ['apensos', 'fase_processual'],
+    queryFn: () =>
+      lerTodasAsPaginas<{ processo_id: string | null; numero: string | null }>((de, ate) =>
+        supabase.from('apensos').select('processo_id, numero').order('id').range(de, ate),
+      ),
   })
 
   const movs = useQuery({
@@ -309,6 +320,7 @@ function SituacaoSelect({
   const [nomeEditado, setNomeEditado] = useState('')
   const [corEditada, setCorEditada] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const botaoRef = useRef<HTMLButtonElement>(null)
 
   const situacaoAtual = opcoes.find((o) => o.id === situacaoIdAtual) ?? null
 
@@ -361,11 +373,26 @@ function SituacaoSelect({
   }
 
   return (
-    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={ref}
+      className="relative"
+      onClick={(e) => e.stopPropagation()}
+      // O ESC FECHA O MENU, E SÓ ELE (varredura C, 23/10/2026): na ficha do
+      // crédito, o Esc com o menu aberto chegava à gaveta e fechava a ficha
+      // inteira — e o menu, sem dono, ficava para trás. O foco volta ao botão.
+      // (Os campos de edição e criação tratam o próprio Esc antes, e param aqui.)
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape' || !aberto) return
+        e.stopPropagation()
+        setAberto(false)
+        botaoRef.current?.focus()
+      }}
+    >
       {/* O BOTÃO DA SITUAÇÃO (o `.sit-btn` da amostra): a bolinha na cor da
           situação e o nome em texto de leitura. A cor carrega sentido para quem
           usa, mas não fala sozinha — o nome está sempre ao lado. */}
       <button
+        ref={botaoRef}
         type="button"
         onClick={() => setAberto((v) => !v)}
         aria-expanded={aberto}
@@ -467,7 +494,11 @@ function SituacaoSelect({
                   value={nomeEditado}
                   onChange={(e) => setNomeEditado(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Escape') setEditandoId(null)
+                    // O Esc desfaz só a edição; o menu continua aberto.
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      setEditandoId(null)
+                    }
                     if (e.key === 'Enter') confirmarEdicao()
                   }}
                 />
@@ -574,7 +605,9 @@ function SituacaoSelect({
                   value={novoNome}
                   onChange={(e) => setNovoNome(e.target.value)}
                   onKeyDown={(e) => {
+                    // O Esc desfaz só a criação; o menu continua aberto.
                     if (e.key === 'Escape') {
+                      e.stopPropagation()
                       setNovoAberto(false)
                       setNovoNome('')
                     }
@@ -794,11 +827,18 @@ export function FaseProcessual({
       toast.error('Digite ao menos 4 dígitos do número do processo.')
       return
     }
-    const encontrado = processos.find((p) => dig(p.numero_cnj).includes(alvo))
-    if (!encontrado) {
+    // AMBÍGUO NÃO ABRE NADA (lib/situacaoDaFase.ts): antes abria o primeiro que
+    // contivesse os dígitos, e "2023" levava à ficha de um crédito qualquer.
+    const achado = localizarPorDigitos(processos, alvo)
+    if (achado.tipo === 'nenhum') {
       toast.error('Nenhum processo encontrado com esse número.')
       return
     }
+    if (achado.tipo === 'varios') {
+      toast.info(`${achado.quantos} processos têm esses dígitos. Digite mais do número.`)
+      return
+    }
+    const encontrado = achado.processo
     if (encontrado.status === 'ativo' || encontrado.status === 'complementar') {
       setTrilha(encontrado.status)
       const r = faseDe.get(encontrado.id)

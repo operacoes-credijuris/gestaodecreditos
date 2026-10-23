@@ -36,3 +36,33 @@ export function aplicarSituacao<T extends PedidoDeSituacao>(linhas: readonly T[]
 export function dataIncompleta(valor: string, badInput: boolean | undefined): boolean {
   return valor === '' && !!badInput
 }
+
+/**
+ * O "Nº do processo e Enter" da Fase processual: qual crédito o número digitado
+ * aponta (varredura C, 23/10/2026).
+ *
+ * ANTES, O PRIMEIRO QUE CONTIVESSE OS DÍGITOS. Com quatro dígitos ("2023", o ano
+ * de metade da carteira), a busca abria a ficha de um crédito qualquer — e quem
+ * digitou tratava a situação do crédito errado sem perceber. Agora: o número
+ * inteiro casa direto; senão, só um que contenha os dígitos; mais de um é
+ * ambíguo, e a tela pede mais dígitos em vez de escolher por conta própria.
+ */
+export type ResultadoDaLocalizacao<T> =
+  | { tipo: 'um'; processo: T }
+  | { tipo: 'nenhum' }
+  | { tipo: 'varios'; quantos: number }
+
+export function localizarPorDigitos<T extends { numero_cnj: string | null }>(
+  processos: readonly T[],
+  digitosDigitados: string,
+): ResultadoDaLocalizacao<T> {
+  const alvo = digitosDigitados.replace(/\D/g, '')
+  if (!alvo) return { tipo: 'nenhum' }
+  const dig = (p: T) => (p.numero_cnj ?? '').replace(/\D/g, '')
+  const exato = processos.find((p) => dig(p) === alvo)
+  if (exato) return { tipo: 'um', processo: exato }
+  const contem = processos.filter((p) => dig(p).includes(alvo))
+  if (contem.length === 0) return { tipo: 'nenhum' }
+  if (contem.length === 1) return { tipo: 'um', processo: contem[0] }
+  return { tipo: 'varios', quantos: contem.length }
+}

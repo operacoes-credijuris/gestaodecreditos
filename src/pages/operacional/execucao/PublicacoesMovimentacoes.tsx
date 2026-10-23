@@ -43,6 +43,8 @@ import {
   tempoDecorrido,
 } from '@/lib/format'
 import { BotaoCopiar } from '@/components/BotaoCopiar'
+import { useHojeQueAnda } from '@/lib/hojeQueAnda'
+import { lerTodasAsPaginas, type PaginaDaLeitura } from '@/lib/leituraPaginada'
 
 // Teto de linhas por consulta, para a tela não puxar a tabela inteira. Bater no
 // teto ESCONDE registro — e publicação escondida é intimação que ninguém leu —,
@@ -65,20 +67,10 @@ const LIMITE_LINHAS = 1000
  * disso, o aviso de corte continua valendo (ele compara com a contagem exata).
  */
 const MAX_PAGINAS_DA_LISTA = 5
-async function lerEmPaginas<T>(
-  pagina: (de: number, ate: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
-): Promise<T[]> {
-  const todas: T[] = []
-  for (let i = 0; i < MAX_PAGINAS_DA_LISTA; i++) {
-    const de = i * LIMITE_LINHAS
-    const { data, error } = await pagina(de, de + LIMITE_LINHAS - 1)
-    if (error) throw new Error(error.message)
-    const lote = (data ?? []) as T[]
-    todas.push(...lote)
-    if (lote.length < LIMITE_LINHAS) break
-  }
-  return todas
-}
+// O laço é o de lib/leituraPaginada.ts (varredura C, 23/10/2026), com o teto
+// de páginas desta tela.
+const lerEmPaginas = <T,>(pagina: PaginaDaLeitura): Promise<T[]> =>
+  lerTodasAsPaginas<T>(pagina, { porPagina: LIMITE_LINHAS, maxPaginas: MAX_PAGINAS_DA_LISTA })
 
 /**
  * Quantos registros existem na janela (contagem leve: head:true não baixa
@@ -110,6 +102,21 @@ function useContagem(tabela: string, campoData: string, desde: string) {
 // dupla pela contagem da pílula e pela lista, que precisam andar juntas.
 const isoDiasAtras = (n: number) =>
   new Date(Date.now() - n * 86400000).toLocaleDateString('sv-SE')
+
+/**
+ * O COMEÇO DA JANELA ANDA COM O DIA (varredura C, 23/10/2026). Era um
+ * `useMemo(..., [])`: a pílula (montada com a página) e a lista (montada de novo
+ * a cada troca de aba) congelavam a data cada uma no SEU momento. Atravessada a
+ * meia-noite, as duas janelas divergiam por um dia — a contagem era de uma, a
+ * lista de outra, e o aviso "mostrando N de M… ficaram de fora" disparava sem
+ * corte nenhum. Com o mesmo relógio (lib/hojeQueAnda.ts), as duas viram juntas.
+ */
+function useInicioDaJanela(dias: number): string {
+  const hoje = useHojeQueAnda()
+  // `hoje` é o gatilho: a data muda, a janela recalcula.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => isoDiasAtras(dias), [hoje, dias])
+}
 
 // Dispara a sincronização UMA vez ao montar (o guard por ref preserva o
 // comportamento no StrictMode). Compartilhado pelas abas Publicações e
@@ -225,8 +232,8 @@ export default function PublicacoesMovimentacoes() {
   const [aba, setAba] = useState<'publicacoes' | 'movimentacoes' | 'fase'>('publicacoes')
   const [busca, setBusca] = useState('')
 
-  const ini30 = useMemo(() => isoDiasAtras(30), [])
-  const ini20 = useMemo(() => isoDiasAtras(20), [])
+  const ini30 = useInicioDaJanela(30)
+  const ini20 = useInicioDaJanela(20)
   const nPub = useContagem('djen_publicacoes', 'data_disponibilizacao', ini30)
   const nMov = useContagem('advbox_movimentacoes', 'data', ini20)
 
@@ -288,8 +295,12 @@ export default function PublicacoesMovimentacoes() {
  * divergindo aos poucos.
  */
 function FaseProcessualTab() {
-  const { data, isError, error, refetch } = processosCrud.useList()
+  const { data, isLoading, isError, error, refetch } = processosCrud.useList()
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
+  // A LEITURA EM CURSO TAMBÉM NÃO É ZERO (varredura C, 23/10/2026): enquanto os
+  // créditos chegavam, a trilha dizia "Ativos 0 · Complementares 0" e os cartões
+  // das fases, 0 crédito — afirmação feita antes de olhar.
+  if (isLoading) return <Loading label="Carregando créditos…" />
   // SEM ISTO A FALHA VIRAVA ZERO: lista de créditos que não carregou chegava como
   // lista vazia, e toda fase aparecia com 0 crédito.
   if (isError)
@@ -339,7 +350,7 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
   const resolve = useResolveProcesso()
 
   // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
-  const ini30 = useMemo(() => isoDiasAtras(30), [])
+  const ini30 = useInicioDaJanela(30)
   // Mesma chave da pílula: o React Query devolve o valor já em cache, sem
   // segunda requisição. Serve para saber se a lista abaixo veio truncada.
   const total = useContagem('djen_publicacoes', 'data_disponibilizacao', ini30)
@@ -925,7 +936,7 @@ function Movimentacoes({ busca }: { busca: string }) {
   const resolve = useResolveProcesso()
 
   // Janela de 20 dias (data do andamento >= hoje - 20, horário local).
-  const ini20 = useMemo(() => isoDiasAtras(20), [])
+  const ini20 = useInicioDaJanela(20)
   const total = useContagem('advbox_movimentacoes', 'data', ini20)
 
   const lista = useQuery({
@@ -945,16 +956,21 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   // Status por processo (última movimentação) — grupo Paralisados. Se a tabela
   // ainda não existir, falha em silêncio (paralisados = []) sem quebrar a aba.
+  //
+  // PAGINADO (varredura C, 23/10/2026): o `.limit(5000)` parava no teto de 1000
+  // linhas do servidor, calado — passando disso, processo parado de verdade
+  // simplesmente não aparecia em Paralisados, que é a pior lista para esconder.
   const status = useQuery({
     queryKey: ['advbox_processo_status'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('advbox_processo_status')
-        .select('*')
-        .limit(5000)
-      if (error) throw new Error(error.message)
-      return (data ?? []) as StatusRow[]
-    },
+    queryFn: () =>
+      lerTodasAsPaginas<StatusRow>((de, ate) =>
+        supabase
+          .from('advbox_processo_status')
+          .select('numero_processo, ultima_movimentacao')
+          // Ordem estável entre as páginas (uma linha por processo).
+          .order('numero_processo')
+          .range(de, ate),
+      ),
     retry: false,
   })
 
