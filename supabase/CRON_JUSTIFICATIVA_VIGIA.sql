@@ -7,9 +7,9 @@
 -- com a sessão de quem olhava boa — com o 401, a frente morta não voltou, e a
 -- geração parou "pesquisando na internet".
 --
--- A FUNÇÃO TEM verify_jwt = true (config.toml): o gateway pede um JWT, e por
--- isso o pedido leva a chave PÚBLICA (anon) no Authorization — a mesma que vai
--- no site, não é segredo. Quem autoriza a ação é o x-cron-secret, conferido
+-- A FUNÇÃO TEM verify_jwt = false (config.toml, desde 23/10/2026): com o
+-- gateway conferindo o JWT, este cron levava 401 "Invalid JWT" a cada disparo,
+-- antes de a função ver o segredo. Quem autoriza é o x-cron-secret, conferido
 -- dentro da função.
 --
 -- Rodar 1x no SQL Editor do Supabase (projeto dnxqajfxmdayqljyiqps). O segredo
@@ -36,7 +36,6 @@ begin
       url     := 'https://dnxqajfxmdayqljyiqps.supabase.co/functions/v1/justificativa-tecnica',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRueHFhamZ4bWRheXFsanlpcXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNDUwNTUsImV4cCI6MjA5NzcyMTA1NX0.GzQCRzic3dM-vmIL0U2bPCD9Ds18VzZF2WvOLhqDmgA',
         'x-cron-secret', %L
       ),
       body    := '{"acao":"vigiar-todas"}'::jsonb

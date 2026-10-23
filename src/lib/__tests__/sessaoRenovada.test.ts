@@ -47,4 +47,12 @@ describe('o servidor', () => {
     expect(f).toMatch(/if \(acao === 'vigiar-todas'\) \{\r?\n\s+if \(!interna\) return erro\(ERRO_ACESSO, 401\)/)
     expect(f).toContain(".eq('status', 'gerando')")
   })
+  it('o cron do vigia passa o gateway: a função confere o acesso por conta própria (23/10/2026)', () => {
+    const toml = ler('supabase/config.toml')
+    expect(toml).toMatch(/\[functions\.justificativa-tecnica\]\r?\nverify_jwt = false/)
+    const f = ler('supabase/functions/justificativa-tecnica/index.ts')
+    for (const acao of ['vigiar', 'gerar', 'rascunho', 'enviar']) {
+      expect(f).toMatch(new RegExp(`async function ${acao}\\(req[^)]*\\)[^{]*\\{\\r?\\n\\s+const caller = await getCallerAtivo\\(req, svc\\)`))
+    }
+  })
 })

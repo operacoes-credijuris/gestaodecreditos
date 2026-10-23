@@ -127,8 +127,14 @@ verify_jwt = false
 [functions.fase-processual]
 verify_jwt = false
 
-# Justificativa técnica da proposta: chamada pelo app (JWT do usuário) e por ela
-# mesma, para encadear as etapas da geração (service_role no Authorization, que
-# passa pelo gateway). A própria função confere quem pode cada ação.
+# Justificativa técnica da proposta: chamada pelo app (JWT do usuário), por ela
+# mesma, para encadear as etapas da geração (service_role), e pelo cron do vigia
+# (x-cron-secret). A própria função confere quem pode cada ação: gerar,
+# rascunho, enviar e vigiar pedem getCallerAtivo; passo e vigiar-todas, o
+# segredo do cron ou a service_role.
+#
+# verify_jwt = false DESDE 23/10/2026: com o gateway conferindo o JWT, o cron do
+# vigia levava 401 "UNAUTHORIZED_INVALID_JWT_FORMAT" a cada 2 minutos, antes de
+# a função ver o segredo — o mesmo motivo da fase-processual acima.
 [functions.justificativa-tecnica]
-verify_jwt = true
+verify_jwt = false
