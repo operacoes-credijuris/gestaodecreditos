@@ -1134,7 +1134,9 @@ function JanelaDeMensagem({
   // ficar habilitado e sem spinner, e um segundo clique disparava tudo de novo.
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
-  const semTexto = mensagem.trim().length < 10
+  // A RÉGUA DO MOTIVO É UMA SÓ (`MINIMO_DO_MOTIVO`, 23/10/2026): esta janela
+  // escrevia o 10 à mão em cinco lugares, e o "Não fechou" lia a constante.
+  const semTexto = !motivoSuficiente(mensagem)
   /** As notas que esta saída deixa no card — o resumo só entra ao aprovar, numa nota própria. */
   const notasDe = (acao: AcaoTela) =>
     notasDoDesfecho({ papel: acao.papel, mensagem, resumo: comResumo ? textoDoResumo : null })
@@ -1146,7 +1148,7 @@ function JanelaDeMensagem({
     if (movida) return acao.statusId === movida.statusId && notasDe(acao).length > 0
     // COM A CAIXA DO RESUMO, aprovar sem resumo gravado pede o resumo escrito à
     // mão NA CAIXA DELE, com a mesma régua — e não na mensagem.
-    if (comResumo && semResumoDe(acao)) return textoDoResumo.trim().length >= 10
+    if (comResumo && semResumoDe(acao)) return motivoSuficiente(textoDoResumo)
     return !(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto
   }
   const semResumo = acoes.some(semResumoDe)
@@ -1277,7 +1279,7 @@ function JanelaDeMensagem({
               Complete o que o motor deixou "a confirmar" (a extensão da cessão, por exemplo). Nas outras
               saídas ele não vai para o card.
             </p>
-            {semResumo && textoDoResumo.trim().length > 0 && textoDoResumo.trim().length < 10 && (
+            {semResumo && textoDoResumo.trim().length > 0 && !motivoSuficiente(textoDoResumo) && (
               <DicaDeAviso>Escreva o resumo por extenso — é o que a proposta vai ler.</DicaDeAviso>
             )}
           </div>
@@ -1331,7 +1333,7 @@ function JanelaDeMensagem({
         }
         onChange={(e) => mudarMensagem(e.target.value)}
       />
-      {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
+      {exigeMotivo && mensagem.trim().length > 0 && !motivoSuficiente(mensagem) && (
         <DicaDeAviso>Escreva a razão por extenso — ela fica no card como registro da decisão.</DicaDeAviso>
       )}
       {/* POR QUE O BOTÃO ESTÁ APAGADO, dito antes de a pessoa tentar (revisão de
@@ -1344,7 +1346,7 @@ function JanelaDeMensagem({
             : acoes.filter(exigeMotivoDe).length > 1
               ? `${nomesQueExigemMotivo} liberam`
               : `${nomesQueExigemMotivo} libera`}{' '}
-          com o motivo escrito (10 caracteres ou mais).
+          com o motivo escrito ({MINIMO_DO_MOTIVO} caracteres ou mais).
         </p>
       )}
       {erro && (
@@ -1937,7 +1939,10 @@ function BotaoVerPropostas({
   if (propostas.length === 0) {
     return onCotar ? <BotaoCotarProposta lead={lead} onCotar={onCotar} ocupado={ocupado} vazio /> : null
   }
-  const rotulo = `Ver propostas cadastradas (${propostas.length})`
+  // O NOME QUE SE OUVE CONTÉM O QUE SE LÊ (23/10/2026): "3 propostas" na pílula,
+  // e o leitor de tela e o comando de voz dizem "Ver as 3 propostas cadastradas".
+  // Era "Ver propostas cadastradas (3)", e "clicar em 3 propostas" não achava o botão.
+  const rotulo = `Ver as ${rotuloDasPropostas(propostas.length)} cadastradas`
   return (
     // A PÍLULA E O "+" JUNTOS: o "+" é o que muda o que a pílula mostra.
     <div className="flex items-center gap-s1">
@@ -3358,8 +3363,11 @@ function CardCredito({
       : lead.nota_texto?.trim()
         ? [{ id: 0, texto: lead.nota_texto, criado_em: null, autor: null }]
         : []
-  const posteriores = notas.length - 1
   const grupos = useMemo(() => agruparNotas(notas), [notas])
+  // O "(+N)" CONTA O QUE O HISTÓRICO MOSTRA (23/10/2026): os blocos, com o
+  // anexo junto da anotação dele. Contava as notas cruas, e um comentário com
+  // dois prints dizia "+3" para um histórico de uma entrada a mais.
+  const posteriores = grupos.length - 1
   const ultima = grupos[grupos.length - 1]
 
   // O TÍTULO QUEBRADO EM CAMPOS (amostra), pela mesma leitura que a análise usa.
@@ -4338,6 +4346,9 @@ export default function AnaliseCredito() {
   // toa. Vive enquanto a página estiver aberta; o sync limpa (ver abaixo),
   // porque o PDF do card pode ter sido substituído no Kommo.
   const [arquivosCache, setArquivosCache] = useState<Record<number, ArquivoLido[]>>({})
+  /** O cache como está agora, para quem roda depois de um `await` (ver `lerArquivosComCache`). */
+  const arquivosCacheAtual = useRef(arquivosCache)
+  arquivosCacheAtual.current = arquivosCache
   /**
    * Quantos cards ficam com os anexos na memória.
    *
@@ -5008,7 +5019,11 @@ export default function AnaliseCredito() {
     aoProgresso?: (feitos: number, total: number, nome: string) => void,
   ): Promise<ArquivoLido[]> {
     const id = lead.kommo_lead_id
-    const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead, aoProgresso))
+    // O CACHE DE AGORA, e não o do render em que a função nasceu (23/10/2026): a
+    // fila dos autos chama a próxima leitura do `finally` da anterior, com a
+    // função de minutos atrás — que não via o card já lido e baixava e relia
+    // de novo os PDFs dele, às vezes centenas de MB.
+    const lidos = arquivosCacheAtual.current[id] ?? (await lerUmaVezSo(lead, aoProgresso))
     guardarNoCache(id, lidos)
     return lidos
   }
@@ -5430,9 +5445,14 @@ export default function AnaliseCredito() {
    * card usa (título primeiro, anotação depois). Só para a etapa aberta: é o que
    * o filtro "Sem nº do processo" e a contagem dele precisam.
    */
+  //
+  // PELA COLUNA INTEIRA, e não pela lista da busca (23/10/2026): a lista muda a
+  // cada tecla, e o mapa relia o cadastro — todas as anotações de cada card —
+  // da coluna toda a cada letra digitada. A coluna só muda com os cards.
+  const colunaAberta = abaAtual ? porAba[abaAtual.key] : undefined
   const temNumero = useMemo(
-    () => new Map(lista.map((l) => [l.kommo_lead_id, Boolean(lerCardCredijuris(l).numero)])),
-    [lista],
+    () => new Map((colunaAberta ?? []).map((l) => [l.kommo_lead_id, Boolean(lerCardCredijuris(l).numero)])),
+    [colunaAberta],
   )
   const ehPronta = useCallback((l: KommoLead) => prontas.data?.has(l.kommo_lead_id) ?? false, [prontas.data])
   // OS FILTROS QUE A ETAPA OFERECE. "Com cotação" só onde a etiqueta do fundo é
@@ -7025,7 +7045,15 @@ export default function AnaliseCredito() {
           </>
         }
         onConfirm={() => semPropostaDe && void semPropostaNoCard(semPropostaDe)}
-        onClose={() => setSemPropostaDe(null)}
+        // FECHAR ESQUECE O MOVIMENTO SEM NOTA, como em toda janela que move
+        // (23/10/2026): era a única que não esquecia. Depois de "moveu, mas a
+        // nota não subiu", fechar deixava o card marcado como "já movido" — e
+        // todo movimento seguinte dele na sessão era recusado, ou PULADO se
+        // fosse de novo para Reprovados.
+        onClose={() => {
+          if (semPropostaDe) esquecerMovimentos(semPropostaDe.kommo_lead_id)
+          setSemPropostaDe(null)
+        }}
       />
 
       {mensagemDoCard && (
