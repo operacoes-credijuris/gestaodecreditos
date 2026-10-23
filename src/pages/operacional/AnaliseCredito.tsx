@@ -1134,7 +1134,9 @@ function JanelaDeMensagem({
   // ficar habilitado e sem spinner, e um segundo clique disparava tudo de novo.
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
-  const semTexto = mensagem.trim().length < 10
+  // A RÉGUA DO MOTIVO É UMA SÓ (`MINIMO_DO_MOTIVO`, 23/10/2026): esta janela
+  // escrevia o 10 à mão em cinco lugares, e o "Não fechou" lia a constante.
+  const semTexto = !motivoSuficiente(mensagem)
   /** As notas que esta saída deixa no card — o resumo só entra ao aprovar, numa nota própria. */
   const notasDe = (acao: AcaoTela) =>
     notasDoDesfecho({ papel: acao.papel, mensagem, resumo: comResumo ? textoDoResumo : null })
@@ -1146,7 +1148,7 @@ function JanelaDeMensagem({
     if (movida) return acao.statusId === movida.statusId && notasDe(acao).length > 0
     // COM A CAIXA DO RESUMO, aprovar sem resumo gravado pede o resumo escrito à
     // mão NA CAIXA DELE, com a mesma régua — e não na mensagem.
-    if (comResumo && semResumoDe(acao)) return textoDoResumo.trim().length >= 10
+    if (comResumo && semResumoDe(acao)) return motivoSuficiente(textoDoResumo)
     return !(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto
   }
   const semResumo = acoes.some(semResumoDe)
@@ -1277,7 +1279,7 @@ function JanelaDeMensagem({
               Complete o que o motor deixou "a confirmar" (a extensão da cessão, por exemplo). Nas outras
               saídas ele não vai para o card.
             </p>
-            {semResumo && textoDoResumo.trim().length > 0 && textoDoResumo.trim().length < 10 && (
+            {semResumo && textoDoResumo.trim().length > 0 && !motivoSuficiente(textoDoResumo) && (
               <DicaDeAviso>Escreva o resumo por extenso — é o que a proposta vai ler.</DicaDeAviso>
             )}
           </div>
@@ -1331,7 +1333,7 @@ function JanelaDeMensagem({
         }
         onChange={(e) => mudarMensagem(e.target.value)}
       />
-      {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
+      {exigeMotivo && mensagem.trim().length > 0 && !motivoSuficiente(mensagem) && (
         <DicaDeAviso>Escreva a razão por extenso — ela fica no card como registro da decisão.</DicaDeAviso>
       )}
       {/* POR QUE O BOTÃO ESTÁ APAGADO, dito antes de a pessoa tentar (revisão de
@@ -1344,7 +1346,7 @@ function JanelaDeMensagem({
             : acoes.filter(exigeMotivoDe).length > 1
               ? `${nomesQueExigemMotivo} liberam`
               : `${nomesQueExigemMotivo} libera`}{' '}
-          com o motivo escrito (10 caracteres ou mais).
+          com o motivo escrito ({MINIMO_DO_MOTIVO} caracteres ou mais).
         </p>
       )}
       {erro && (
@@ -1937,7 +1939,10 @@ function BotaoVerPropostas({
   if (propostas.length === 0) {
     return onCotar ? <BotaoCotarProposta lead={lead} onCotar={onCotar} ocupado={ocupado} vazio /> : null
   }
-  const rotulo = `Ver propostas cadastradas (${propostas.length})`
+  // O NOME QUE SE OUVE CONTÉM O QUE SE LÊ (23/10/2026): "3 propostas" na pílula,
+  // e o leitor de tela e o comando de voz dizem "Ver as 3 propostas cadastradas".
+  // Era "Ver propostas cadastradas (3)", e "clicar em 3 propostas" não achava o botão.
+  const rotulo = `Ver as ${rotuloDasPropostas(propostas.length)} cadastradas`
   return (
     // A PÍLULA E O "+" JUNTOS: o "+" é o que muda o que a pílula mostra.
     <div className="flex items-center gap-s1">
@@ -3358,8 +3363,11 @@ function CardCredito({
       : lead.nota_texto?.trim()
         ? [{ id: 0, texto: lead.nota_texto, criado_em: null, autor: null }]
         : []
-  const posteriores = notas.length - 1
   const grupos = useMemo(() => agruparNotas(notas), [notas])
+  // O "(+N)" CONTA O QUE O HISTÓRICO MOSTRA (23/10/2026): os blocos, com o
+  // anexo junto da anotação dele. Contava as notas cruas, e um comentário com
+  // dois prints dizia "+3" para um histórico de uma entrada a mais.
+  const posteriores = grupos.length - 1
   const ultima = grupos[grupos.length - 1]
 
   // O TÍTULO QUEBRADO EM CAMPOS (amostra), pela mesma leitura que a análise usa.
@@ -3759,8 +3767,17 @@ function CardCredito({
             return (
               <div className="mt-[10px] flex min-w-0 items-center gap-s3 rounded-r-controle border-l-[3px] border-borda-forte bg-superficie-2 px-[10px] py-2 text-corpo text-texto-2">
                 <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 sm:flex-nowrap">
+                  {/* SEM OS SEGUNDOS NO RESUMO (23/10/2026): eles existem para
+                      ordenar as notas em rajada, e isso é no histórico aberto,
+                      que continua com eles. Aqui, numa linha só, "às 13:17:04"
+                      era ruído antes do texto; o instante exato vai no título. */}
                   {ultima.nota.criado_em && (
-                    <span className="flex-none text-xs text-texto-3">{formatDataHoraSegundos(ultima.nota.criado_em)}</span>
+                    <span
+                      className="flex-none text-xs text-texto-3"
+                      title={formatDataHoraSegundos(ultima.nota.criado_em)}
+                    >
+                      {formatDateTime(ultima.nota.criado_em)}
+                    </span>
                   )}
                   {selo && <Selo className="flex-none">{selo}</Selo>}
                   {/* NO CELULAR, DUAS LINHAS (revisão de UX de 09/10/2026): numa
@@ -3776,8 +3793,40 @@ function CardCredito({
               </div>
             )
           })()}
+      </div>
 
-        <div className="mt-[10px] flex flex-wrap items-center gap-x-4 gap-y-1">
+      {/* SÓ NO COMPUTADOR (revisão visual de 07/10/2026): na tela estreita a
+          zona de ações desce para baixo do card, e o bloco repetia, duas
+          linhas abaixo, o "há 3 dias" da última movimentação no rodapé (e o
+          selo "Parado há N dias" do título). Lá fica o rodapé. */}
+      {dias !== null && quandoNaEtapa && (
+        <div
+          className="hidden leading-tight min-[900px]:block min-[900px]:text-right"
+          title={`Na coluna desde ${formatDateTime(quandoNaEtapa)}`}
+        >
+          {/* O TEMPO NA ETAPA EM 14PX SEMIBOLD (auditoria visual, A2): em 18px
+              negrito ele disputava com o nome do card, que é o que se lê
+              primeiro. */}
+          <span className="block text-xs text-texto-3">Nesta etapa</span>
+          <span className={cn('text-corpo font-semibold tabular-nums', parado ? 'text-aviso' : 'text-texto')}>
+            {textoDosDias(dias)}
+          </span>
+        </div>
+      )}
+
+      {/* A ZONA DE AÇÕES À DIREITA, NA LINHA DE BAIXO (23/10/2026): o tempo na
+          etapa fica no canto de cima e os botões no de baixo, como na amostra —
+          mas os botões deixaram de ser uma coluna da altura do card. Eram ela que
+          espremia o miolo: com quatro botões (~520px), a última anotação cortava
+          na metade, o "resp." descia para uma linha sozinha e as etiquetas
+          quebravam. Agora o miolo usa a largura toda, e os links, as datas e os
+          botões dividem a última linha. Em tela estreita os botões descem para
+          baixo do rodapé, como antes. */}
+      <div className="col-span-full mt-[4px] flex flex-wrap items-end justify-between gap-x-6 gap-y-s3">
+        {/* O RODAPÉ CEDE A LARGURA AOS BOTÕES: a base de 280px os deixa na mesma
+            linha sempre que cabem, e as datas é que descem para baixo dos links —
+            e não a fileira de botões para uma linha só dela. */}
+        <div className="flex min-w-0 flex-[1_1_280px] flex-wrap items-center gap-x-4 gap-y-1">
           {/* As anotações vêm em texto livre e o formato varia entre cards, então
               são exibidas cruas, recolhidas por padrão. A contagem no rótulo evita
               que anotação nova passe batida com o bloco fechado.
@@ -3814,33 +3863,11 @@ function CardCredito({
           )}
           <DatasDoCard lead={lead} diasAoLado={dias !== null && Boolean(quandoNaEtapa)} />
         </div>
-      </div>
 
-      {/* A ZONA DE AÇÕES, SEMPRE À DIREITA (amostra): o tempo na etapa em cima,
-          os botões embaixo, a ação que avança em destaque e as outras
-          contornadas. Em tela estreita desce para baixo do card. */}
-      {/* NA GRADE DE 4/8 (revisão visual 2): 8px entre os botões, como em toda
-          barra de controles (§0.1) — eram 4,5px, e a fileira que ganhou
-          Justificativa, Certidões e Anotar parecia um bloco só. */}
-      <div className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-s3 min-[900px]:flex-col min-[900px]:items-end">
-        {/* SÓ NO COMPUTADOR (revisão visual de 07/10/2026): na tela estreita a
-            zona de ações desce para baixo do card, e o bloco repetia, duas
-            linhas abaixo, o "há 3 dias" da última movimentação no rodapé (e o
-            selo "Parado há N dias" do título). Lá fica o rodapé. */}
-        {dias !== null && quandoNaEtapa && (
-          <div
-            className="hidden leading-tight min-[900px]:block min-[900px]:text-right"
-            title={`Na coluna desde ${formatDateTime(quandoNaEtapa)}`}
-          >
-            {/* O TEMPO NA ETAPA EM 14PX SEMIBOLD (auditoria visual, A2): em 18px
-                negrito ele disputava com o nome do card, que é o que se lê
-                primeiro. */}
-            <span className="block text-xs text-texto-3">Nesta etapa</span>
-            <span className={cn('text-corpo font-semibold tabular-nums', parado ? 'text-aviso' : 'text-texto')}>
-              {textoDosDias(dias)}
-            </span>
-          </div>
-        )}
+        {/* A AÇÃO QUE AVANÇA EM DESTAQUE e as outras contornadas. NA GRADE DE
+            4/8 (revisão visual 2): 8px entre os botões, como em toda barra de
+            controles (§0.1) — eram 4,5px, e a fileira que ganhou Justificativa,
+            Certidões e Anotar parecia um bloco só. */}
         {/* NO CELULAR OS BOTÕES ENCHEM A LINHA (revisão visual de 07/10/2026):
             soltos à direita, o último caía sozinho numa linha de baixo — e era
             justamente a ação da etapa, que vem por último. Esticados, cada linha
@@ -3853,7 +3880,7 @@ function CardCredito({
             saída negativa (Sem proposta, Não fechou) → a ação que avança, por
             último. Quem alterna entre colunas acha cada coisa no mesmo lugar.
             O QUE MOVE O CARD DIZ ISSO NO PASSAR DO MOUSE, e abre confirmação. */}
-        <div className="flex w-full flex-wrap items-center justify-end gap-s2 max-sm:[&>*]:flex-auto max-sm:[&>div>button]:w-full min-[900px]:mt-auto min-[900px]:w-auto min-[900px]:max-w-[560px]">
+        <div className="flex w-full flex-wrap items-center justify-end gap-s2 max-sm:[&>*]:flex-auto max-sm:[&>div>button]:w-full min-[900px]:ml-auto min-[900px]:w-auto min-[900px]:max-w-[560px]">
           {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
           {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t, a) => onAnotar(lead, t, a)} />}
 
@@ -4202,7 +4229,15 @@ function Seg<K extends string>({
       // 36PX, COMO O SEGMENTADO DE ui E A BUSCA AO LADO (auditoria visual, A3):
       // o trilho com 3px de folga e as opções de 28px. Eram 39px contra os 35px
       // da busca, na mesma linha.
-      className={cn('inline-flex gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-[3px]', className)}
+      // NO CELULAR, A LINHA INTEIRA (23/10/2026): o tipo de crédito e a
+      // destinação ficavam um embaixo do outro, cada um do tamanho do texto, e a
+      // borda direita dos dois não batia com a da busca logo abaixo — três
+      // larguras numa coluna de 343px. Esticados, as opções dividem a linha — e
+      // com 36px, a régua de toque da casa (eram 28px, o alvo do mouse).
+      className={cn(
+        'inline-flex gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-[3px] max-sm:flex max-sm:w-full',
+        className,
+      )}
     >
       {itens.map((it) => {
         const ativo = it.key === valor
@@ -4213,7 +4248,7 @@ function Seg<K extends string>({
             aria-pressed={ativo}
             onClick={() => onChange(it.key)}
             className={cn(
-              'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-colors',
+              'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-colors max-sm:h-controle max-sm:flex-1 max-sm:justify-center',
               ativo ? 'bg-superficie text-marca-texto shadow-nivel-1' : 'text-texto-2 hover:text-texto',
             )}
           >
@@ -4338,6 +4373,9 @@ export default function AnaliseCredito() {
   // toa. Vive enquanto a página estiver aberta; o sync limpa (ver abaixo),
   // porque o PDF do card pode ter sido substituído no Kommo.
   const [arquivosCache, setArquivosCache] = useState<Record<number, ArquivoLido[]>>({})
+  /** O cache como está agora, para quem roda depois de um `await` (ver `lerArquivosComCache`). */
+  const arquivosCacheAtual = useRef(arquivosCache)
+  arquivosCacheAtual.current = arquivosCache
   /**
    * Quantos cards ficam com os anexos na memória.
    *
@@ -5008,7 +5046,11 @@ export default function AnaliseCredito() {
     aoProgresso?: (feitos: number, total: number, nome: string) => void,
   ): Promise<ArquivoLido[]> {
     const id = lead.kommo_lead_id
-    const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead, aoProgresso))
+    // O CACHE DE AGORA, e não o do render em que a função nasceu (23/10/2026): a
+    // fila dos autos chama a próxima leitura do `finally` da anterior, com a
+    // função de minutos atrás — que não via o card já lido e baixava e relia
+    // de novo os PDFs dele, às vezes centenas de MB.
+    const lidos = arquivosCacheAtual.current[id] ?? (await lerUmaVezSo(lead, aoProgresso))
     guardarNoCache(id, lidos)
     return lidos
   }
@@ -5430,9 +5472,14 @@ export default function AnaliseCredito() {
    * card usa (título primeiro, anotação depois). Só para a etapa aberta: é o que
    * o filtro "Sem nº do processo" e a contagem dele precisam.
    */
+  //
+  // PELA COLUNA INTEIRA, e não pela lista da busca (23/10/2026): a lista muda a
+  // cada tecla, e o mapa relia o cadastro — todas as anotações de cada card —
+  // da coluna toda a cada letra digitada. A coluna só muda com os cards.
+  const colunaAberta = abaAtual ? porAba[abaAtual.key] : undefined
   const temNumero = useMemo(
-    () => new Map(lista.map((l) => [l.kommo_lead_id, Boolean(lerCardCredijuris(l).numero)])),
-    [lista],
+    () => new Map((colunaAberta ?? []).map((l) => [l.kommo_lead_id, Boolean(lerCardCredijuris(l).numero)])),
+    [colunaAberta],
   )
   const ehPronta = useCallback((l: KommoLead) => prontas.data?.has(l.kommo_lead_id) ?? false, [prontas.data])
   // OS FILTROS QUE A ETAPA OFERECE. "Com cotação" só onde a etiqueta do fundo é
@@ -6253,7 +6300,11 @@ export default function AnaliseCredito() {
    * deixar dentro do CRM.
    */
   function concluir(lead: KommoLead, acoes: AcaoTela[]) {
-    setMensagemDoCard({ lead, acoes, titulo: 'Concluir a qualificação' })
+    // O TÍTULO DIZ QUAL ETAPA SE CONCLUI (23/10/2026): era sempre "Concluir a
+    // qualificação", o nome do Externo — e na Revisão do RPV ou na Análise do
+    // Interno a janela falava de uma etapa que não é a do card.
+    const etapa = abaAtual ? nomeDaColuna(abaAtual.label) : null
+    setMensagemDoCard({ lead, acoes, titulo: etapa ? `Concluir: ${etapa}` : 'Concluir a etapa' })
   }
 
   // ------------------------------------------------ ONDA 4: PARA TODOS (03/10/2026)
@@ -7025,7 +7076,15 @@ export default function AnaliseCredito() {
           </>
         }
         onConfirm={() => semPropostaDe && void semPropostaNoCard(semPropostaDe)}
-        onClose={() => setSemPropostaDe(null)}
+        // FECHAR ESQUECE O MOVIMENTO SEM NOTA, como em toda janela que move
+        // (23/10/2026): era a única que não esquecia. Depois de "moveu, mas a
+        // nota não subiu", fechar deixava o card marcado como "já movido" — e
+        // todo movimento seguinte dele na sessão era recusado, ou PULADO se
+        // fosse de novo para Reprovados.
+        onClose={() => {
+          if (semPropostaDe) esquecerMovimentos(semPropostaDe.kommo_lead_id)
+          setSemPropostaDe(null)
+        }}
       />
 
       {mensagemDoCard && (

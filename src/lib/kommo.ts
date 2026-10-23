@@ -397,7 +397,9 @@ export const TELAS: DefTela[] = [
     key: 'validacao',
     label: 'Revisão',
     statusId: ST_DECISAO,
-    descricaoVazia: 'Nenhum crédito aguardando validação.',
+    // "REVISÃO", O NOME DA ETAPA (23/10/2026): a frase ainda dizia "validação",
+    // o nome de antes de 02/10/2026, sob o título "Nenhum card em Revisão".
+    descricaoVazia: 'Nenhum crédito aguardando revisão.',
   },
   {
     key: 'aprovados',
@@ -854,11 +856,16 @@ export function useKommoLeads(pipelineId: number) {
       const todos: KommoLead[] = []
       for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
         const de = pagina * POR_PAGINA
+        // A PÁGINA ANDA PELO ID, E SÓ POR ELE (23/10/2026). Ordenada por
+        // `atualizado_em`, a lista mudava de ordem enquanto era lida — a tela
+        // dispara o `kommo-sync` ao abrir, junto com esta consulta —, e passado
+        // o teto de uma página o card atualizado no meio pulava de página: vinha
+        // duas vezes (chave repetida, contagem a mais) ou nenhuma. A ordem em
+        // que a lista chega não serve à tela: `agruparPorAba` ordena cada coluna.
         const { data, error } = await supabase
           .from('kommo_leads')
           .select('*')
           .in('pipeline_id', funis)
-          .order('atualizado_em', { ascending: false })
           .order('kommo_lead_id', { ascending: false })
           .range(de, de + POR_PAGINA - 1)
         if (error) throw new Error(error.message)
@@ -886,15 +893,24 @@ export function useAnalisesProntas() {
   return useQuery({
     queryKey: ['kommo_analise_interna'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('kommo_analise_interna')
-        .select('kommo_lead_id')
-      if (error) throw new Error(error.message)
-      return new Set(
-        ((data ?? []) as Pick<KommoAnaliseInterna, 'kommo_lead_id'>[]).map(
-          (r) => r.kommo_lead_id,
-        ),
-      )
+      // PAGINADA COMO A DOS CARDS (23/10/2026): uma linha por card analisado, e
+      // a tabela só cresce. Numa consulta só, passado o teto do PostgREST, as
+      // linhas de fora eram cortadas sem aviso — e o selo "Finalizado" sumia de
+      // cards com a análise pronta, como se ninguém os tivesse tocado.
+      const ids = new Set<number>()
+      for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
+        const de = pagina * POR_PAGINA
+        const { data, error } = await supabase
+          .from('kommo_analise_interna')
+          .select('kommo_lead_id')
+          .order('kommo_lead_id')
+          .range(de, de + POR_PAGINA - 1)
+        if (error) throw new Error(error.message)
+        const lote = (data ?? []) as Pick<KommoAnaliseInterna, 'kommo_lead_id'>[]
+        for (const r of lote) ids.add(r.kommo_lead_id)
+        if (lote.length < POR_PAGINA) break
+      }
+      return ids
     },
   })
 }
@@ -1684,22 +1700,6 @@ function colunasDoFunil(pipelineId: number, etapas: EtapaKommo[]): EtapaKommo[] 
 }
 
 /**
- * Separa os cards nas abas — e devolve à parte os que não couberam em nenhuma.
- *
- * O SALDO EXISTE DE PROPÓSITO. Uma versão antiga filtrava card por card contra
- * os cinco status de RPV e descartava o resto em silêncio: um card movido no
- * Kommo para uma coluna fora dessas cinco sumia da tela, sem aparecer em aba
- * nenhuma e sem entrar em contagem nenhuma. Ninguém tinha como notar — a
- * ausência de um card não chama atenção.
- *
- * O saldo já teve aba própria ("Outras etapas") e depois uma linha de contagem
- * sob as abas; as duas foram removidas por decisão do dono. HOJE NADA O EXIBE, e
- * o efeito é assumido: card em coluna que a tela não lista não aparece em lugar
- * nenhum. Ele continua sendo devolvido aqui porque é assim que a função mantém
- * card estranho FORA das abas em vez de misturá-lo na primeira — e é o que o
- * teste de particionamento verifica.
- */
-/**
  * Desde quando o card está na coluna em que está — ou null, se não sabemos.
  *
  * A CONFERÊNCIA DO STATUS É O CORAÇÃO DISTO. A data é gravada junto com a
@@ -1732,6 +1732,22 @@ function daColunaMaisNovoPrimeiro(a: KommoLead, b: KommoLead): number {
   return ordemNaColuna(b) - ordemNaColuna(a) || b.kommo_lead_id - a.kommo_lead_id
 }
 
+/**
+ * Separa os cards nas abas — e devolve à parte os que não couberam em nenhuma.
+ *
+ * O SALDO EXISTE DE PROPÓSITO. Uma versão antiga filtrava card por card contra
+ * os cinco status de RPV e descartava o resto em silêncio: um card movido no
+ * Kommo para uma coluna fora dessas cinco sumia da tela, sem aparecer em aba
+ * nenhuma e sem entrar em contagem nenhuma. Ninguém tinha como notar — a
+ * ausência de um card não chama atenção.
+ *
+ * O saldo já teve aba própria ("Outras etapas") e depois uma linha de contagem
+ * sob as abas; as duas foram removidas por decisão do dono. HOJE NADA O EXIBE, e
+ * o efeito é assumido: card em coluna que a tela não lista não aparece em lugar
+ * nenhum. Ele continua sendo devolvido aqui porque é assim que a função mantém
+ * card estranho FORA das abas em vez de misturá-lo na primeira — e é o que o
+ * teste de particionamento verifica.
+ */
 export function agruparPorAba(
   leads: KommoLead[],
   abas: Aba[],
