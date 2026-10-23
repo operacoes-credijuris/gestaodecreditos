@@ -726,12 +726,18 @@ function Individual() {
             cada um com a sua largura, desciam em degraus desalinhados. */}
         <div className="flex flex-wrap gap-s2 max-sm:w-full sm:ml-auto max-sm:[&>*]:flex-1">
           {/* SELIC e IPCA que alimentam a coluna Valor projetado. */}
+          {/* NO CELULAR, "PARÂMETROS" (23/10/2026): com o nome inteiro os dois
+              botões não cabiam lado a lado e viravam duas faixas de largura
+              toda, acima do que é do investidor. O nome inteiro fica no
+              computador e no leitor de tela. */}
           <Button
             variant="secondary"
             icon={<Settings className="h-[16px] w-[16px]" />}
             onClick={() => setAbrirParametros(true)}
+            aria-label="Parâmetros de atualização"
           >
-            Parâmetros de atualização
+            <span className="sm:hidden">Parâmetros</span>
+            <span className="hidden sm:inline">Parâmetros de atualização</span>
           </Button>
           {/* Regera o estágio e as providências de TODOS os créditos, ignorando
               a checagem de novidade que a rodada semanal faz. A DICA DIZ O
@@ -1252,7 +1258,7 @@ function Consolidado() {
       <div className="border-b border-borda px-s5 py-s4">
         <Field label="Filtrar por mês" className="w-full sm:max-w-xs">
           <Select value={mes} onChange={(e) => setMes(e.target.value)}>
-            <option value="todos">Tudo</option>
+            <option value="todos">Todos os meses</option>
             {meses.map((m) => (
               <option key={m} value={m}>
                 {sentenceCase(rotuloMes(m))}

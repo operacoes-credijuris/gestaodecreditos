@@ -349,7 +349,10 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
           <span className="inline-flex items-center gap-s1">
             <Tecla>Ctrl</Tecla> <Tecla>Enter</Tecla> aba nova
           </span>
-          <span className="hidden sm:inline">créditos, cards, contatos e telas da plataforma</span>
+          {/* À DIREITA, NA MESMA LINHA DAS TECLAS (23/10/2026): com "da
+              plataforma" o texto não cabia nos 620px e descia sozinho para uma
+              segunda linha do rodapé. */}
+          <span className="ml-auto hidden sm:inline">créditos, cards, contatos e telas</span>
         </div>
       </div>
     </div>,

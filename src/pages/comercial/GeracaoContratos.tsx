@@ -573,7 +573,10 @@ function GerarPanel() {
         onSubmit={handleSubmit}
         className="grid items-start gap-s5 lg:grid-cols-[minmax(0,1fr)_320px]"
       >
-        <Card className="px-s6 py-s1">
+        {/* 16PX DE LADO NO CELULAR (23/10/2026), como os outros cartões: com os
+            24px do computador somados à margem da página, os campos ficavam
+            com menos de 300px. */}
+        <Card className="px-s4 py-s1 sm:px-s6">
           <Passo
             numero={1}
             titulo="O crédito"

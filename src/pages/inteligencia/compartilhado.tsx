@@ -449,9 +449,26 @@ export function LinhaMetrica({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-s3">
-      <dt className="inline-flex min-w-0 items-center gap-s0.5 text-corpo text-texto-3">
-        {rotulo}
-        {explicacao && <Dica texto={explicacao} />}
+      {/* O ⓘ COLADO NA ÚLTIMA PALAVRA (23/10/2026): com o rótulo em duas linhas
+          (celular, painel de um terço), o `inline-flex` de antes jogava o ⓘ
+          para o meio do vão entre o rótulo e o valor, solto dos dois. Em texto
+          corrido ele acompanha a quebra. */}
+      <dt className="min-w-0 text-corpo text-texto-3">
+        {explicacao ? (
+          // A ÚLTIMA PALAVRA E O ⓘ NÃO SE SEPARAM: sem isto o ⓘ descia sozinho
+          // para a linha de baixo ("Metade central das operações" / "ⓘ").
+          <>
+            {rotulo.slice(0, rotulo.lastIndexOf(' ') + 1)}
+            <span className="whitespace-nowrap">
+              {rotulo.slice(rotulo.lastIndexOf(' ') + 1)}{' '}
+              <span className="align-middle">
+                <Dica texto={explicacao} />
+              </span>
+            </span>
+          </>
+        ) : (
+          rotulo
+        )}
       </dt>
       <dd className={cn('whitespace-nowrap text-right text-corpo tabular-nums text-texto', destaque ? 'font-bold' : 'font-medium')}>
         {valor}

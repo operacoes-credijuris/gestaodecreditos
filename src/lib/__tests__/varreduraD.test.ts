@@ -135,3 +135,19 @@ describe('Quadro › Performance: a dica do prazo fala do prazo', () => {
     expect(linha).toMatch(/explicacao=\{DIZ\.maisRapidaDemorada\}/)
   })
 })
+
+describe('Varredura D (UI/UX): o que a revisão visual mudou', () => {
+  it('o ⓘ das métricas fica colado na última palavra do rótulo', () => {
+    const c = semComentarios(ler('pages/inteligencia/compartilhado.tsx'))
+    expect(c).toMatch(/rotulo\.slice\(rotulo\.lastIndexOf\(' '\) \+ 1\)/)
+  })
+  it('o eixo da evolução cabe "R$ 650 mil" numa linha', () => {
+    expect(ler('pages/inteligencia/graficos.tsx')).toMatch(/width=\{76\} tickFormatter=\{brlAbreviado\}/)
+  })
+  it('o plano da BullAI no menu sai no plural certo, sem "(s)"', () => {
+    expect(semComentarios(ler('pages/configuracoes/Configuracoes.tsx'))).toMatch(/contar\(c\.restantes, 'consulta', 'consultas'\)/)
+  })
+  it('o botão de parâmetros das Carteiras mantém o nome inteiro para o leitor de tela', () => {
+    expect(ler('pages/comercial/CarteirasInvestidores.tsx')).toMatch(/aria-label="Parâmetros de atualização"/)
+  })
+})
