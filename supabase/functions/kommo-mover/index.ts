@@ -318,7 +318,18 @@ Deno.serve(async (req: Request) => {
     try {
       resMove = await kommoFetch(
         `${base}/leads/${leadId}`,
-        { method: 'PATCH', headers, body: JSON.stringify({ status_id: statusId, ...etiquetasDoPatch }) },
+        {
+          method: 'PATCH',
+          headers,
+          // O FUNIL JUNTO, quando o destino é conhecido pelo espelho (23/10/2026):
+          // a documentação do PATCH pede os dois, e a coluna sozinha só basta
+          // dentro do mesmo funil.
+          body: JSON.stringify({
+            status_id: statusId,
+            ...(linhaDoPrecatorio ? { pipeline_id: Number(linhaDoPrecatorio.pipeline_id) } : {}),
+            ...etiquetasDoPatch,
+          }),
+        },
         { idempotente: true },
       )
     } catch (e) {
@@ -382,7 +393,7 @@ Deno.serve(async (req: Request) => {
       // histórico por causa de um registro que não gravou).
       const _porque = 'motivo' in resNota && resNota.motivo
         ? `falha de rede: ${resNota.motivo}`
-        : `HTTP ${resNota.status}`
+        : `HTTP ${resNota.status}: ${(await (resNota as Response).text().catch(() => '')).slice(0, 200)}`
       avisoNota = `O card foi movido, mas a anotação não foi registrada (${_porque}).`
     }
 

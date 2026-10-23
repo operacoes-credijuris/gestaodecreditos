@@ -41,7 +41,8 @@ describe('Sem proposta', () => {
 
   it('o movimento leva as etiquetas no mesmo PATCH, lidas do Kommo; sem a leitura, nada se move', () => {
     const f = ler('supabase/functions/kommo-mover/index.ts')
-    expect(f).toContain('JSON.stringify({ status_id: statusId, ...etiquetasDoPatch })')
+    expect(f).toContain('...(linhaDoPrecatorio ? { pipeline_id: Number(linhaDoPrecatorio.pipeline_id) } : {}),')
+    expect(f).toMatch(/status_id: statusId,[\s\S]{0,160}\.\.\.etiquetasDoPatch,/)
     expect(f).toContain("Não consegui ler as etiquetas do card no Kommo; nada foi movido.")
     expect(f).toContain('ehDestinoDoSemProposta(Number(linhaDoPrecatorio.pipeline_id), statusId)')
   })

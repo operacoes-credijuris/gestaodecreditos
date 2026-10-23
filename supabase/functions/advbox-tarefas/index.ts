@@ -32,11 +32,19 @@ import {
   type AdvboxCtx,
 } from '../_shared/advbox.ts'
 import { dataDoAdvbox } from '../_shared/dataDoAdvbox.ts'
+import { lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
+// A poda segura mora com a advbox-movimentacoes, que poda do mesmo jeito: leitura
+// paginada do cadastro, conjunto a apagar calculado em código, DELETE em fatias.
+import {
+  apagarEmFatias,
+  type Cadastro,
+  colunaDaLeitura,
+  idsAApagar,
+  lerCadastro,
+  MIN_DIGITS,
+} from '../advbox-movimentacoes/podaSegura.ts'
 
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
-
-// Piso para considerar um número de processo válido (igual às outras funções).
-const MIN_DIGITS = 6
 
 /**
  * Normaliza um nome para comparação: sem acento, sem caixa, sem espaço
@@ -151,34 +159,24 @@ function extrairTarefa(p: Record<string, unknown>, numero: string) {
 }
 
 // Conjunto de números de processo cadastrados no nosso sistema (só dígitos).
-async function numerosCadastrados(): Promise<Set<string>> {
+//
+// PAGINADO, COM ORDEM PELO `id` (23/10/2026). Era um `select` solto, que o
+// PostgREST corta em 1000 linhas sem avisar: quem ficasse de fora não casava, e
+// a poda da varredura completa apagava as tarefas dele. Erro de leitura LANÇA
+// (um erro engolido devolveria conjunto vazio, e a varredura concluiria que
+// NENHUM processo está cadastrado); leitura cortada volta `completo: false`, e
+// a poda não roda.
+async function numerosCadastrados(): Promise<Cadastro> {
   const svc = serviceClient()
-  const [proc, ap, req] = await Promise.all([
-    svc.from('processos').select('numero_cnj'),
-    svc.from('apensos').select('numero'),
-    svc.from('requerimentos').select('numero_protocolo'),
-  ])
-  // Falhar alto: um erro engolido aqui devolveria conjunto vazio, o que faria
-  // a varredura concluir que NENHUM processo está cadastrado.
-  for (const r of [proc, ap, req]) {
-    if (r.error) throw new Error(`cadastro: ${r.error.message}`)
-  }
-  const set = new Set<string>()
-  const add = (v: unknown) => {
-    const d = onlyDigits(v)
-    if (d.length >= MIN_DIGITS) set.add(d)
-  }
-  for (const r of proc.data ?? []) add((r as { numero_cnj?: string }).numero_cnj)
-  for (const r of ap.data ?? []) add((r as { numero?: string }).numero)
-  for (const r of req.data ?? [])
-    add((r as { numero_protocolo?: string }).numero_protocolo)
-  return set
+  return await lerCadastro((tabela, coluna, de, ate) =>
+    svc.from(tabela).select<string, Record<string, unknown>>(coluna).order('id').range(de, ate)
+  )
 }
 
 // Processos do ADVBOX que casam com os nossos números (por process_number ou
 // protocol_number). Retorna mapa lawsuits_id -> info do processo.
 async function processosCasaveis(ctx: AdvboxCtx) {
-  const nums = await numerosCadastrados()
+  const nums = (await numerosCadastrados()).numeros
   const lawsuits = await fetchAll(ctx, '/lawsuits')
   const map = new Map<number, Record<string, unknown>>()
   for (const l of lawsuits) {
@@ -203,8 +201,9 @@ async function processosCasaveis(ctx: AdvboxCtx) {
  */
 async function casaveisComDigits(
   ctx: AdvboxCtx,
-): Promise<Map<string, { numero: string; digits: string[] }>> {
-  const nums = await numerosCadastrados()
+): Promise<{ casaveis: Map<string, { numero: string; digits: string[] }>; cadastro: Cadastro }> {
+  const cadastro = await numerosCadastrados()
+  const nums = cadastro.numeros
   const lawsuits = await fetchAll(ctx, '/lawsuits')
   const map = new Map<string, { numero: string; digits: string[] }>()
   for (const l of lawsuits) {
@@ -221,7 +220,7 @@ async function casaveisComDigits(
         : String(l.protocol_number || l.process_number || l.id)
     map.set(String(l.id), { numero: exibivel, digits })
   }
-  return map
+  return { casaveis: map, cadastro }
 }
 
 Deno.serve(async (req: Request) => {
@@ -389,8 +388,10 @@ Deno.serve(async (req: Request) => {
       }
 
       let fila: FilaItem[]
+      // O que a poda global fez (ou por que não fez) — só na varredura completa.
+      let poda: Record<string, unknown> | null = null
       if (primeira) {
-        const casaveis = await casaveisComDigits(ctx)
+        const { casaveis, cadastro } = await casaveisComDigits(ctx)
         fila = [...casaveis.entries()].map(([lid, v]) => ({
           lid,
           numero: v.numero,
@@ -409,14 +410,48 @@ Deno.serve(async (req: Request) => {
           // derivam o mesmo conjunto, então apagar duas vezes é inofensivo.
           // Só na varredura completa: com alvo, a fila é parcial de propósito.
           //
-          // A guarda `fila.length` é ESSENCIAL: com a fila vazia, listaIn([])
-          // vira ("__none__") e o filtro `not in` casa TODAS as linhas —
-          // apagaria a tabela inteira por um soluço em /lawsuits ou no cadastro.
-          const { error } = await svc
-            .from('advbox_tarefas')
-            .delete()
-            .not('advbox_lawsuit_id', 'in', listaIn(fila.map((f) => f.lid)))
-          if (error) throw new Error(error.message)
+          // A guarda `fila.length` é ESSENCIAL: fila vazia é soluço em /lawsuits
+          // ou no cadastro, nunca carteira vazia, e "nada a manter" apagaria a
+          // tabela inteira.
+          //
+          // CADASTRO CORTADO NÃO PODA (23/10/2026): quem ficou fora do corte não
+          // entrou na fila, e as tarefas dele seriam apagadas como "saiu".
+          //
+          // O QUE APAGAR É CALCULADO AQUI, E O DELETE VAI EM FATIAS (23/10/2026).
+          // Era um `not in (todos os lawsuits da fila)` numa URL só, que cresce
+          // com a carteira: passadas algumas centenas de ids a URL estoura, o
+          // banco responde 500 e o `throw` matava a sincronização antes de
+          // começar. Agora lê os lawsuits que o cache TEM (paginado, ordem pela
+          // chave), separa os que saíram e apaga com `in` positivo de 150 em 150.
+          // Erro de poda vai para o log e para a resposta, mas NÃO derruba a
+          // sincronização: o cache fica com linha a mais, não a menos.
+          if (!cadastro.completo) {
+            console.warn(`poda ignorada: ${cadastro.motivo}`)
+            poda = { feita: false, motivo: cadastro.motivo }
+          } else {
+            const lidsNoCache = colunaDaLeitura(
+              await lerTodasAsLinhas<Record<string, unknown>>(
+                (de, ate) =>
+                  svc
+                    .from('advbox_tarefas')
+                    .select<string, Record<string, unknown>>('advbox_lawsuit_id')
+                    .order('id')
+                    .range(de, ate),
+                { maxPaginas: 300 },
+              ),
+              'advbox_lawsuit_id',
+            )
+            const fora = idsAApagar(lidsNoCache, new Set(fila.map((f) => f.lid)))
+            const r = await apagarEmFatias(fora, (fatia) =>
+              svc.from('advbox_tarefas').delete().in('advbox_lawsuit_id', fatia)
+            )
+            const erro =
+              r.erro ??
+              lidsNoCache.erro ??
+              (lidsNoCache.cortada ? 'leitura do cache cortada no teto' : null)
+            if (erro) console.error('falha ao podar advbox_tarefas:', erro)
+            poda = { feita: true, processos_podados: r.apagados, erro }
+          }
         }
       } else {
         fila = (body as { fila: FilaItem[] }).fila
@@ -520,6 +555,7 @@ Deno.serve(async (req: Request) => {
         podadas,
         erros,
         vazios,
+        poda,
       })
     }
 

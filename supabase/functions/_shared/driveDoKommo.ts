@@ -13,6 +13,7 @@
 //   3. quem chamou anexa o uuid ao card (PUT /leads/{id}/files).
 
 import { fatias } from './autosParaOKommo.ts'
+import { kommoFetch } from './kommoFetch.ts'
 
 // SEM TETO DE TEMPO, uma conexão parada segurava a função até o limite dela, e
 // a rotina dos autos perdia a trava no meio de um documento: outra volta entrava
@@ -22,7 +23,13 @@ const TEMPO_PARTE_MS = 60_000
 
 /** O endereço do drive da conta (drive-b, drive-c…), que o Kommo informa em /account. */
 export async function urlDoDriveDaConta(baseApi: string, auth: Record<string, string>): Promise<string> {
-  const r = await fetch(`${baseApi}/account?with=drive_url`, { headers: auth, signal: AbortSignal.timeout(TEMPO_SESSAO_MS) })
+  // PELO kommoFetch E COM O STATUS (23/10/2026): um 429 da cota disputada se
+  // repete, e um 401/403 diz o que é — antes tudo virava "não consegui
+  // descobrir o drive", e a procura ia para o lugar errado.
+  const r = await kommoFetch(`${baseApi}/account?with=drive_url`, { headers: auth, signal: AbortSignal.timeout(TEMPO_SESSAO_MS) })
+  if (!r.ok) {
+    throw new Error(`o Kommo não informou o drive da conta (HTTP ${r.status}): ${(await r.text().catch(() => '')).slice(0, 160)}`)
+  }
   const u = ((await r.json().catch(() => ({}))) as { drive_url?: string })?.drive_url
   if (!u) throw new Error('não consegui descobrir o drive da conta Kommo')
   return String(u)
@@ -70,7 +77,9 @@ export async function subirAoDriveDoKommoComVersao(o: {
   bytes: Uint8Array
   mime: string
 }): Promise<ArquivoNoDrive> {
-  const s = await fetch(`${o.drive}/v1.0/sessions`, {
+  // PELO kommoFetch: o 429 (não processado) se repete; o 5xx não, porque a
+  // sessão ou a parte podem ter entrado.
+  const s = await kommoFetch(`${o.drive}/v1.0/sessions`, {
     method: 'POST',
     signal: AbortSignal.timeout(TEMPO_SESSAO_MS),
     headers: { ...o.auth, 'Content-Type': 'application/json' },
@@ -84,7 +93,7 @@ export async function subirAoDriveDoKommoComVersao(o: {
   let url: string | null = sessao.upload_url ?? null
   for (const [a, b] of fatias(o.bytes.byteLength, Number(sessao.max_part_size) || 524_288)) {
     if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
-    const r = await fetch(url, {
+    const r = await kommoFetch(url, {
       method: 'POST',
       signal: AbortSignal.timeout(TEMPO_PARTE_MS),
       // O TIPO DO ARQUIVO em cada parte, como na receita oficial do Kommo (e não

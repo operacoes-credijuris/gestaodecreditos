@@ -19,6 +19,7 @@
 // corrente é DESCARTADO e a composição usa os doze meses fechados anteriores.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { dataDeReferencia } from './referencia.ts'
 
 const BASE = 'https://api.bcb.gov.br/dados/serie'
 const SERIE_SELIC_MES = 4390 // Selic acumulada no mês, % a.m.
@@ -133,12 +134,15 @@ Deno.serve(async (req: Request) => {
 
     // Competência: o mês mais recente que os DOIS índices já fecharam. Usar o mais
     // novo dos dois faria a data prometer um fechamento que um deles ainda não tem.
-    const comps = [compSelic, compIpca].filter(Boolean) as Ponto[]
-    if (comps.length) {
-      const menor = comps.reduce((a, b) => (a.ano * 12 + a.mes <= b.ano * 12 + b.mes ? a : b))
-      // Último dia do mês de competência: dia 0 do mês seguinte.
-      const fim = new Date(Date.UTC(menor.ano, menor.mes, 0))
-      mudancas.data_referencia = fim.toISOString().slice(0, 10)
+    //
+    // SÓ ANDA COM OS DOIS GRAVADOS (23/10/2026). Com um índice só, a data ia para
+    // o mês dele por cima de um índice que ficou o de antes. Ver referencia.ts.
+    const dataRef = dataDeReferencia(compSelic, compIpca)
+    if (dataRef) mudancas.data_referencia = dataRef
+    else if (selic != null || ipca != null) {
+      avisos.push(
+        `Só ${selic != null ? 'a SELIC' : 'o IPCA'} foi atualizado — a data de referência ficou a de antes.`,
+      )
     }
 
     if (Object.keys(mudancas).length === 0) {

@@ -647,6 +647,15 @@ Deno.serve(async (req: Request) => {
           ],
         })
 
+        // CORTADA NO TETO DE TOKENS NÃO VIRA CACHE (23/10/2026): com a
+        // ferramenta forçada, o max_tokens corta o `input` dela no meio — a
+        // situação pela metade e a lista de peças faltando — e isso era gravado
+        // com o `fonte_hash` como panorama completo, servido do cache até surgir
+        // andamento novo. Agora é falha: o catch abaixo grava só o erro.
+        if (r.stop_reason === 'max_tokens') {
+          throw new Error('O panorama passou do tamanho máximo da resposta e saiu cortado. Tente de novo.')
+        }
+
         let situacao = ''
         let sugestoes: { peca: string; porque: string }[] = []
         for (const bloco of r.content) {

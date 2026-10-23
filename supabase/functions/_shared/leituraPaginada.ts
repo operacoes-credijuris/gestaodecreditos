@@ -48,6 +48,30 @@ export async function lerTodasAsLinhas<T>(
 }
 
 /**
+ * `.in()` EM FATIAS, CADA UMA PAGINADA (23/10/2026). Uma lista de ids longa vai
+ * inteira na URL da consulta, e passadas algumas centenas a consulta falha — e,
+ * sem olhar o erro, a varredura da fase processual seguia com nada e dizia
+ * "Classificação atualizada". Aqui: fatias de 150 (o mesmo corte da rotina do
+ * Escavador), todas as páginas de cada uma, e o primeiro erro para tudo.
+ *
+ * A ORDEM vale dentro de cada fatia; quem precisa de ordem global reordena.
+ */
+export async function lerPorIds<T, I>(
+  ids: readonly I[],
+  pagina: (fatia: I[], de: number, ate: number) => PromiseLike<PaginaDoBanco<T>>,
+  { porFatia = 150, porPagina = 1000 }: { porFatia?: number; porPagina?: number } = {},
+): Promise<LeituraCompleta<T>> {
+  const linhas: T[] = []
+  for (let i = 0; i < ids.length; i += porFatia) {
+    const fatia = ids.slice(i, i + porFatia)
+    const r = await lerTodasAsLinhas<T>((de, ate) => pagina(fatia, de, ate), { porPagina })
+    for (const l of r.linhas) linhas.push(l)
+    if (r.erro || r.cortada) return { linhas, erro: r.erro, cortada: r.cortada }
+  }
+  return { linhas, erro: null, cortada: false }
+}
+
+/**
  * Uma ocorrência por id — a ÚLTIMA lida, que é a mais recente.
  *
  * O mesmo card pode vir em duas leituras de funil (movido entre uma e outra), e

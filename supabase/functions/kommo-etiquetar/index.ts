@@ -521,7 +521,7 @@ Deno.serve(async (req: Request) => {
       if (!resNota.ok) {
         aviso =
           (aviso ? aviso + ' ' : '') +
-          `A etiqueta mudou, mas o registro de quem a mudou não gravou (HTTP ${resNota.status}).`
+          `A etiqueta mudou, mas o registro de quem a mudou não gravou (HTTP ${resNota.status}: ${(await resNota.text().catch(() => '')).slice(0, 200)}).`
       }
     } catch (e) {
       aviso =

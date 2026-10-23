@@ -329,6 +329,16 @@ function SituacaoSelect({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [aberto])
 
+  // FECHOU POR QUALQUER CAMINHO, ZERA (23/10/2026): só o clique fora zerava, e
+  // fechar pelo próprio botão ou escolhendo uma opção deixava o "Excluir?"
+  // aberto — com o foco já no botão vermelho, na próxima abertura.
+  useEffect(() => {
+    if (aberto) return
+    setNovoAberto(false)
+    setEditandoId(null)
+    setExcluindoId(null)
+  }, [aberto])
+
   const confirmarNovo = async () => {
     if (!novoNome.trim() || criando) return
     let criada: SituacaoCatalogo | undefined
@@ -421,7 +431,11 @@ function SituacaoSelect({
                       setExcluindoId(null)
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') setExcluindoId(null)
+                      // O ESC FECHA SÓ A CONFIRMAÇÃO, e não a ficha do crédito por baixo.
+                      if (e.key === 'Escape') {
+                        e.stopPropagation()
+                        setExcluindoId(null)
+                      }
                     }}
                     className="inline-flex h-controle-sm items-center gap-s1 rounded-controle bg-perigo-cheio px-s2 text-sm font-semibold text-white hover:brightness-105"
                   >
@@ -433,7 +447,11 @@ function SituacaoSelect({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => setExcluindoId(null)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') setExcluindoId(null)
+                      // O ESC FECHA SÓ A CONFIRMAÇÃO, e não a ficha do crédito por baixo.
+                      if (e.key === 'Escape') {
+                        e.stopPropagation()
+                        setExcluindoId(null)
+                      }
                     }}
                     className="inline-flex h-controle-sm items-center rounded-controle px-s2 text-sm text-texto-2 hover:bg-superficie-3"
                   >

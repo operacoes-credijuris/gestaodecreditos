@@ -119,6 +119,14 @@ verify_jwt = false
 [functions.escavador-autos-rotina]
 verify_jwt = false
 
+# Fase processual: chamada pelo app (JWT do usuário) e pelo cron diário, que só
+# leva o x-cron-secret. Sem esta entrada valia o padrão (verify_jwt = true), e o
+# gateway recusava o cron com 401 antes de a função conferir o segredo — a
+# varredura diária nunca rodou (auditoria de 23/10/2026). Toda ação confere quem
+# chama no código (getCallerAtivo ou o segredo do cron).
+[functions.fase-processual]
+verify_jwt = false
+
 # Justificativa técnica da proposta: chamada pelo app (JWT do usuário) e por ela
 # mesma, para encadear as etapas da geração (service_role no Authorization, que
 # passa pelo gateway). A própria função confere quem pode cada ação.

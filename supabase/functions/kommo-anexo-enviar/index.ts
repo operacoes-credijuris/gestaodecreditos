@@ -177,7 +177,11 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify([{ file_uuid: uuid }]),
     }, { idempotente: true /* vincular o mesmo arquivo de novo não duplica */ })
     if (!rAnexo.ok) {
-      return responder({ erro: `O arquivo subiu, mas o Kommo recusou anexá-lo ao card (HTTP ${rAnexo.status}).` }, 502)
+      return responder({
+        erro: `O arquivo subiu, mas o Kommo recusou anexá-lo ao card (HTTP ${rAnexo.status}).`,
+        // O MOTIVO DO KOMMO junto (23/10/2026): "HTTP 400" sozinho não diz o que corrigir.
+        detalhe: (await rAnexo.text().catch(() => '')).slice(0, 300),
+      }, 502)
     }
 
     // SEM NOTA (22/10/2026): o "Anotar" com texto e arquivo pede assim o

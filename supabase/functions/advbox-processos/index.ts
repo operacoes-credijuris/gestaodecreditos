@@ -372,10 +372,19 @@ Deno.serve(async (req: Request) => {
     // falhou depois de criar)? Só vincula.
     const existente = await acharNaAdvbox(ctx, alvo.numero, alvo.campo)
     if (existente) {
-      await svc
+      // O ERRO DA GRAVAÇÃO DO VÍNCULO É OLHADO (23/10/2026). Era ignorado, e a
+      // resposta dizia "ok, já existia" com o vínculo NÃO gravado: o registro
+      // seguia sem advbox_lawsuit_id, aparecia como faltante, e nada na tela
+      // dizia por quê. Mesmo tratamento do vínculo do processo recém-criado.
+      const { error: erroVinculo } = await svc
         .from(alvo.tabela)
         .update({ advbox_lawsuit_id: existente.id })
         .eq('id', alvo.id)
+      if (erroVinculo) {
+        throw new Error(
+          `O processo já existe na ADVBOX (id ${existente.id}), mas o vínculo não foi gravado: ${erroVinculo.message}`,
+        )
+      }
       return jsonResponse({ ok: true, ja_existia: true, lawsuit_id: existente.id })
     }
 

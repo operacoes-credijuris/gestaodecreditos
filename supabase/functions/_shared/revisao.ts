@@ -184,8 +184,10 @@ export function aplicarPatch(
       continue
     }
     if (!listas.has(campo)) { remocoesVazias.push(caminho); continue }
+    // SÓ DÍGITOS, como em aplicarNaLista (23/10/2026): `Number('')` é 0, e um
+    // caminho como "riscos." apagava o item 0 da lista em silêncio.
+    if (!ehIndice(chave)) { remocoesVazias.push(caminho); continue }
     const i = Number(chave)
-    if (!Number.isInteger(i) || i < 0) { remocoesVazias.push(caminho); continue }
     porLista.set(campo, [...(porLista.get(campo) ?? []), i])
   }
   // DE TRÁS PARA FRENTE, senão remover o item 1 desloca o 2 e o índice seguinte

@@ -37,6 +37,7 @@
 // vai precisar exatamente disto.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from './respostaDoClaude.ts'
+import { gravarComUmaRetentativa } from './tetosRpv.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 // ---------------------------------------------------------------------------
@@ -622,10 +623,20 @@ function dispararProximaEtapa(uf: string): void {
   emSegundoPlano(p)
 }
 
+/**
+ * O ERRO DA GRAVAÇÃO É CONFERIDO (23/10/2026): o cliente do Supabase não lança,
+ * devolve `{ error }`, e o erro era ignorado — o 'pronta' ou o 'falhou' final se
+ * perdia e a linha ficava 'levantando' até a trava vencer. Agora uma segunda
+ * tentativa e, falhando, lança: a etapa vira falha dita (o catch de
+ * executarPasso), em vez de seguir como se tivesse gravado.
+ */
 async function gravar(svc: SupabaseClient, uf: string, ano: number, campos: Record<string, unknown>): Promise<void> {
-  await svc.from('emolumentos_uf')
-    .update({ ...campos, atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv' })
-    .eq('uf', uf).eq('ano', ano)
+  const erro = await gravarComUmaRetentativa(() =>
+    svc.from('emolumentos_uf')
+      .update({ ...campos, atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv' })
+      .eq('uf', uf).eq('ano', ano)
+  )
+  if (erro) throw new Error(`não consegui gravar o levantamento de ${uf}: ${erro}`)
 }
 
 /** Desiste, com um motivo que diz o que aconteceu. */
@@ -634,6 +645,22 @@ async function desistir(svc: SupabaseClient, uf: string, ano: number, p: Progres
     status: 'falhou', tabela: null, motivo,
     progresso: { ...p, em_curso: null, falhas: (p.falhas || 0) + 1 },
   })
+}
+
+/**
+ * DESISTE SEM LANÇAR, para os caminhos que já são o fim (o catch, os tetos de
+ * passos): se nem o 'falhou' grava, devolve o motivo para a resposta dizer —
+ * executarPasso promete não lançar.
+ */
+async function desistirSemLancar(
+  svc: SupabaseClient, uf: string, ano: number, p: Progresso, motivo: string,
+): Promise<string | undefined> {
+  try {
+    await desistir(svc, uf, ano, p, motivo)
+    return undefined
+  } catch (e) {
+    return `${motivo} (e a falha não foi gravada: ${(e as Error)?.message ?? String(e)})`
+  }
 }
 
 /** Fecha o levantamento com o que se conseguiu. Meio custo é útil; nada não é. */
@@ -669,7 +696,7 @@ export async function executarPasso(
   ufBruta: unknown,
   apiKey: string,
   svc: SupabaseClient,
-): Promise<{ etapa: string; proxima: string | null }> {
+): Promise<{ etapa: string; proxima: string | null; erro?: string }> {
   const ano = new Date().getFullYear()
   const uf = normalizarUf(ufBruta)
   if (!uf) return { etapa: 'nenhuma', proxima: null }
@@ -705,11 +732,11 @@ export async function executarPasso(
   }
 
   if (p.passos > MAX_PASSOS || p.mortes >= MAX_MORTES) {
-    await desistir(svc, uf, ano, p,
+    const erro = await desistirSemLancar(svc, uf, ano, p,
       p.mortes >= MAX_MORTES
         ? `a tabela de ${uf} está num documento que não consigo ler dentro do limite de tempo (tentei ${p.mortes} vezes, em documentos diferentes). Informe o custo à mão, ou me passe o endereço do anexo com a tabela.`
         : `o levantamento de ${uf} deu voltas demais sem completar`)
-    return { etapa: p.etapa, proxima: null }
+    return { etapa: p.etapa, proxima: null, ...(erro ? { erro } : {}) }
   }
 
   try {
@@ -818,8 +845,8 @@ export async function executarPasso(
     await consolidar(svc, uf, ano, p)
     return { etapa: 'registro', proxima: null }
   } catch (e) {
-    await desistir(svc, uf, ano, p, `a etapa "${p.etapa}" falhou: ${(e as Error)?.message ?? String(e)}`)
-    return { etapa: p.etapa, proxima: null }
+    const erro = await desistirSemLancar(svc, uf, ano, p, `a etapa "${p.etapa}" falhou: ${(e as Error)?.message ?? String(e)}`)
+    return { etapa: p.etapa, proxima: null, ...(erro ? { erro } : {}) }
   }
 }
 
@@ -957,7 +984,13 @@ export async function consultarRegra(
       // Retomando, a marca `em_curso` deixada pelo worker morto conta a
       // história para a próxima invocação: ela conta a morte, passa ao
       // documento seguinte e, depois de algumas, desiste dizendo o que houve.
-      await gravar(svc, uf, ano, { progresso: lerProgresso(linha.progresso) })
+      // A GRAVAÇÃO AGORA LANÇA quando falha (23/10/2026): aqui vira resposta de
+      // falha dita, e não exceção para a análise que só consultava.
+      try {
+        await gravar(svc, uf, ano, { progresso: lerProgresso(linha.progresso) })
+      } catch (e) {
+        return { estado: 'falhou', emolumentos: vazio(uf, ano, (e as Error)?.message ?? String(e)) }
+      }
       dispararProximaEtapa(uf)
       return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa }
     }

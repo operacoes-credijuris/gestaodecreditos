@@ -26,12 +26,21 @@ import {
   getAdvboxCtx,
   type AdvboxCtx,
 } from '../_shared/advbox.ts'
+import { lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
+import {
+  apagarEmFatias,
+  type Cadastro,
+  colunaDaLeitura,
+  idsAApagar,
+  lerCadastro,
+  MIN_DIGITS,
+  statusUnicoPorNumero,
+} from './podaSegura.ts'
 
 // Esta função varre dezenas de processos em paralelo — precisa de espaçamento
 // maior que o padrão sequencial do módulo compartilhado.
 configurarThrottle(350)
 
-const MIN_DIGITS = 6 // casa números com >= 6 dígitos (igual à aba de Tarefas)
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 const str = (v: unknown): string | null => (v == null ? null : String(v))
 
@@ -76,38 +85,35 @@ async function mapPool<T, R>(
 }
 
 // Conjunto de números de processo cadastrados (Créditos, Requerimentos, Apensos).
-async function numerosCadastrados(): Promise<Set<string>> {
+//
+// PAGINADO, COM ORDEM PELO `id` (23/10/2026). Era um `select` solto em cada
+// tabela, e o PostgREST corta em 1000 linhas sem avisar: passado esse tamanho,
+// os processos de fora do corte deixavam de casar e a poda APAGAVA o histórico
+// deles. Ver podaSegura.ts.
+//
+// FALHA ALTO em erro de leitura (o `lerCadastro` lança), e não `?? []`. Este
+// conjunto decide o que a poda APAGA: com um soluço de leitura (5xx, statement
+// timeout) ele saía vazio, nada casava, e o DELETE limpava as dezenas de
+// milhares de linhas de advbox_movimentacoes mais a tabela de status inteira —
+// o histórico integral do ADVBOX, que o cron levaria horas para reconstruir.
+// Melhor a sincronização falhar com 500 e tentar de novo em 2h do que apagar o
+// que estava certo. Leitura CORTADA no teto não lança: volta `completo: false`,
+// e quem chama sincroniza com o que veio, mas não poda.
+async function numerosCadastrados(): Promise<Cadastro> {
   const svc = serviceClient()
-  const [proc, ap, req] = await Promise.all([
-    svc.from('processos').select('numero_cnj'),
-    svc.from('apensos').select('numero'),
-    svc.from('requerimentos').select('numero_protocolo'),
-  ])
-  // FALHA ALTO, e não `?? []`. Este conjunto decide o que a poda APAGA: com um
-  // soluço de leitura (5xx, statement timeout) ele saía vazio, nada casava, e o
-  // DELETE limpava as dezenas de milhares de linhas de advbox_movimentacoes mais
-  // a tabela de status inteira — o histórico integral do ADVBOX, que o cron
-  // levaria horas para reconstruir. Melhor a sincronização falhar com 500 e
-  // tentar de novo em 2h do que apagar o que estava certo.
-  for (const r of [proc, ap, req]) {
-    if (r.error) throw new Error(`cadastro: ${r.error.message}`)
-  }
-  const set = new Set<string>()
-  const add = (v: unknown) => {
-    const d = onlyDigits(v)
-    if (d.length >= MIN_DIGITS) set.add(d)
-  }
-  for (const r of proc.data ?? []) add((r as { numero_cnj?: string }).numero_cnj)
-  for (const r of ap.data ?? []) add((r as { numero?: string }).numero)
-  for (const r of req.data ?? [])
-    add((r as { numero_protocolo?: string }).numero_protocolo)
-  return set
+  return await lerCadastro((tabela, coluna, de, ate) =>
+    svc.from(tabela).select<string, Record<string, unknown>>(coluna).order('id').range(de, ate)
+  )
 }
 
 // Processos do ADVBOX que casam com os nossos números.
-// Retorna mapa lawsuits_id -> número de processo exibível.
-async function processosCasaveis(ctx: AdvboxCtx): Promise<Map<string, string>> {
-  const nums = await numerosCadastrados()
+// Retorna mapa lawsuits_id -> número de processo exibível, e o cadastro lido
+// (a poda precisa saber se ele veio inteiro).
+async function processosCasaveis(
+  ctx: AdvboxCtx,
+): Promise<{ casaveis: Map<string, string>; cadastro: Cadastro }> {
+  const cadastro = await numerosCadastrados()
+  const nums = cadastro.numeros
   const lawsuits = await fetchAll(ctx, '/lawsuits')
   // Nenhum processo no ADVBOX é resposta SUSPEITA, não notícia: a conta tem
   // processos. Vazio aqui significa API mudando de formato, token trocado ou
@@ -123,7 +129,7 @@ async function processosCasaveis(ctx: AdvboxCtx): Promise<Map<string, string>> {
       map.set(String(l.id), String(l.process_number || l.protocol_number || l.id))
     }
   }
-  return map
+  return { casaveis: map, cadastro }
 }
 
 // Extrai a data de um andamento (defensivo: vários nomes possíveis).
@@ -298,8 +304,10 @@ Deno.serve(async (req: Request) => {
     // "0 gravados" fica indistinguível de "quebrou".
     let pulados = 0
     let avisoSelecao: string | null = null
+    // O que a poda fez (ou por que não fez) — só na primeira chamada.
+    let poda: Record<string, unknown> | null = null
     if (primeira) {
-      const casaveis = await processosCasaveis(ctx)
+      const { casaveis, cadastro } = await processosCasaveis(ctx)
       // tudo=true relê o histórico de TODOS, ignorando a detecção de mudança. É a
       // saída para cache com data errada: sem ela, um registro corrompido faria a
       // sincronização pular aquele processo para sempre, e nada na tela diria.
@@ -322,26 +330,59 @@ Deno.serve(async (req: Request) => {
       // créditos.
       if (casaveis.size === 0) {
         console.warn('poda ignorada: nenhum processo casável (leitura suspeita)')
+        poda = { feita: false, motivo: 'nenhum processo casável (leitura suspeita)' }
+      } else if (!cadastro.completo) {
+        // CADASTRO CORTADO NÃO PODA (23/10/2026): quem ficou fora do corte não
+        // casou, e apagar o histórico dele seria apagar processo que existe.
+        console.warn(`poda ignorada: ${cadastro.motivo}`)
+        poda = { feita: false, motivo: cadastro.motivo }
       } else {
-        const lids = [...casaveis.keys()]
-        const lidsStr =
-          '(' + lids.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
-        const podaMov = await svc
-          .from('advbox_movimentacoes')
-          .delete()
-          .not('advbox_lawsuit_id', 'in', lidsStr)
+        // O QUE APAGAR É CALCULADO AQUI, E O DELETE VAI EM FATIAS (23/10/2026).
+        // Era um `not in (todos os lawsuits casáveis)` numa URL só: cresce com a
+        // carteira, e passadas algumas centenas de ids a URL estoura, o banco
+        // responde 500 e a sincronização morria antes de começar. Agora: lê o
+        // que o cache TEM (paginado, ordem pela chave), separa o que saiu do
+        // cadastro, e apaga com `in` positivo de 150 em 150. Leitura do cache
+        // com erro ou corte → nada a apagar (ver idsAApagar).
+        const lerColuna = (tabela: string, coluna: string, ordem: string) =>
+          lerTodasAsLinhas<Record<string, unknown>>(
+            (de, ate) =>
+              svc
+                .from(tabela)
+                .select<string, Record<string, unknown>>(coluna)
+                .order(ordem)
+                .range(de, ate),
+            { maxPaginas: 300 },
+          )
+        const lidsNoCache = colunaDaLeitura(
+          await lerColuna('advbox_movimentacoes', 'advbox_lawsuit_id', 'id'),
+          'advbox_lawsuit_id',
+        )
+        const lidsFora = idsAApagar(lidsNoCache, new Set(casaveis.keys()))
+        const podaMov = await apagarEmFatias(lidsFora, (fatia) =>
+          svc.from('advbox_movimentacoes').delete().in('advbox_lawsuit_id', fatia)
+        )
         // Status: a tabela é chaveada pelo número exibível.
-        const numeros = [...casaveis.values()]
-        const inStr =
-          '(' + numeros.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
-        const podaStatus = await svc
-          .from('advbox_processo_status')
-          .delete()
-          .not('numero_processo', 'in', inStr)
+        const numerosNoCache = colunaDaLeitura(
+          await lerColuna('advbox_processo_status', 'numero_processo', 'numero_processo'),
+          'numero_processo',
+        )
+        const numerosFora = idsAApagar(numerosNoCache, new Set(casaveis.values()))
+        const podaStatus = await apagarEmFatias(numerosFora, (fatia) =>
+          svc.from('advbox_processo_status').delete().in('numero_processo', fatia)
+        )
         // Erro de poda não é fatal (o cache fica com linha a mais, não a menos),
-        // mas engolido some para sempre — ao menos vai para o log.
-        for (const p of [podaMov, podaStatus]) {
-          if (p.error) console.error('falha ao podar cache:', p.error.message)
+        // mas engolido some para sempre — vai para o log E para a resposta.
+        const leituraFalhou = [lidsNoCache, numerosNoCache]
+          .map((l) => l.erro ?? (l.cortada ? 'leitura do cache cortada no teto' : null))
+          .filter(Boolean)
+        const erros = [podaMov.erro, podaStatus.erro, ...leituraFalhou].filter(Boolean)
+        for (const e of erros) console.error('falha ao podar cache:', e)
+        poda = {
+          feita: true,
+          processos_podados: podaMov.apagados,
+          status_podados: podaStatus.apagados,
+          erros,
         }
       }
     } else {
@@ -429,14 +470,21 @@ Deno.serve(async (req: Request) => {
 
     // Status por processo (última movimentação de todo o histórico). Só grava
     // para processos buscados com sucesso, para não sobrescrever com null.
-    const statusRows = resultados
-      .filter((r) => r.erro == null)
-      .map((r) => ({
-        numero_processo: r.numero,
-        advbox_lawsuit_id: r.lid,
-        ultima_movimentacao: ultimaData(r.movs),
-        sincronizado_em: agora,
-      }))
+    //
+    // UMA LINHA POR NÚMERO (23/10/2026): dois lawsuits com o mesmo número no
+    // lote faziam o upsert inteiro ser recusado ("cannot affect row a second
+    // time"), a função lançava antes do dispararProximo e a cadeia morria em
+    // toda passada. Fica a linha com a data mais recente (statusUnicoPorNumero).
+    const statusRows = statusUnicoPorNumero(
+      resultados
+        .filter((r) => r.erro == null)
+        .map((r) => ({
+          numero_processo: r.numero,
+          advbox_lawsuit_id: r.lid,
+          ultima_movimentacao: ultimaData(r.movs),
+          sincronizado_em: agora,
+        })),
+    )
     if (statusRows.length) {
       const { error } = await svc
         .from('advbox_processo_status')
@@ -459,6 +507,7 @@ Deno.serve(async (req: Request) => {
       // Só na primeira chamada estes dois dizem algo: é ali que a fila é montada.
       pulados_sem_mudanca: pulados,
       selecao: avisoSelecao,
+      poda,
     })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)

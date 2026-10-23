@@ -332,13 +332,22 @@ export function pontoSeguro(blocos: readonly BlocoDaConversa[], pendentes: Reado
   return k
 }
 
-/** O desfecho de uma resposta completa, para o laço da frente. */
-export type DesfechoDaResposta = 'continuar' | 'terminou' | 'recusa'
+/**
+ * O desfecho de uma resposta completa, para o laço da frente. `cortada`: a
+ * resposta parou no teto de tokens (`max_tokens`) — o texto do fim pode estar
+ * pela metade.
+ */
+export type DesfechoDaResposta = 'continuar' | 'terminou' | 'recusa' | 'cortada'
 
 /**
  * A RESPOSTA COMPLETA ENTRA NA CONVERSA tal como veio. `pause_turn`: a próxima
  * chamada reenvia a conversa como está e a API retoma o turno (sem mensagem
  * nova — a documentação pede assim). Qualquer outro fim encerra a frente.
+ *
+ * O TETO DE TOKENS NÃO É FIM NORMAL (23/10/2026): `max_tokens` contava como
+ * 'terminou', e um dossiê cortado no meio de uma frase saía como pesquisa
+ * completa (`parcial: false`) — a redação o tratava como inteiro. Agora é
+ * 'cortada', e a frente fecha como parcial.
  */
 export function aposResposta(
   conversa: readonly MensagemDaConversa[],
@@ -349,7 +358,28 @@ export function aposResposta(
   const nova = conteudo.length > 0
     ? [...conversa, { role: 'assistant' as const, content: [...conteudo] }]
     : [...conversa]
-  return { conversa: nova, desfecho: stopReason === 'pause_turn' ? 'continuar' : 'terminou' }
+  const desfecho: DesfechoDaResposta = stopReason === 'pause_turn'
+    ? 'continuar'
+    : stopReason === 'max_tokens'
+    ? 'cortada'
+    : 'terminou'
+  return { conversa: nova, desfecho }
+}
+
+/**
+ * A REDAÇÃO SÓ VALE INTEIRA (23/10/2026): o texto final vai ao card do Kommo, e
+ * um texto cortado no teto de tokens chegava lá como `pronta`. A redação não
+ * tem "parcial" (o que sai dela é o que o cedente lê): cortada é falha. Devolve
+ * a mensagem da falha pelo fim da resposta, ou null quando ela pode ser salva.
+ */
+export function falhaDaRedacao(stopReason: string | null | undefined): string | null {
+  if (stopReason === 'refusal') {
+    return 'O modelo recusou a redação (filtro de segurança da Anthropic). Revise o prompt em Configurações.'
+  }
+  if (stopReason === 'max_tokens') {
+    return 'A redação passou do tamanho máximo da resposta e saiu cortada; nada foi salvo. Encurte o pedido no prompt (Configurações) e tente de novo.'
+  }
+  return null
 }
 
 /**
@@ -849,7 +879,11 @@ export function juntarDossies(
       indice.set(k, fontes.length)
       return fontes.length
     })
-    const aviso = f.parcial ? '\n(Pesquisa interrompida pelo tempo: o que segue é o que deu para achar.)' : ''
+    // O AVISO COBRE OS DOIS CORTES (23/10/2026): o relógio e o teto de tokens
+    // deixam a frente parcial do mesmo jeito.
+    const aviso = f.parcial
+      ? '\n(Pesquisa interrompida pelo tempo ou pelo tamanho da resposta: o que segue é o que deu para achar.)'
+      : ''
     blocos.push(`${cabeca}${aviso}\n${renumerarDossie(d.texto.trim(), mapa)}`)
   })
   return { texto: blocos.join('\n\n'), fontes }

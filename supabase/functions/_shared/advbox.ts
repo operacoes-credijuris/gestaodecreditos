@@ -88,8 +88,34 @@ async function throttle(): Promise<void> {
 }
 
 /**
+ * O status é de falha TEMPORÁRIA — vale tentar de novo?
+ *
+ * 429 e 5xx, por definição. 408 (o servidor desistiu de esperar o pedido). E 403,
+ * que no HTTP seria permanente, mas aqui não é: o Cloudflare na frente do ADVBOX
+ * responde 403 quando barra por ritmo (ver o cabeçalho deste módulo), e a mesma
+ * chamada passa segundos depois. O resto dos 4xx — 400, 401, 404, 422 — é
+ * resposta definitiva: repetir só gasta tempo.
+ */
+export function falhaTemporaria(status: number): boolean {
+  return status === 429 || status === 403 || status === 408 || status >= 500
+}
+
+/** Um trecho legível do corpo de erro, para a mensagem dizer o que foi recusado. */
+function trechoDoCorpo(texto: string): string {
+  return texto.replace(/\s+/g, ' ').trim().slice(0, 300)
+}
+
+/**
  * GET com throttle + retry/backoff, respeitando Retry-After.
- * Trata 429/403/5xx e corpos de erro do Cloudflare como falha temporária.
+ * Trata 429/403/408/5xx, erro de rede e corpos de erro do Cloudflare como falha
+ * temporária.
+ *
+ * 4xx DEFINITIVO SAI NA HORA (23/10/2026). O `throw` do status não-OK ficava
+ * DENTRO do `try`, e o `catch` — feito para erro de rede — o pegava e repetia:
+ * um 404 ou um 401 (token trocado) dava 6 tentativas com espera crescente, ~15 s
+ * jogados fora por chamada, e numa varredura isso comia o teto de 150 s da Edge
+ * Function. Agora só o `fetch` e a leitura do corpo ficam no `try`; o 4xx
+ * definitivo é lançado fora dele, com o status e um trecho do corpo.
  */
 export async function getJson(
   ctx: AdvboxCtx,
@@ -97,35 +123,54 @@ export async function getJson(
   tries = 6,
 ): Promise<unknown> {
   let ultimoErro = 'desconhecido'
+  const esperar = (a: number) =>
+    sleep(500 * 2 ** (a - 1) + Math.floor(Math.random() * 300))
   for (let a = 1; a <= tries; a++) {
     await throttle()
+    let res: Response
+    let texto: string
     try {
-      const res = await fetch(`${ctx.base}${path}`, { headers: ctx.headers })
-      if (res.status === 429 || res.status === 403 || res.status >= 500) {
-        ultimoErro = `HTTP ${res.status}`
-        if (a < tries) {
-          const ra = Number(res.headers.get('retry-after'))
-          const espera =
-            Number.isFinite(ra) && ra > 0
-              ? Math.min(ra * 1000, 15000)
-              : 500 * 2 ** (a - 1)
-          await sleep(espera + Math.floor(Math.random() * 300))
-        }
-        continue
-      }
-      const j = await res.json()
-      if (isCloudflareError(j)) {
-        ultimoErro = 'cloudflare rate limit'
-        if (a < tries) await sleep(500 * 2 ** (a - 1) + Math.floor(Math.random() * 300))
-        continue
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return j
+      res = await fetch(`${ctx.base}${path}`, { headers: ctx.headers })
+      texto = await res.text()
     } catch (e) {
-      // Erro de rede/parse: também merece nova tentativa.
+      // Erro de REDE (conexão caiu, corpo interrompido): merece nova tentativa.
       ultimoErro = (e as Error).message
-      if (a < tries) await sleep(500 * 2 ** (a - 1) + Math.floor(Math.random() * 300))
+      if (a < tries) await esperar(a)
+      continue
     }
+    if (falhaTemporaria(res.status)) {
+      ultimoErro = `HTTP ${res.status}`
+      if (a < tries) {
+        const ra = Number(res.headers.get('retry-after'))
+        const espera =
+          Number.isFinite(ra) && ra > 0
+            ? Math.min(ra * 1000, 15000)
+            : 500 * 2 ** (a - 1)
+        await sleep(espera + Math.floor(Math.random() * 300))
+      }
+      continue
+    }
+    if (!res.ok) {
+      // Definitivo: não repete. Fora de qualquer try, de propósito.
+      const trecho = trechoDoCorpo(texto)
+      throw new Error(`${path} → HTTP ${res.status}${trecho ? ` — ${trecho}` : ''}`)
+    }
+    let j: unknown
+    try {
+      j = JSON.parse(texto)
+    } catch {
+      // 200 com corpo que não é JSON (página de erro do gateway, corpo cortado):
+      // é soluço do caminho, não resposta — tenta de novo, como antes.
+      ultimoErro = `resposta não é JSON (${trechoDoCorpo(texto).slice(0, 80) || 'vazia'})`
+      if (a < tries) await esperar(a)
+      continue
+    }
+    if (isCloudflareError(j)) {
+      ultimoErro = 'cloudflare rate limit'
+      if (a < tries) await esperar(a)
+      continue
+    }
+    return j
   }
   throw new Error(`${path} → ${ultimoErro} (após ${tries} tentativas)`)
 }

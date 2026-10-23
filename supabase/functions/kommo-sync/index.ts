@@ -153,7 +153,10 @@ function nomeDoArquivoDaNota(n: KommoNote): string {
 function arquivoComTexto(n: KommoNote): boolean {
   if (n.note_type !== 'attachment') return false
   const texto = semEntidadesHtml(n.params?.text).trim()
-  return !!texto && texto !== nomeDoArquivoDaNota(n)
+  // OS DOIS NOMES: o Kommo pode guardar no texto o `file_name` quando o
+  // `original_file_name` é outro, e o anexo comum viraria "texto de gente".
+  const nomes = [n.params?.original_file_name, n.params?.file_name].map((x) => semEntidadesHtml(x).trim())
+  return !!texto && !nomes.includes(texto)
 }
 
 /** Uma anotação como fica guardada em kommo_leads.notas. */
@@ -249,7 +252,8 @@ Deno.serve(async (req: Request) => {
           'Kommo devolveu 429 (limite de requisições). Tente novamente em alguns minutos.',
         )
       }
-      if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`)
+      // COM O MOTIVO DO KOMMO (23/10/2026): um 400 num filtro não se diagnostica pelo número.
+      if (!res.ok) throw new Error(`${path} → HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
       try {
         return (await res.json()) as T
       } catch {

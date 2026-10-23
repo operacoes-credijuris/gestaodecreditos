@@ -99,6 +99,7 @@ import {
   decidirFrente,
   dossieDaConversa,
   dossiesDaLinha,
+  falhaDaRedacao,
   ehEstadoV2,
   ESQUEMA_DO_PLANO,
   type EstadoDaFrente,
@@ -677,10 +678,18 @@ async function rodarFrente(
         continue
       }
       const dossie = dossieDaConversa(conversa)
+      // CORTADA NO TETO DE TOKENS (23/10/2026): o dossiê pode ter parado no meio
+      // de uma frase. Fecha como PARCIAL — a redação recebe o aviso de pesquisa
+      // interrompida (juntarDossies) em vez de tratá-lo como completo.
+      const cortada = depois.desfecho === 'cortada'
       if (dossie.texto.trim() || encerrar) {
         return await fechar({
-          status: dossie.texto.trim() ? 'pronta' : 'falha', dossie, parcial: encerrar,
-          erro: dossie.texto.trim() ? null : 'a frente terminou sem escrever o dossiê',
+          status: dossie.texto.trim() ? 'pronta' : 'falha', dossie, parcial: encerrar || cortada,
+          erro: dossie.texto.trim()
+            ? null
+            : cortada
+            ? 'a frente passou do tamanho máximo da resposta sem escrever o dossiê'
+            : 'a frente terminou sem escrever o dossiê',
         })
       }
       // TERMINOU SEM DOSSIÊ (só buscou): pede o dossiê com o que achou, sem
@@ -722,7 +731,7 @@ async function redigir(
   tarefa: string,
   dossie: string,
   fontes: FonteDaJustificativa[],
-): Promise<{ texto: string; usage: Anthropic.Usage | null; cortada: boolean }> {
+): Promise<{ texto: string; usage: Anthropic.Usage | null; cortada: boolean; falha: string | null }> {
   const pedido =
     `TAREFA (o pedido da casa, com os dados do crédito):\n\n${tarefa}\n\n` +
     `DOSSIÊ DA PESQUISA (por frente; os números entre colchetes indicam as fontes de cada trecho):\n\n${dossie}\n\n` +
@@ -735,18 +744,20 @@ async function redigir(
     system: SISTEMA_REDACAO,
     messages: [{ role: 'user', content: pedido }],
   } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
-  if (chamada.tipo === 'cortada') return { texto: '', usage: chamada.usage, cortada: true }
+  if (chamada.tipo === 'cortada') return { texto: '', usage: chamada.usage, cortada: true, falha: null }
   const resposta = chamada.resposta
-  if (resposta.stop_reason === 'refusal') {
-    throw new Error('O modelo recusou a redação (filtro de segurança da Anthropic). Revise o prompt em Configurações.')
-  }
+  // RECUSA OU TETO DE TOKENS (23/10/2026): a redação cortada no max_tokens saía
+  // `pronta` e podia subir ao card do Kommo pela metade. Agora é falha — e o
+  // consumo dela volta junto, para entrar na conta da geração.
+  const falha = falhaDaRedacao(resposta.stop_reason)
+  if (falha) return { texto: '', usage: resposta.usage, cortada: false, falha }
   const texto = resposta.content
     .filter((b) => b.type === 'text')
     .map((b) => (b as { text: string }).text)
     .join('')
     .trim()
   if (!texto) throw new Error('A redação terminou sem texto. Tente de novo.')
-  return { texto, usage: resposta.usage, cortada: false }
+  return { texto, usage: resposta.usage, cortada: false, falha: null }
 }
 
 async function redacao(svc: SupabaseClient, leadId: number, tentativa: string): Promise<void> {
@@ -804,6 +815,7 @@ async function redacao(svc: SupabaseClient, leadId: number, tentativa: string): 
     const feito = await redigir(anthropic, r, tarefa, dossie.texto, dossie.fontes)
     if (r.perdeu) return
     if (feito.usage) consumoRedacao = somarConsumo(consumoRedacao, feito.usage)
+    if (feito.falha) throw new Error(feito.falha)
     if (feito.cortada) {
       // O RELÓGIO CORTOU A REDAÇÃO: recomeça numa invocação nova (a conta acima
       // limita a MAX_TENTATIVAS_REDACAO).
@@ -1021,8 +1033,14 @@ async function enviar(req: Request, svc: SupabaseClient, body: Record<string, un
   const leadId = Number(body.kommo_lead_id)
   const tentativa = String(body.tentativa ?? '')
   const texto = String(body.texto ?? '').trim()
-  const autor = String(body.autor ?? '').trim() || caller.email || null
   if (!leadId || !tentativa) return erro('kommo_lead_id e tentativa são obrigatórios.', 400)
+  // O AUTOR SAI DO PERFIL DE QUEM CHAMA, NÃO DO CORPO (23/10/2026): o
+  // `body.autor` vinha do navegador, e qualquer usuário assinava a nota do card
+  // (e o `enviado_por`) com o nome de outro. Mesma regra do kommo-anexo-enviar:
+  // profiles.nome, senão o e-mail.
+  const { data: perfilLido } = await svc.from('profiles').select('nome, email').eq('id', caller.id).maybeSingle()
+  const perfil = perfilLido as { nome?: string | null; email?: string | null } | null
+  const autor = perfil?.nome?.trim() || perfil?.email || caller.email || null
 
   const linha = await lerLinha(svc, leadId)
   const pode = podeEnviar(linha, texto)

@@ -28,7 +28,11 @@ export default function NotFound() {
             voltar para onde estava — e não recomeçar da Análise. Sem página
             anterior (link aberto numa aba nova), só o início. */}
         <div className="mt-s4 flex flex-wrap justify-center gap-s2">
-          {window.history.length > 1 && (
+          {/* PÁGINA ANTERIOR DA PLATAFORMA, e não do navegador (23/10/2026): o
+              `history.length` conta também o site de onde a aba veio, e o
+              Voltar saía da plataforma. O `idx` é o do React Router: 0 é a
+              primeira tela desta visita. */}
+          {((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0 && (
             <Button variant="secondary" onClick={() => navigate(-1)}>
               Voltar
             </Button>

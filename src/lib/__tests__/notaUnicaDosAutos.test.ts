@@ -137,7 +137,7 @@ describe('a regra da interrupção e da retomada', () => {
 describe('a rotina aplica a regra antes do pedido pago', () => {
   const rotina = readFileSync(join(__dirname, '..', '..', '..', 'supabase/functions/escavador-autos-rotina/index.ts'), 'utf8')
   it('interrompe depois de acompanhar e antes de pedir', () => {
-    const a = rotina.indexOf('await acompanhar(svc, chave, soEste, novas)')
+    const a = rotina.indexOf('await acompanhar(svc, chave, soEste, novas, resta)')
     const i = rotina.indexOf('const situacoes = await interromperERetomar(svc, soEste)')
     const p = rotina.indexOf('await pedir(svc, chave, situacoes, soEste, avisos, novas, resta)')
     expect(a).toBeGreaterThan(0)

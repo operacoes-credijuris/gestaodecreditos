@@ -150,6 +150,24 @@ describe('enviarAnotacao com texto e arquivos', () => {
     expect(log).toEqual([])
     expect(r.erroDoTexto).toBe('Kommo recusou')
   })
+  it('a nota falhou depois de o arquivo subir: a próxima tentativa não o sobe de novo', async () => {
+    const log: string[] = []
+    const passos = (falhar: boolean) => ({
+      anotar: async () => void log.push('anotar'),
+      anexar: async () => void log.push('anexar'),
+      subir: async () => (log.push('subir'), ANEXO),
+      anotarComArquivo: async () => {
+        log.push('junto')
+        if (falhar) throw new Error('Kommo recusou')
+      },
+    })
+    const a = arq('a.pdf')
+    const r1 = await enviarAnotacao('Segue.', [a], passos(true), () => {})
+    expect(r1.noDrive).toEqual({ chave: 'a.pdf', arquivo: ANEXO })
+    const r2 = await enviarAnotacao('Segue.', [{ ...a, noDrive: r1.noDrive!.arquivo }], passos(false), () => {})
+    expect(log).toEqual(['subir', 'junto', 'junto'])
+    expect(r2).toMatchObject({ textoEnviado: true, enviados: ['a.pdf'] })
+  })
   it('sem os passos novos, a sequência de antes', async () => {
     const log: string[] = []
     await enviarAnotacao('Segue.', [arq('a.pdf')], {

@@ -21,11 +21,10 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import { lerTodasAsLinhas, type PaginaDoBanco } from '../_shared/leituraPaginada.ts'
+import { falhaDaResposta, resolverModeloDaCarteira } from './regras.ts'
 
-// Haiku dá conta desta tarefa: o texto é curto, o formato é fixo e o dossiê
-// chega pronto e em ordem cronológica, então sobra pouca decisão para o modelo.
-// O corpo da requisição aceita `modelo` para comparar sem novo deploy.
-const MODELO = 'claude-haiku-4-5-20251001'
+// O modelo padrão (Haiku) e a lista dos aceitos moram em ./regras.ts. O corpo
+// da requisição aceita `modelo` para comparar sem novo deploy — só da lista.
 
 // Créditos por invocação, e quantas chamadas ao modelo em paralelo dentro do
 // lote. Cada crédito pode custar até TRÊS idas ao modelo (a conferência de
@@ -276,6 +275,9 @@ const conferir = (r: Resumo): string[] => [
   ...problemas('As providências', r.providencias),
 ]
 
+/** A resposta veio cortada (ou recusada): não serve como resumo nem como reescrita. */
+class RespostaInutil extends Error {}
+
 /** Uma ida ao modelo. `correcao` presente = segunda tentativa. */
 async function chamar(
   anthropic: Anthropic,
@@ -301,6 +303,10 @@ async function chamar(
     tool_choice: { type: 'tool', name: FERRAMENTA.name },
     messages: [{ role: 'user', content: conteudo }],
   })
+  // CORTADA NO TETO DE TOKENS É FALHA (23/10/2026), e não resumo: ver
+  // falhaDaResposta. A reescrita cortada é descartada em gerarUm.
+  const falha = falhaDaResposta(r.stop_reason)
+  if (falha) throw new RespostaInutil(falha)
   for (const bloco of r.content) {
     if (bloco.type === 'tool_use') {
       const i = bloco.input as Record<string, unknown>
@@ -327,10 +333,18 @@ async function gerarUm(
   let problemasMelhor = conferir(melhor)
 
   for (let i = 0; i < TENTATIVAS_CORRECAO && problemasMelhor.length > 0; i++) {
-    const nova = await chamar(anthropic, dossie, modelo, {
-      anterior: melhor,
-      problemas: problemasMelhor,
-    })
+    let nova: Resumo
+    try {
+      nova = await chamar(anthropic, dossie, modelo, {
+        anterior: melhor,
+        problemas: problemasMelhor,
+      })
+    } catch (e) {
+      // A REESCRITA CORTADA SE DESCARTA (23/10/2026): a tentativa anterior,
+      // inteira, continua valendo. Só a PRIMEIRA cortada derruba o crédito.
+      if (e instanceof RespostaInutil) continue
+      throw e
+    }
     const problemasNova = conferir(nova)
     // PESO, e não contagem. Contando, "providências vazias" (1 problema) empatava
     // com "estágio 20 caracteres acima do limite" (1 problema) e, por ser mais
@@ -434,8 +448,10 @@ Deno.serve(async (req: Request) => {
     }
     const svc = serviceClient()
     const anthropic = new Anthropic({ apiKey })
-    // Override só para comparar modelos sem redeploy; o padrão é MODELO.
-    const modelo = body.modelo && body.modelo.trim() ? body.modelo.trim() : MODELO
+    // Override só para comparar modelos sem redeploy, e SÓ DA LISTA
+    // (23/10/2026): o id vinha de qualquer usuário direto para a API. Fora da
+    // lista vale o padrão (ver ./regras.ts).
+    const modelo = resolverModeloDaCarteira(body.modelo)
 
     // ----- Monta o lote desta invocação -----
     let lote: string[]
@@ -452,10 +468,19 @@ Deno.serve(async (req: Request) => {
     } else {
       // Primeira chamada da cadeia: só os créditos que aparecem em carteira,
       // isto é, que têm cessionário. Crédito sem cessionário não é de ninguém.
-      const { data } = await svc
+      // LEITURA QUE FALHA É ERRO (23/10/2026): o erro era ignorado e a
+      // varredura respondia ok com zero créditos, como se a carteira estivesse
+      // vazia.
+      const { data, error: erroIds } = await svc
         .from('processos')
         .select('id')
         .not('cessionario', 'is', null)
+      if (erroIds) {
+        return jsonResponse({
+          ok: false, modelo, gerados: 0, pulados: 0, falhas: 0, restantes: 0,
+          erro: `não consegui ler os créditos da carteira: ${erroIds.message}`,
+        })
+      }
       const ids = ((data ?? []) as { id: string }[]).map((r) => r.id)
       lote = ids.slice(0, BATCH)
       resto = ids.slice(BATCH)
@@ -466,13 +491,25 @@ Deno.serve(async (req: Request) => {
     }
 
     // ----- Insumos do lote: 2 consultas, não 2 por crédito -----
-    const { data: procData } = await svc
+    const { data: procData, error: erroProc } = await svc
       .from('processos')
       .select(
         'id, numero_cnj, tribunal, comarca, vara, entidade_devedora, tipo_credito, data_aquisicao, expectativa_liquidacao, data_liquidacao, status',
       )
       .in('id', lote)
+    if (erroProc) {
+      // O LOTE NÃO É GERADO, a cadeia segue — mesma regra da leitura dos
+      // andamentos abaixo (23/10/2026: o erro era ignorado e o lote saía vazio).
+      if (resto.length) dispararProximo(resto, forcar, modelo)
+      return jsonResponse({
+        ok: false, modelo, gerados: 0, pulados: 0, falhas: lote.length, restantes: resto.length,
+        erro: `não consegui ler os créditos do lote: ${erroProc.message}`,
+      })
+    }
     const todos = (procData ?? []) as ProcessoRow[]
+    // OS ERROS DE GRAVAÇÃO vão para a resposta (23/10/2026): eram ignorados, e
+    // ela dizia ok com a carteira sem o texto novo.
+    const errosDeGravacao: string[] = []
 
     // Crédito ENCERRADO não recebe resumo gerado: não há processo a narrar nem
     // providência a tomar, e a carteira mostra uma mensagem fixa no lugar (ver
@@ -483,7 +520,8 @@ Deno.serve(async (req: Request) => {
     //     volta a ser gerada sozinha se o status deixar de ser encerrado.
     const encerrados = todos.filter((p) => p.status === 'encerrado').map((p) => p.id)
     if (encerrados.length) {
-      await svc.from('carteira_resumos').delete().in('processo_id', encerrados)
+      const { error } = await svc.from('carteira_resumos').delete().in('processo_id', encerrados)
+      if (error) errosDeGravacao.push(`não consegui apagar o resumo dos encerrados: ${error.message}`)
     }
     const processos = todos.filter((p) => p.status !== 'encerrado')
 
@@ -539,6 +577,7 @@ Deno.serve(async (req: Request) => {
         falhas: processos.length,
         restantes: resto.length,
         erro: `não consegui ler os andamentos/tarefas do lote: ${movLidas.erro ?? tarLidas.erro}`,
+        ...(errosDeGravacao.length ? { erros_de_gravacao: errosDeGravacao } : {}),
       })
     }
     const movData = movLidas.linhas
@@ -560,10 +599,21 @@ Deno.serve(async (req: Request) => {
     }
 
     // Hashes já gravados, para pular o que não teve novidade.
-    const { data: jaTem } = await svc
+    // LEITURA QUE FALHA É ERRO (23/10/2026): sem os hashes, o lote inteiro
+    // seria regerado (e pago) como se não houvesse nada gravado. O lote para, a
+    // cadeia segue.
+    const { data: jaTem, error: erroHashes } = await svc
       .from('carteira_resumos')
       .select('processo_id, fonte_hash')
       .in('processo_id', lote)
+    if (erroHashes) {
+      if (resto.length) dispararProximo(resto, forcar, modelo)
+      return jsonResponse({
+        ok: false, modelo, gerados: 0, pulados: 0, falhas: processos.length, restantes: resto.length,
+        erro: `não consegui ler os resumos já gravados do lote: ${erroHashes.message}`,
+        ...(errosDeGravacao.length ? { erros_de_gravacao: errosDeGravacao } : {}),
+      })
+    }
     const hashAtual = new Map<string, string | null>()
     for (const r of (jaTem ?? []) as {
       processo_id: string
@@ -616,19 +666,20 @@ Deno.serve(async (req: Request) => {
       // Sem nenhum insumo não há o que resumir: gravar texto do modelo aqui
       // seria pedir invenção. Registra o motivo e segue.
       if (movs.length === 0 && tarefas.length === 0) {
-        await svc.from('carteira_resumos').upsert({
+        const { error } = await svc.from('carteira_resumos').upsert({
           processo_id: p.id,
           fonte_hash: fonte,
           erro: 'Sem andamentos ou tarefas no cache do ADVBOX para este crédito.',
           gerado_em: new Date().toISOString(),
         })
+        if (error) errosDeGravacao.push(`${p.numero_cnj ?? p.id}: ${error.message}`)
         falhas++
         return
       }
 
       try {
         const r = await gerarUm(anthropic, montarDossie(p, movs, tarefas), modelo)
-        await svc.from('carteira_resumos').upsert({
+        const { error: erroGravar } = await svc.from('carteira_resumos').upsert({
           processo_id: p.id,
           estagio_processual: r.estagio_processual,
           providencias: r.providencias,
@@ -637,31 +688,47 @@ Deno.serve(async (req: Request) => {
           erro: null,
           gerado_em: new Date().toISOString(),
         })
+        // O RESUMO QUE NÃO GRAVOU NÃO CONTA COMO GERADO (23/10/2026): o erro do
+        // upsert era ignorado e a resposta somava "gerados". Vira falha do
+        // crédito, e o catch tenta ao menos registrar o erro na linha.
+        if (erroGravar) {
+          errosDeGravacao.push(`${p.numero_cnj ?? p.id}: ${erroGravar.message}`)
+          throw new Error(`O resumo foi gerado, mas não consegui gravá-lo: ${erroGravar.message}`)
+        }
         gerados++
       } catch (e) {
         // fonte_hash APAGADO, e não só omitido (auditoria de bugs, 09/10/2026):
         // omitido, o upsert mantinha o hash da geração anterior — igual ao atual
         // quando não houve andamento novo —, a varredura seguinte pulava o
         // crédito, e o erro ficava na célula do investidor até surgir novidade.
-        await svc.from('carteira_resumos').upsert({
+        const { error: erroDoErro } = await svc.from('carteira_resumos').upsert({
           processo_id: p.id,
           fonte_hash: null,
           erro: String((e as Error).message ?? e).slice(0, 500),
           gerado_em: new Date().toISOString(),
         })
+        if (erroDoErro) errosDeGravacao.push(`${p.numero_cnj ?? p.id}: ${erroDoErro.message}`)
         falhas++
       }
     })
 
     if (resto.length) dispararProximo(resto, forcar, modelo)
 
+    // OK SÓ QUANDO TUDO GRAVOU (23/10/2026): com erro de gravação, a resposta
+    // diz quais, para a tela não anunciar uma carteira que não mudou.
     return jsonResponse({
-      ok: true,
+      ok: errosDeGravacao.length === 0,
       modelo,
       gerados,
       pulados,
       falhas,
       restantes: resto.length,
+      ...(errosDeGravacao.length
+        ? {
+          erros_de_gravacao: errosDeGravacao,
+          erro: `não consegui gravar ${errosDeGravacao.length} resumo(s) na carteira: ${errosDeGravacao[0]}`,
+        }
+        : {}),
     })
   } catch (e) {
     return jsonResponse({ error: String((e as Error).message ?? e) }, 500)

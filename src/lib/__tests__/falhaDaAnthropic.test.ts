@@ -30,6 +30,12 @@ describe('falhaDaAnthropic', () => {
     expect(traduzirFalhaDaAnthropic('PDF ilegível')).toBe('PDF ilegível')
     expect(falhaDaAnthropic('')).toBeNull()
   })
+  it('o limite e a recusa de OUTRO serviço não viram da Anthropic (23/10/2026)', () => {
+    expect(falhaDaAnthropic('/movements/123 → cloudflare rate limit (após 6 tentativas)')).toBeNull()
+    expect(falhaDaAnthropic('Server overloaded, try later')).toBeNull()
+    expect(falhaDaAnthropic('BullAI: invalid api key')).toBeNull()
+    expect(falhaDaAnthropic('Escavador: insufficient credits')).toBeNull()
+  })
   it('o navegador e a justificativa usam o tradutor', () => {
     const fn = readFileSync(join(__dirname, '..', 'functions.ts'), 'utf8')
     expect(fn).toContain('const daAnthropic = falhaDaAnthropic(detalhe || error.message)')

@@ -66,6 +66,7 @@ import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
 import { assinarNota } from '../_shared/notaCredijuris.ts'
 import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { subirAoDriveDoKommo, subirAoDriveDoKommoComVersao } from '../_shared/driveDoKommo.ts'
+import { proximaPaginaDeArquivos } from '../_shared/paginasDeArquivos.ts'
 import {
   documentosDosAutos,
   emOrdemDosAutos,
@@ -77,6 +78,15 @@ import {
 } from '../_shared/autosParaOKommo.ts'
 import { juntadaInicial, lerJuntada } from '../_shared/autosJuntos.ts'
 import { juntarProcessos } from './juntar.ts'
+import {
+  cobrancaPossivel,
+  downloadSumiu,
+  inicioDoDiaEmBrasilia,
+  reservaCabeNaCota,
+  temTempoParaConferir,
+  verificacaoDoPedido,
+} from './concorrencia.ts'
+import { lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
 import {
   ehAnexoDosAutos,
   faltaPapel,
@@ -327,6 +337,9 @@ function clienteKommo(token: string, subdominio: string) {
     async urlDoDrive(): Promise<string> {
       if (drive) return drive
       const r = await api('/account?with=drive_url')
+      // O STATUS PRIMEIRO (23/10/2026): um 401/429 virava "não consegui descobrir
+      // o drive", e a procura ia para o lugar errado.
+      if (!r.ok) throw new Error(`o Kommo não informou o drive da conta (HTTP ${r.status}): ${(await r.text().catch(() => '')).slice(0, 160)}`)
       const u = ((await r.json().catch(() => ({}))) as any)?.drive_url
       if (!u) throw new Error('não consegui descobrir o drive da conta Kommo')
       drive = String(u)
@@ -337,7 +350,8 @@ function clienteKommo(token: string, subdominio: string) {
       const fora: string[] = []
       let caminho: string | null = `/leads/${leadId}/files?limit=50`
       for (let i = 0; caminho && i < 5; i++) {
-        const r = await api(caminho)
+        const atual: string = caminho
+        const r = await api(atual)
         if (r.status === 204) break
         // FALHA NÃO É "SEM ANEXO" (auditoria de bugs, 09/10/2026): um 429/5xx
         // aqui devolvia a lista vazia, a IA lia o card sem os PDFs, o card
@@ -345,8 +359,16 @@ function clienteKommo(token: string, subdominio: string) {
         // anexado nunca era olhado. O erro sobe e a leitura conta como passageira.
         if (!r.ok) throw new Error(`a aba Arquivos do card não veio do Kommo (HTTP ${r.status})`)
         const j = (await r.json().catch(() => ({}))) as any
-        for (const f of j?._embedded?.files ?? []) if (f?.file_uuid) fora.push(String(f.file_uuid))
-        const prox = j?._links?.next?.href as string | undefined
+        let novos = 0
+        for (const f of j?._embedded?.files ?? []) {
+          if (f?.file_uuid && !fora.includes(String(f.file_uuid))) {
+            fora.push(String(f.file_uuid))
+            novos++
+          }
+        }
+        // O `next`, ou o `before_id` quando a página veio cheia (ver
+        // _shared/paginasDeArquivos.ts); página sem arquivo novo encerra.
+        const prox = novos ? proximaPaginaDeArquivos(atual, j, 50) : null
         caminho = prox ? prox.replace(/^https?:\/\/[^/]+\/api\/v4/, '') : null
       }
       return fora
@@ -371,7 +393,19 @@ function clienteKommo(token: string, subdominio: string) {
       if (r.status === 401 || r.status === 403) {
         r = await fetch(url, { headers: auth, signal: AbortSignal.timeout(TEMPO_DOWNLOAD_MS) })
       }
-      return r.ok ? new Uint8Array(await r.arrayBuffer()) : null
+      // SÓ O 404 É "SUMIU" (auditoria, 23/10/2026). Antes, qualquer falha (429,
+      // 5xx, tempo esgotado) virava null, e o card ficava LIDO sem aquele PDF —
+      // a impressão do card não muda, então ele nunca era relido. O resto sobe,
+      // e a leitura conta como passageira (refeita na próxima volta).
+      if (downloadSumiu(r.status)) {
+        await r.body?.cancel().catch(() => {})
+        return null
+      }
+      if (!r.ok) {
+        await r.body?.cancel().catch(() => {})
+        throw new Error(`um anexo do card não desceu do Kommo (HTTP ${r.status})`)
+      }
+      return new Uint8Array(await r.arrayBuffer())
     },
     /** Sobe um PDF ao drive do Kommo, em partes — ver `_shared/driveDoKommo.ts`. */
     async subir(nome: string, bytes: Uint8Array): Promise<string> {
@@ -484,7 +518,9 @@ async function fontesDoCard(kommo: Kommo, lead: any) {
   let total = 0
   for (const c of candidatos) {
     if (pdfs.length >= MAX_PDFS || total + c.bytes > MAX_BYTES_LEITURA) break
-    const b = await kommo.baixar(c.download).catch(() => null)
+    // SEM `.catch` (23/10/2026): a falha do download sobe e a leitura é refeita,
+    // como a da aba Arquivos. Só o anexo apagado (404) fica de fora.
+    const b = await kommo.baixar(c.download)
     if (!b) continue
     pdfs.push({ nome: c.nome, bytes: b })
     total += b.byteLength
@@ -871,15 +907,93 @@ async function registrarPedido(svc: Servico, id: number, cnj: string, leadId: nu
   )
 }
 
+/** O `erro` da linha de consumo enquanto o POST pago não volta: linha que fica assim é volta que morreu no meio. */
+const RESERVA_EM_ABERTO = 'reserva da cota: o pedido pago ainda não voltou'
+
+/**
+ * A RESERVA DA VAGA NA COTA DO DIA (auditoria, 23/10/2026): a linha de consumo
+ * é gravada ANTES do POST pago e, em seguida, contam-se as do dia até ela
+ * (inclusive). A posição é o que decide — ver `reservaCabeNaCota`. Volta que
+ * morre entre a reserva e o POST deixa a linha: a cota conta a mais, nunca a
+ * menos.
+ */
+async function reservarPedidoDoDia(
+  svc: Servico,
+  leadId: number,
+  cnj: string,
+  inicioDoDia: string,
+): Promise<{ id: string; posicao: number } | { erro: string }> {
+  const { data: linha, error } = await svc
+    .from('escavador_consumo')
+    .insert({
+      kommo_lead_id: leadId,
+      operacao: 'autos_pedido',
+      alvo: cnj,
+      centavos: 0,
+      requisicoes: 1,
+      processos: 1,
+      erro: RESERVA_EM_ABERTO,
+    })
+    .select('id, criado_em')
+    .single()
+  if (error || !linha?.id) return { erro: error?.message ?? 'a reserva não voltou do banco' }
+  const { count, error: erroCota } = await svc
+    .from('escavador_consumo')
+    .select('id', { count: 'exact', head: true })
+    .eq('operacao', 'autos_pedido')
+    .gte('criado_em', inicioDoDia)
+    .lte('criado_em', String(linha.criado_em))
+  if (erroCota || count == null) {
+    await desfazerReserva(svc, String(linha.id))
+    return { erro: erroCota?.message ?? 'a contagem da cota não voltou' }
+  }
+  return { id: String(linha.id), posicao: count }
+}
+
+async function desfazerReserva(svc: Servico, id: string) {
+  await svc.from('escavador_consumo').delete().eq('id', id)
+}
+
+/**
+ * Depois do POST pago: a reserva vira o consumo (os créditos que o Escavador
+ * disse ter usado), fica marcada se a cobrança é possível mas o pedido não
+ * confirmou, ou é desfeita se a recusa foi afirmada e nada foi cobrado.
+ */
+async function fecharReserva(
+  svc: Servico,
+  id: string,
+  r: { status: number; centavos: number },
+  pedidoId: number,
+) {
+  if (r.status >= 200 && r.status < 300 && pedidoId) {
+    await svc.from('escavador_consumo').update({ centavos: r.centavos, erro: null }).eq('id', id)
+  } else if (cobrancaPossivel(r.status, r.centavos)) {
+    await svc
+      .from('escavador_consumo')
+      .update({ centavos: r.centavos, erro: `o pedido pago não confirmou (HTTP ${r.status}); pode ter sido cobrado` })
+      .eq('id', id)
+  } else {
+    await desfazerReserva(svc, id)
+  }
+}
+
 async function pedir(
   svc: Servico,
   chave: string,
-  situacoes: Map<number, SituacaoDoCard>,
+  situacoes: Map<number, SituacaoDoCard> | null,
   soEste: number | null,
   avisos: string[],
   novas: boolean,
   resta: () => number = () => Infinity,
 ) {
+  // SEM SABER ONDE OS CARDS ESTÃO, NENHUM PEDIDO PAGO (auditoria, 23/10/2026):
+  // card fora do mapa conta como "pode pagar", e um mapa incompleto (leitura
+  // que falhou ou foi cortada) pagaria pelo card que já saiu da análise. A
+  // próxima volta do cron lê de novo.
+  if (!situacoes) {
+    avisos.push('Não consegui ler onde os cards estão; nenhum pedido pago nesta volta.')
+    return
+  }
   // REPETIR (0077): o robô falhou de passagem e o pedido se refaz — de 10 em 10
   // minutos, contados do último pedido pago.
   const estados = ['NOVO', 'FILA', 'SEM_SALDO', 'PEDINDO', ...(novas ? ['REPETIR'] : [])]
@@ -889,13 +1003,15 @@ async function pedir(
   const processos = (data ?? []) as Processo[]
   if (processos.length === 0) return
 
-  // A COTA DO DIA, no fuso de Brasília.
-  const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+  // A COTA DO DIA, no fuso de Brasília. Esta contagem só poupa trabalho (cota
+  // cheia, nada a tentar); quem decide o pedido pago é a RESERVA, refeita no
+  // banco antes de cada POST (`reservarPedidoDoDia`).
+  const inicioDoDia = inicioDoDiaEmBrasilia(new Date())
   const { count, error: erroCota } = await svc
     .from('escavador_consumo')
     .select('id', { count: 'exact', head: true })
     .eq('operacao', 'autos_pedido')
-    .gte('criado_em', `${hoje}T03:00:00Z`)
+    .gte('criado_em', inicioDoDia)
   // SEM A CONTAGEM, NENHUM PEDIDO PAGO (auditoria de bugs, 09/10/2026): o erro
   // era ignorado e a contagem virava ZERO — com a cota já cheia, uma consulta
   // que falhasse liberava mais 40 pedidos pagos no mesmo dia. A próxima volta
@@ -1008,6 +1124,27 @@ async function pedir(
       continue
     }
 
+    // A VAGA NA COTA, NO BANCO, ANTES DO POST PAGO (auditoria, 23/10/2026). A
+    // contagem era feita uma vez por volta e somada aqui na memória: duas voltas
+    // ao mesmo tempo (o cron, o sync, o aviso) viam as mesmas 38 e pagavam 4 —
+    // passando do teto de 40 por dia. Agora cada pedido grava a linha de
+    // consumo ANTES e conta as do dia até ela; fora do teto, desfaz e espera.
+    const reserva = await reservarPedidoDoDia(svc, leadId, cnj, inicioDoDia)
+    if ('erro' in reserva) {
+      await gravar({
+        estado: 'FILA',
+        detalhe: `Não consegui reservar a vaga na cota do dia (${reserva.erro}); tento de novo na próxima volta.`,
+      })
+      avisos.push(`Não consegui reservar a vaga na cota do dia (${reserva.erro}); nenhum pedido pago a mais nesta volta.`)
+      break
+    }
+    pedidosHoje = Math.max(pedidosHoje, reserva.posicao)
+    if (!reservaCabeNaCota(reserva.posicao, LIMITE_PEDIDOS_DIA)) {
+      await desfazerReserva(svc, reserva.id)
+      await gravar({ estado: 'FILA', detalhe: `Cota de ${LIMITE_PEDIDOS_DIA} pedidos por dia atingida; pede amanhã.` })
+      continue
+    }
+
     const r = await escavador(chave, `/processos/numero_cnj/${cnj}/solicitar-atualizacao`, {
       method: 'POST',
       // O AVISO SÓ COM CALLBACK CADASTRADO. O SDK oficial do Escavador diz que
@@ -1017,12 +1154,15 @@ async function pedir(
       // meia hora cobre o acompanhamento.
       body: JSON.stringify({ autos: 1, utilizar_certificado: 1, ...(comCallback ? { enviar_callback: 1 } : {}) }),
     })
+    const pedidoId = Number(r.corpo?.id ?? 0)
+    // A RESERVA VIRA O CONSUMO DE VERDADE, ou é desfeita se o pedido com
+    // certeza não foi cobrado (ver `cobrancaPossivel`).
+    await fecharReserva(svc, reserva.id, r, pedidoId)
     if (r.status === 402) {
       await gravar({ estado: 'SEM_SALDO', detalhe: 'O Escavador recusou o pedido por falta de crédito.' })
       avisos.push('Escavador sem saldo: os pedidos de autos param até a recarga.')
       break
     }
-    const pedidoId = Number(r.corpo?.id ?? 0)
     if (r.status >= 300 || !pedidoId) {
       const detalhe = `O Escavador recusou o pedido (HTTP ${r.status}): ${String(r.corpo?.message ?? '').slice(0, 200)}`
       // PROBLEMA DA CONTA PARA A VOLTA, e não encerra o processo: token recusado
@@ -1052,16 +1192,7 @@ async function pedir(
       }
       continue
     }
-    pedidosHoje++
     await registrarPedido(svc, pedidoId, cnj, leadId, r.corpo)
-    await svc.from('escavador_consumo').insert({
-      kommo_lead_id: leadId,
-      operacao: 'autos_pedido',
-      alvo: cnj,
-      centavos: r.centavos,
-      requisicoes: 1,
-      processos: 1,
-    })
     // A CONTAGEM DOS PEDIDOS PAGOS deste processo: é ela que o teto de
     // repetições do robô confere.
     await gravar({
@@ -1082,20 +1213,44 @@ async function quandoFoiPedido(svc: Servico, pedidoId: number | null): Promise<n
   return Date.parse(String(data?.criado_em ?? '')) || null
 }
 
-async function acompanhar(svc: Servico, chave: string, soEste: number | null, novas: boolean) {
-  let q = svc.from('escavador_autos_processo').select('*').eq('estado', 'AGUARDANDO')
+async function acompanhar(svc: Servico, chave: string, soEste: number | null, novas: boolean, resta: () => number) {
+  // OS MAIS ESQUECIDOS PRIMEIRO (23/10/2026): com o relógio parando o laço no
+  // meio, a fila anda pela conferência mais antiga, e não sempre pelos mesmos.
+  let q = svc
+    .from('escavador_autos_processo')
+    .select('*')
+    .eq('estado', 'AGUARDANDO')
+    .order('verificado_em', { ascending: true, nullsFirst: true })
   if (soEste) q = q.eq('kommo_lead_id', soEste)
   const { data } = await q
   for (const p of (data ?? []) as Processo[]) {
+    // O RELÓGIO ANTES DE CADA CONFERÊNCIA (auditoria, 23/10/2026): cada uma leva
+    // até 30 s, e com muitos pedidos em AGUARDANDO a invocação morria em ~150 s
+    // no meio do laço — sem pedir nem atualizar a nota. O resto fica para a
+    // próxima volta. Ver `temTempoParaConferir`.
+    if (!temTempoParaConferir(resta())) break
     // NA RODADA DE REPETIÇÃO confere-se de 10 em 10 minutos, e não de 30: senão
     // cada tentativa levaria 40 minutos.
     const verificado = p.verificado_em ? Date.parse(p.verificado_em) : null
     if (!soEste && !horaDeConferir(verificado, Date.now(), !!p.falha_do_robo, REVER_MIN)) continue
-    const gravar = (m: Record<string, unknown>) =>
-      svc.from('escavador_autos_processo')
+    // A GRAVAÇÃO CONDICIONADA AO QUE SE LEU (auditoria, 23/10/2026): entre a
+    // leitura e a consulta (até 30 s), outra volta pode ter levado este
+    // processo adiante. Gravando só pela chave, a segunda volta zerava a
+    // `juntada` de quem já estava juntando, ou trazia um CONCLUIDO de volta a
+    // ANEXANDO — e os mesmos PDFs subiam de novo ao card. Só grava quem ainda
+    // vê a linha como foi lida; quem perde (nada gravado) deixa o processo com
+    // a outra volta.
+    const gravar = async (m: Record<string, unknown>): Promise<boolean> => {
+      const { data: gravou } = await svc
+        .from('escavador_autos_processo')
         .update({ atualizado_em: agora(), ...m })
         .eq('kommo_lead_id', p.kommo_lead_id)
         .eq('numero_cnj', p.numero_cnj)
+        .eq('estado', 'AGUARDANDO')
+        .eq('atualizado_em', p.atualizado_em)
+        .select('kommo_lead_id')
+      return !!gravou?.length
+    }
     const consulta = await ultimaVerificacao(chave, p.numero_cnj)
     // CONSULTA QUE NÃO RESPONDEU não decide nada: nem sucesso, nem desistência.
     if (!consulta.consultou) {
@@ -1104,8 +1259,9 @@ async function acompanhar(svc: Servico, chave: string, soEste: number | null, no
     }
     const v = consulta.v
     const status = String(v?.status ?? 'PENDENTE').toUpperCase()
-    const doPedido =
-      v && (Number(v.id) === Number(p.pedido_id) || Date.parse(String(v.criado_em)) >= Date.parse(p.criado_em))
+    // A VERIFICAÇÃO TEM DE SER DESTE PEDIDO, pelo id (23/10/2026): ver
+    // `verificacaoDoPedido`.
+    const doPedido = verificacaoDoPedido(v, p.pedido_id, p.criado_em)
     if (v && doPedido) await registrarPedido(svc, Number(v.id), p.numero_cnj, p.kommo_lead_id, v)
     // AS 72 HORAS CONTAM DO PEDIDO, e não da linha. `criado_em` da linha é a
     // leitura do card: um processo que esperou três dias na FILA (cota, saldo)
@@ -1409,24 +1565,28 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
 // ------------------------------------------------------------------ O CARD QUE SAIU DA ANÁLISE
 /**
  * Onde cada card está, para a regra da interrupção. Card que não está no
- * espelho fica de fora do mapa (= segue como sempre); se a leitura do espelho
- * falhar, o mapa volta vazio — na dúvida, nada se interrompe.
+ * espelho fica de fora do mapa (= segue como sempre).
+ *
+ * LEITURA QUE FALHA DEVOLVE null (23/10/2026), e não o mapa vazio: vazio, nada
+ * se interrompia — certo — mas todo card ficava "pode pagar", e o `pedir`
+ * pagava pelo card que já saiu da análise. Com null, nada se interrompe e
+ * nenhum pedido pago sai nesta volta.
  */
-async function situacoesDosCards(svc: Servico, ids: number[]): Promise<Map<number, SituacaoDoCard>> {
+async function situacoesDosCards(svc: Servico, ids: number[]): Promise<Map<number, SituacaoDoCard> | null> {
   const fora = new Map<number, SituacaoDoCard>()
   if (!ids.length) return fora
   const { data: etapas, error: erroEtapas } = await svc
     .from('kommo_etapa')
     .select('pipeline_id, status_id, nome')
     .in('pipeline_id', FUNIS_DE_ENTRADA_POR_NOME)
-  if (erroEtapas) return fora
+  if (erroEtapas) return null
   const entradas = entradasDoOperacional((etapas ?? []) as any[])
   for (let i = 0; i < ids.length; i += 150) {
     const { data: leads, error } = await svc
       .from('kommo_leads')
       .select('kommo_lead_id, pipeline_id, status_id')
       .in('kommo_lead_id', ids.slice(i, i + 150))
-    if (error) return new Map()
+    if (error) return null
     for (const l of (leads ?? []) as any[]) fora.set(Number(l.kommo_lead_id), situacaoDoCard(l, entradas))
   }
   return fora
@@ -1442,21 +1602,38 @@ async function situacoesDosCards(svc: Servico, ids: number[]): Promise<Map<numbe
  * falhar (REPETIR) num card que já saiu é interrompido antes do pedido pago da
  * mesma volta. Devolve a situação dos cards, que o `pedir` confere de novo.
  */
-async function interromperERetomar(svc: Servico, soEste: number | null): Promise<Map<number, SituacaoDoCard>> {
-  let qp = svc
-    .from('escavador_autos_processo')
-    .select('kommo_lead_id, numero_cnj, estado, atualizado_em')
-    .in('estado', [...ESTADOS_INTERROMPIVEIS, INTERROMPIDO, 'PEDINDO'])
-  let qc = svc.from('escavador_autos_card').select('kommo_lead_id, estado, atualizado_em').in('estado', ['NOVO', INTERROMPIDO])
-  if (soEste) {
-    qp = qp.eq('kommo_lead_id', soEste)
-    qc = qc.eq('kommo_lead_id', soEste)
+async function interromperERetomar(svc: Servico, soEste: number | null): Promise<Map<number, SituacaoDoCard> | null> {
+  // TODAS AS PÁGINAS, em ordem estável (auditoria, 23/10/2026). O PostgREST
+  // corta em 1000 linhas sem avisar: o card além do corte ficava fora do mapa
+  // de situações, `podePagarPedido(undefined)` dizia que sim, e o `pedir`
+  // pagava pelo card que já tinha saído da coluna de análise. Leitura com erro
+  // ou cortada devolve null: nada se interrompe e nada se paga nesta volta.
+  type LinhaDoProcesso = { kommo_lead_id: number; numero_cnj: string; estado: string; atualizado_em: string }
+  type LinhaDoCard = { kommo_lead_id: number; estado: string; atualizado_em: string }
+  const [lp, lc] = await Promise.all([
+    lerTodasAsLinhas<LinhaDoProcesso>((de, ate) => {
+      let q = svc
+        .from('escavador_autos_processo')
+        .select('kommo_lead_id, numero_cnj, estado, atualizado_em')
+        .in('estado', [...ESTADOS_INTERROMPIVEIS, INTERROMPIDO, 'PEDINDO'])
+      if (soEste) q = q.eq('kommo_lead_id', soEste)
+      return q.order('kommo_lead_id').order('numero_cnj').range(de, ate)
+    }),
+    lerTodasAsLinhas<LinhaDoCard>((de, ate) => {
+      let q = svc.from('escavador_autos_card').select('kommo_lead_id, estado, atualizado_em').in('estado', ['NOVO', INTERROMPIDO])
+      if (soEste) q = q.eq('kommo_lead_id', soEste)
+      return q.order('kommo_lead_id').range(de, ate)
+    }),
+  ])
+  if (lp.erro || lp.cortada || lc.erro || lc.cortada) {
+    console.error('[escavador-autos-rotina] leitura incompleta para a interrupção:', lp.erro ?? lc.erro ?? 'cortada')
+    return null
   }
-  const [{ data: processos }, { data: cards }] = await Promise.all([qp, qc])
-  const ps = (processos ?? []) as { kommo_lead_id: number; numero_cnj: string; estado: string; atualizado_em: string }[]
-  const cs = (cards ?? []) as { kommo_lead_id: number; estado: string; atualizado_em: string }[]
+  const ps = lp.linhas
+  const cs = lc.linhas
   const ids = [...new Set([...ps, ...cs].map((x) => Number(x.kommo_lead_id)))]
   const situacoes = await situacoesDosCards(svc, ids)
+  if (!situacoes) return null
 
   for (const p of ps) {
     const s = situacoes.get(Number(p.kommo_lead_id))
@@ -1698,7 +1875,7 @@ Deno.serve(async (req: Request) => {
     if (volta === 0) {
       if (novas) await rearmarQuemVoltou(svc, soEste)
       await lerCards(svc, kommo, chaveIA, soEste, resta, avisos, notaUnica)
-      await acompanhar(svc, chave, soEste, novas)
+      await acompanhar(svc, chave, soEste, novas, resta)
       const situacoes = await interromperERetomar(svc, soEste)
       await pedir(svc, chave, situacoes, soEste, avisos, novas, resta)
       // A nota única de cada card, com o que esta volta mudou.

@@ -171,7 +171,12 @@ export function useAnotacaoDoCard(
       )
       // O QUE ENTROU SAI DA LISTA; o que falhou fica, com o motivo. Com o texto
       // recusado, nenhum arquivo foi tentado — todos ficam como estavam.
-      if (r.erroDoTexto) setAnexos(fila)
+      // O ARQUIVO QUE JÁ SUBIU (e ficou sem a nota) fica marcado: a próxima
+      // tentativa só grava a nota com ele.
+      if (r.erroDoTexto) {
+        const subiu = r.noDrive
+        setAnexos(subiu ? fila.map((a) => (a.chave === subiu.chave ? { ...a, noDrive: subiu.arquivo } : a)) : fila)
+      }
       else {
         const falharam = new Set(r.falhas.map((f) => f.chave))
         setAnexos((l) => l.filter((a) => falharam.has(a.chave)))

@@ -19,6 +19,8 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { contaKommo } from "../_shared/segredos.ts";
 import { kommoFetch } from "../_shared/kommoFetch.ts";
 import { arquivosParaAnalise, lerJuntada, type ProcessoParaAnalise } from "../_shared/autosJuntos.ts";
+import { urlDoDriveDaConta } from "../_shared/driveDoKommo.ts";
+import { proximaPaginaDeArquivos } from "../_shared/paginasDeArquivos.ts";
 
 const CORS = corsHeaders;
 // O subdomínio da conta vem de integracao_kommo_secret, pelo contaKommo() — era
@@ -110,8 +112,10 @@ Deno.serve(async (req) => {
       _embedded?: { files?: Array<{ file_uuid: string }> };
       _links?: { next?: { href?: string } };
     };
+    const vistos = new Set<string>();
     for (let pagina = 0; proxima && pagina < MAX_PAGINAS_DA_LISTA; pagina++) {
-      const listRes: Response = await kommoFetch(proxima, { headers: auth });
+      const atual: string = proxima;
+      const listRes: Response = await kommoFetch(atual, { headers: auth });
       // 204 = card sem anexo nenhum: corpo vazio, não erro.
       if (listRes.status === 204) break;
       if (!listRes.ok) {
@@ -119,8 +123,12 @@ Deno.serve(async (req) => {
       }
       const listJson: PaginaDeArquivos | null = await listRes.json().catch(() => null);
       if (!listJson) return json({ erro: "A Kommo devolveu uma resposta vazia/inválida na lista de arquivos do card." }, 502);
-      arquivos.push(...(listJson._embedded?.files ?? []));
-      proxima = listJson._links?.next?.href ?? null;
+      // SÓ O QUE É NOVO: a página repetida (o Kommo ignorando o before_id) encerra.
+      const novos = (listJson._embedded?.files ?? []).filter((f) => f?.file_uuid && !vistos.has(f.file_uuid));
+      novos.forEach((f) => vistos.add(f.file_uuid));
+      arquivos.push(...novos);
+      // O `next`, ou o `before_id` quando a página veio cheia (ver _shared/paginasDeArquivos.ts).
+      proxima = novos.length ? proximaPaginaDeArquivos(atual, listJson, 50) : null;
     }
     // Saiu do laço com página seguinte: a lista NÃO está inteira, e isso se diz.
     const listaCortada = !!proxima;
@@ -140,10 +148,14 @@ Deno.serve(async (req) => {
     const aOlhar = arquivos.filter((a) => !ignoradosPeloUuid.has(a.file_uuid));
 
     // 2) descobre a URL do drive da conta (ex.: drive-g)
-    const accRes = await kommoFetch(`${base}/api/v4/account?with=drive_url`, { headers: auth });
-    const accJson = await accRes.json().catch(() => ({}));
-    const driveUrl = (accJson as any)?.drive_url;
-    if (!driveUrl) return json({ erro: "Não foi possível descobrir a drive_url da conta Kommo." }, 502);
+    // COM O MOTIVO DO KOMMO (23/10/2026): um 401/429 virava "não foi possível
+    // descobrir a drive_url" — ver _shared/driveDoKommo.ts.
+    let driveUrl: string;
+    try {
+      driveUrl = await urlDoDriveDaConta(`${base}/api/v4`, auth);
+    } catch (e) {
+      return json({ erro: `Não foi possível descobrir o drive da conta Kommo: ${(e as Error)?.message ?? e}` }, 502);
+    }
 
     // 3) busca os METADADOS de cada anexo (é aqui que vem nome + mime_type + link)
     //

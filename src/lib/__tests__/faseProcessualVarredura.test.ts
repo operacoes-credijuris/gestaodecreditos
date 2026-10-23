@@ -18,8 +18,16 @@ describe('fase-processual — varredura', () => {
     expect(f).not.toContain('JANELA_RECENTE_DIAS')
   })
   it('as leituras são paginadas (sem o corte de 1000 linhas)', () => {
-    expect(f).toContain("await lerTodasAsLinhas<MovRow>((de, ate) =>")
+    expect(f).toContain("await lerPorIds<MovRow, string>(todosDigits, (f, de, ate) =>")
     expect(f).toContain("svc.from('processos').select('id, numero_cnj').in('status', ['ativo', 'complementar']).order('id').range(de, ate)")
+  })
+  it('as leituras do lote vão em fatias, e a que falha para tudo antes de gravar (23/10/2026)', () => {
+    for (const oQue of ['os créditos', 'os apensos', 'os andamentos', 'as fases atuais']) {
+      expect(f).toContain(`return falhaDeLeitura('${oQue}',`)
+    }
+    expect(f).not.toMatch(/\.in\('id', lote\)|\.in\('processo_id', lote\)/)
+    const toml = readFileSync(join(__dirname, '..', '..', '..', 'supabase/config.toml'), 'utf8')
+    expect(toml).toMatch(/\[functions\.fase-processual\]\r?\nverify_jwt = false/)
   })
   it('para com folga antes do teto do servidor e conta os adiados', () => {
     expect(f).toContain('if (Date.now() - inicio > ORCAMENTO_MS) {')

@@ -438,35 +438,56 @@ export async function executarPesquisaTeto(
   if (!esf || chave.length !== 2) return { ok: false, motivo: 'uf ou esfera inválida' }
   // Só a esfera municipal tem município; nas outras a linha é a de chave vazia.
   const mun = esf === 'municipal' ? String(municipio ?? '').trim() : ''
-  if (!apiKey) {
-    await gravarFalha(svc, chave, esf, ano, mun, 'a chave da Anthropic não está configurada')
-    return { ok: false, motivo: 'sem chave' }
+  // GRAVA A FALHA E DIZ SE NÃO CONSEGUIU (23/10/2026): a linha que não sai de
+  // 'pesquisando' tem de aparecer na resposta, não sumir num catch vazio.
+  const falhar = async (motivoDaLinha: string, curto: string) => {
+    const erroFalha = await gravarFalha(svc, chave, esf, ano, mun, motivoDaLinha)
+    return { ok: false, motivo: erroFalha ? `${curto} (e a falha não foi gravada: ${erroFalha})` : curto }
   }
+  if (!apiKey) return await falhar('a chave da Anthropic não está configurada', 'sem chave')
 
   try {
     const anthropic = new Anthropic({ apiKey })
-    const resposta = await anthropic.messages
-      .stream({
-        model: MODELO,
-        // 8000, e não 4000: no Opus 5.5 o raciocínio (sempre ligado) conta
-        // dentro do teto, somado em todas as voltas de busca do servidor.
-        max_tokens: 8000,
-        // O padrão do Opus 5. O do 5.5 é 'medium', e o valor aqui decide se
-        // um crédito é reprovado.
-        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
-        tools: [
-          FERRAMENTA,
-          { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
-          { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES },
-        ] as Anthropic.Tool[],
-        messages: [{ role: 'user', content: pergunta(chave, esf, ano, mun) }],
-      } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
-      .finalMessage()
+    const mensagens: Anthropic.MessageParam[] = [{ role: 'user', content: pergunta(chave, esf, ano, mun) }]
+    const pedir = () =>
+      anthropic.messages
+        .stream({
+          model: MODELO,
+          // 8000, e não 4000: no Opus 5.5 o raciocínio (sempre ligado) conta
+          // dentro do teto, somado em todas as voltas de busca do servidor.
+          max_tokens: 8000,
+          // O padrão do Opus 5. O do 5.5 é 'medium', e o valor aqui decide se
+          // um crédito é reprovado.
+          output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
+          tools: [
+            FERRAMENTA,
+            { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
+            { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES },
+          ] as Anthropic.Tool[],
+          messages: mensagens,
+        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+        .finalMessage()
+
+    let resposta = await pedir()
+    // PAUSE_TURN É PAUSA, NÃO FALHA (23/10/2026): o laço de busca do servidor
+    // tem teto próprio e devolve 'pause_turn' ao batê-lo. Antes isso caía em
+    // "terminou sem registrar um teto", gravava 'falhou' e punha o ente em
+    // repouso. Reenviar o turno pausado retoma de onde parou, sem mensagem
+    // nova — como em _shared/emolumentos.ts —, com teto de retomadas, porque
+    // cada uma reenvia todo o contexto acumulado.
+    for (let i = 0; i < MAX_RETOMADAS_TETO && resposta.stop_reason === 'pause_turn'; i++) {
+      mensagens.push({ role: 'assistant', content: resposta.content })
+      resposta = await pedir()
+    }
+    // RECUSA, TETO DE TOKENS E PAUSA SEM FIM SÃO FALHAS DITAS (23/10/2026): eram
+    // ignoradas, e um registrar_teto cortado no max_tokens podia ser lido com o
+    // valor pela metade. O motivo vai para a linha, em português.
+    const falhaDaParada = motivoDaParadaDoTeto(resposta.stop_reason)
+    if (falhaDaParada) return await falhar(falhaDaParada, falhaDaParada)
 
     const uso = resposta.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA.name)
     if (!uso || uso.type !== 'tool_use') {
-      await gravarFalha(svc, chave, esf, ano, mun, 'a pesquisa terminou sem registrar um teto')
-      return { ok: false, motivo: 'sem ferramenta' }
+      return await falhar('a pesquisa terminou sem registrar um teto', 'sem ferramenta')
     }
     const r = uso.input as {
       existe?: boolean; valor_reais?: number | null; em_salarios_minimos?: number | null
@@ -478,30 +499,76 @@ export async function executarPesquisaTeto(
     // existe=true sem valor é resposta incompleta, não é resposta: gravar
     // 'pronto' com valor nulo faria o motor tratar como "não tem teto".
     if (r.existe === true && !temValor) {
-      await gravarFalha(svc, chave, esf, ano, mun,
-        `a pesquisa afirmou que há teto mas não trouxe o valor (${String(r.observacao ?? '').slice(0, 200)})`)
-      return { ok: false, motivo: 'sem valor' }
+      return await falhar(
+        `a pesquisa afirmou que há teto mas não trouxe o valor (${String(r.observacao ?? '').slice(0, 200)})`,
+        'sem valor',
+      )
     }
 
-    await svc.from('rpv_tetos').update({
-      status: 'pronto',
-      valor: temValor ? Number(valor.toFixed(2)) : null,
-      em_salarios: Number.isFinite(Number(r.em_salarios_minimos)) ? Number(r.em_salarios_minimos) : null,
-      fonte: String(r.fonte ?? '').slice(0, 500) || null,
-      vigencia: String(r.vigencia ?? '').slice(0, 300) || null,
-      motivo: temValor ? String(r.observacao ?? '').slice(0, 500) || null
-        : `não há teto próprio: ${String(r.observacao ?? 'sem detalhe').slice(0, 400)}`,
-      origem: 'busca',
-      atualizado_em: new Date().toISOString(),
-      atualizado_por: 'teto_passo',
-    }).eq('uf', chave).eq('esfera', esf).eq('ano', ano).eq('municipio_chave', chaveDoMunicipio(mun))
+    // A GRAVAÇÃO FINAL É CONFERIDA (23/10/2026): o erro do update era
+    // ignorado, a resposta dizia ok e a linha ficava 'pesquisando' até a trava
+    // vencer. Uma segunda tentativa; falhando, vira falha dita (o catch abaixo).
+    const erroPronto = await gravarComUmaRetentativa(() =>
+      svc.from('rpv_tetos').update({
+        status: 'pronto',
+        valor: temValor ? Number(valor.toFixed(2)) : null,
+        em_salarios: Number.isFinite(Number(r.em_salarios_minimos)) ? Number(r.em_salarios_minimos) : null,
+        fonte: String(r.fonte ?? '').slice(0, 500) || null,
+        vigencia: String(r.vigencia ?? '').slice(0, 300) || null,
+        motivo: temValor ? String(r.observacao ?? '').slice(0, 500) || null
+          : `não há teto próprio: ${String(r.observacao ?? 'sem detalhe').slice(0, 400)}`,
+        origem: 'busca',
+        atualizado_em: new Date().toISOString(),
+        atualizado_por: 'teto_passo',
+      }).eq('uf', chave).eq('esfera', esf).eq('ano', ano).eq('municipio_chave', chaveDoMunicipio(mun))
+    )
+    if (erroPronto) throw new Error(`achei o teto, mas não consegui gravá-lo: ${erroPronto}`)
 
     return { ok: true }
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e)
-    await gravarFalha(svc, chave, esf, ano, mun, msg.slice(0, 300))
-    return { ok: false, motivo: msg }
+    return await falhar(msg.slice(0, 300), msg)
   }
+}
+
+/** Quantas vezes a pesquisa do teto retoma um `pause_turn` antes de desistir. */
+const MAX_RETOMADAS_TETO = 2
+
+/**
+ * O MOTIVO DA FALHA pelo fim da resposta da pesquisa do teto, ou null quando
+ * ela pode ser lida (23/10/2026). Recusa e teto de tokens eram ignorados; um
+ * `pause_turn` que sobra depois das retomadas também é falha, dita como tal.
+ */
+export function motivoDaParadaDoTeto(stopReason: string | null | undefined): string | null {
+  if (stopReason === 'refusal') return 'o modelo recusou a pesquisa do teto (filtro de segurança da Anthropic)'
+  if (stopReason === 'max_tokens') {
+    return 'a resposta da pesquisa do teto passou do tamanho máximo e saiu cortada; o valor não foi aproveitado'
+  }
+  if (stopReason === 'pause_turn') {
+    return `a pesquisa do teto continuou pausada pelo servidor depois de ${MAX_RETOMADAS_TETO} retomadas`
+  }
+  return null
+}
+
+/**
+ * UMA GRAVAÇÃO COM UMA SEGUNDA TENTATIVA (23/10/2026). O cliente do Supabase
+ * não lança: devolve `{ error }`, e quem não olha deixa a linha presa no estado
+ * de antes. Devolve a mensagem do erro que sobrou, ou null se gravou.
+ */
+export async function gravarComUmaRetentativa(
+  fazer: () => PromiseLike<{ error: { message?: string } | null }>,
+): Promise<string | null> {
+  let ultimo = 'erro desconhecido'
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    try {
+      const { error } = await fazer()
+      if (!error) return null
+      ultimo = error.message || ultimo
+    } catch (e) {
+      ultimo = (e as Error)?.message ?? String(e)
+    }
+  }
+  return ultimo
 }
 
 /** Tipo frouxo na fronteira: a ação vem do corpo de uma requisição. */
@@ -509,23 +576,29 @@ type EsferaOuTexto = EsferaTeto | string
 
 async function gravarFalha(
   svc: SupabaseClient, uf: string, esfera: EsferaTeto, ano: number, municipio: string, motivo: string,
-): Promise<void> {
+): Promise<string | null> {
   // A LINHA DO MUNICÍPIO, e só ela (auditoria de bugs, 09/10/2026): sem o
   // `municipio_chave`, a falha de UM município derrubava para 'falhou' TODAS as
   // linhas municipais daquela UF no ano — inclusive as prontas e a da capital —,
   // e o `maybeSingle` com várias linhas dava erro (ignorado), então o contador
   // ficava sempre em 1 e o repouso nunca passava de 30 minutos.
   const chaveMun = chaveDoMunicipio(municipio)
+  // A LEITURA DO CONTADOR NÃO IMPEDE A GRAVAÇÃO (23/10/2026): um erro nela
+  // pulava o update, e a linha ficava 'pesquisando'. Sem o contador, conta 1.
+  let falhas = 1
   try {
     const { data, error } = await svc.from('rpv_tetos').select('falhas')
       .eq('uf', uf).eq('esfera', esfera).eq('ano', ano).eq('municipio_chave', chaveMun).maybeSingle()
-    if (error) throw error
-    const falhas = Number((data as { falhas?: number } | null)?.falhas ?? 0) + 1
-    await svc.from('rpv_tetos').update({
+    if (!error) falhas = Number((data as { falhas?: number } | null)?.falhas ?? 0) + 1
+  } catch (_) { /* segue com 1 */ }
+  // O ERRO DO UPDATE É CONFERIDO, com uma segunda tentativa, e devolvido a quem
+  // chamou — a análise não para por causa disto, mas a resposta diz.
+  return await gravarComUmaRetentativa(() =>
+    svc.from('rpv_tetos').update({
       status: 'falhou', motivo, falhas,
       // O repouso conta da FALHA, não do começo da pesquisa.
       pesquisa_desde: new Date().toISOString(),
       atualizado_em: new Date().toISOString(), atualizado_por: 'teto_passo',
     }).eq('uf', uf).eq('esfera', esfera).eq('ano', ano).eq('municipio_chave', chaveMun)
-  } catch (_) { /* a análise não para por causa disto */ }
+  )
 }

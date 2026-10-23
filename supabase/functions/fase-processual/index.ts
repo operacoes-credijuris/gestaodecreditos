@@ -32,7 +32,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
-import { lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
+import { lerPorIds, lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
 
 // Haiku dá conta: a saída é um código fixo de uma lista curta, não prosa livre.
 const MODELO = 'claude-haiku-4-5-20251001'
@@ -530,9 +530,10 @@ Deno.serve(async (req: Request) => {
       // carteira do investidor. Filtrar por `cessionario` aqui descartava quase
       // toda a base.
       // PAGINADO: o PostgREST corta em 1000 linhas sem avisar.
-      const { linhas: candidatos } = await lerTodasAsLinhas<{ id: string; numero_cnj: string | null }>((de, ate) =>
+      const { linhas: candidatos, erro: erroCandidatos } = await lerTodasAsLinhas<{ id: string; numero_cnj: string | null }>((de, ate) =>
         svc.from('processos').select('id, numero_cnj').in('status', ['ativo', 'complementar']).order('id').range(de, ate),
       )
+      if (erroCandidatos) return jsonResponse({ error: `Não consegui ler a carteira: ${erroCandidatos}` }, 500)
 
       // A CARTEIRA INTEIRA, E O HASH DECIDE (21/10/2026). A varredura olhava só
       // quem teve andamento nos últimos dias, contados pela data do andamento — e
@@ -554,16 +555,29 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, gerados: 0, pulados: 0, falhas: 0, calendarioTransicionados })
     }
 
-    const { data: procData } = await svc
-      .from('processos')
-      .select('id, numero_cnj, tribunal, comarca, vara, data_aquisicao, status')
-      .in('id', lote)
-    const todos = (procData ?? []) as ProcessoRow[]
+    // AS LEITURAS DO LOTE EM FATIAS E CONFERIDAS (23/10/2026): desde que o lote
+    // é a carteira inteira, cada `.in(lote)` levava centenas de ids na URL — a
+    // consulta falhava, o erro era ignorado, e a varredura terminava com nada
+    // feito e "Classificação atualizada" na tela. Leitura que falha PARA a
+    // varredura antes de qualquer gravação: classificar com dado faltando
+    // regravaria a fase de quem ficou de fora (ver lerPorIds).
+    const falhaDeLeitura = (oQue: string, erro: string | null, cortada: boolean) =>
+      jsonResponse({ error: `Não consegui ler ${oQue}: ${erro ?? 'a leitura passou do teto de páginas'}. Nada foi alterado.` }, 500)
+    const lidosDoLote = await lerPorIds<ProcessoRow, string>(lote, (f, de, ate) =>
+      svc
+        .from('processos')
+        .select('id, numero_cnj, tribunal, comarca, vara, data_aquisicao, status')
+        .in('id', f)
+        .order('id')
+        .range(de, ate),
+    )
+    if (lidosDoLote.erro || lidosDoLote.cortada) return falhaDeLeitura('os créditos', lidosDoLote.erro, lidosDoLote.cortada)
+    const todos = lidosDoLote.linhas
 
     // Encerrado sai do classificador: não há posição de fase a manter.
     const encerrados = todos.filter((p) => p.status === 'encerrado').map((p) => p.id)
-    if (encerrados.length) {
-      await svc.from('processos_fase').delete().in('processo_id', encerrados)
+    for (let i = 0; i < encerrados.length; i += 150) {
+      await svc.from('processos_fase').delete().in('processo_id', encerrados.slice(i, i + 150))
     }
     const processos = todos.filter((p) => p.status === 'ativo' || p.status === 'complementar')
 
@@ -577,16 +591,12 @@ Deno.serve(async (req: Request) => {
       const d = onlyDigits(p.numero_cnj)
       digitsDe.set(p.id, d.length >= 6 ? [d] : [])
     }
-    const { data: apensosData } = processos.length
-      ? await svc
-          .from('apensos')
-          .select('processo_id, numero')
-          .in(
-            'processo_id',
-            processos.map((p) => p.id),
-          )
-      : { data: [] }
-    for (const a of (apensosData ?? []) as { processo_id: string | null; numero: string | null }[]) {
+    const apensosLidos = await lerPorIds<{ processo_id: string | null; numero: string | null }, string>(
+      processos.map((p) => p.id),
+      (f, de, ate) => svc.from('apensos').select('processo_id, numero').in('processo_id', f).order('id').range(de, ate),
+    )
+    if (apensosLidos.erro || apensosLidos.cortada) return falhaDeLeitura('os apensos', apensosLidos.erro, apensosLidos.cortada)
+    for (const a of apensosLidos.linhas) {
       if (!a.processo_id) continue
       const d = onlyDigits(a.numero)
       if (d.length < 6) continue
@@ -597,18 +607,20 @@ Deno.serve(async (req: Request) => {
     // PAGINADO (21/10/2026): sem `range`, o PostgREST devolvia só 1000 andamentos
     // do lote inteiro, sem avisar — o histórico de parte dos créditos chegava
     // cortado ao modelo (e a conclusão recente podia nem estar nele).
-    const { linhas: movData } = todosDigits.length
-      ? await lerTodasAsLinhas<MovRow>((de, ate) =>
-          svc
-            .from('advbox_movimentacoes')
-            .select('id, numero_digits, data, data_ts, conteudo')
-            .in('numero_digits', todosDigits)
-            .order('data', { ascending: false })
-            .order('data_ts', { ascending: false, nullsFirst: false })
-            .order('id', { ascending: false })
-            .range(de, ate),
-        )
-      : { linhas: [] as MovRow[] }
+    // EM FATIAS (23/10/2026): a ordem vale dentro de cada fatia, e
+    // `movimentacoesDoCredito` reordena o que é de cada crédito.
+    const movsLidas = await lerPorIds<MovRow, string>(todosDigits, (f, de, ate) =>
+      svc
+        .from('advbox_movimentacoes')
+        .select('id, numero_digits, data, data_ts, conteudo')
+        .in('numero_digits', f)
+        .order('data', { ascending: false })
+        .order('data_ts', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false })
+        .range(de, ate),
+    )
+    if (movsLidas.erro || movsLidas.cortada) return falhaDeLeitura('os andamentos', movsLidas.erro, movsLidas.cortada)
+    const movData = movsLidas.linhas
     const movsPor = new Map<string, MovRow[]>()
     for (const m of (movData ?? []) as MovRow[]) {
       const k = m.numero_digits ?? ''
@@ -630,14 +642,21 @@ Deno.serve(async (req: Request) => {
       return todas
     }
 
-    const { data: jaTem } = await svc
-      .from('processos_fase')
-      .select(
-        'processo_id, fase_codigo, data_entrada_fase, movimentacao_ancora_data, movimentacao_ancora_texto, data_intimacao_lida_expedicao_rpv, fonte_hash',
-      )
-      .in('processo_id', lote)
+    // A FASE ATUAL DE CADA UM, inteira: quem faltasse aqui seria tratado como
+    // nunca classificado, e a fase dele — inclusive a ajustada à mão — regravada.
+    const jaTem = await lerPorIds<FaseAtual & { processo_id: string }, string>(lote, (f, de, ate) =>
+      svc
+        .from('processos_fase')
+        .select(
+          'processo_id, fase_codigo, data_entrada_fase, movimentacao_ancora_data, movimentacao_ancora_texto, data_intimacao_lida_expedicao_rpv, fonte_hash',
+        )
+        .in('processo_id', f)
+        .order('processo_id')
+        .range(de, ate),
+    )
+    if (jaTem.erro || jaTem.cortada) return falhaDeLeitura('as fases atuais', jaTem.erro, jaTem.cortada)
     const atualPor = new Map<string, FaseAtual>()
-    for (const r of (jaTem ?? []) as (FaseAtual & { processo_id: string })[]) {
+    for (const r of jaTem.linhas) {
       atualPor.set(r.processo_id, r)
     }
 

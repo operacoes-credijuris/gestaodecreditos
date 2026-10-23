@@ -13,6 +13,12 @@
 // descarta algo é CONTADA e volta em `diagnostico`, e a tela mostra o resumo.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import {
+  contagemDaResposta,
+  diasRetroativos,
+  fimDaPaginacao,
+  numeroDoItem,
+} from './regras.ts'
 
 const DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao'
 const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
@@ -39,7 +45,7 @@ const ESPERAS_MS = [1000, 3000, 6000]
 
 async function fetchPagina(
   url: string,
-): Promise<{ items: Record<string, unknown>[]; count: number }> {
+): Promise<{ items: Record<string, unknown>[]; count: number | null }> {
   const tentativas = ESPERAS_MS.length + 1
   for (let a = 1; a <= tentativas; a++) {
     try {
@@ -61,14 +67,16 @@ async function fetchPagina(
       const j = await res.json()
       return {
         items: (j?.items ?? []) as Record<string, unknown>[],
-        count: Number(j?.count ?? 0),
+        // NULL QUANDO NÃO VEM (23/10/2026), e não 0: com 0, a paginação dava
+        // tudo por lido na primeira página. Ver regras.ts.
+        count: contagemDaResposta(j),
       }
     } catch (e) {
       if (a === tentativas) throw e
       await sleep(ESPERAS_MS[a - 1])
     }
   }
-  return { items: [], count: 0 }
+  return { items: [], count: null }
 }
 
 const POR_PAGINA = 100
@@ -102,15 +110,19 @@ async function buscarPorOab(
 ): Promise<{ items: Record<string, unknown>[]; total: number }> {
   const [numero, uf] = oab.split('/')
   const items: Record<string, unknown>[] = []
-  let total = 0
+  let total: number | null = null
   for (let p = 1; p <= MAX_PAGINAS; p++) {
     const r = await fetchPagina(
       `${DJEN}?numeroOab=${numero}&ufOab=${uf}${janela}` +
         `&itensPorPagina=${POR_PAGINA}&pagina=${p}`,
     )
-    total = r.count
+    if (r.count != null) total = r.count
     items.push(...r.items)
-    if (r.items.length < POR_PAGINA || items.length >= total) return { items, total }
+    // SEM CONTAGEM, SEGUE ENQUANTO A PÁGINA VIER CHEIA (23/10/2026). Ver
+    // fimDaPaginacao em regras.ts.
+    if (fimDaPaginacao(r.items.length, items.length, total, POR_PAGINA)) {
+      return { items, total: total ?? items.length }
+    }
   }
   // Teto batido: melhor falhar alto do que devolver metade parecendo completo.
   throw new Error(
@@ -263,7 +275,10 @@ Deno.serve(async (req: Request) => {
       if (lida) oabSet.add(lida)
       else oabsIlegiveis.push(String(o))
     }
-    const dias = Number(cfg.dias_retroativos ?? 30)
+    // VALIDADO (23/10/2026): um valor não numérico virava NaN e o toISOString
+    // logo abaixo lançava RangeError — nenhuma intimação entrava até alguém
+    // corrigir a configuração. Ver diasRetroativos em regras.ts.
+    const { dias, ajuste: ajusteDosDias } = diasRetroativos(cfg.dias_retroativos)
     const fim = new Date().toISOString().slice(0, 10)
     const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
     const janela = `&dataDisponibilizacaoInicio=${ini}&dataDisponibilizacaoFim=${fim}`
@@ -312,9 +327,9 @@ Deno.serve(async (req: Request) => {
         naoIntimacao++
         continue
       }
-      const numero = onlyDigits(
-        (it.numeroprocessocommascara as string) ?? (it.numero_processo as string),
-      )
+      // Máscara VAZIA cai no número sem máscara (23/10/2026): `??` não pega "",
+      // e a intimação era descartada como "processo não cadastrado".
+      const numero = onlyDigits(numeroDoItem(it))
       if (!numeros.has(numero)) {
         processoNaoCadastrado++
         continue
@@ -332,10 +347,7 @@ Deno.serve(async (req: Request) => {
       .map((it) => ({
         id: Number(it.id),
         data_disponibilizacao: (it.data_disponibilizacao as string) ?? null,
-        numero_processo:
-          (it.numeroprocessocommascara as string) ??
-          (it.numero_processo as string) ??
-          null,
+        numero_processo: numeroDoItem(it),
         sigla_tribunal: (it.siglaTribunal as string) ?? null,
         tipo_comunicacao: (it.tipoComunicacao as string) ?? null,
         raw: it,
@@ -363,10 +375,17 @@ Deno.serve(async (req: Request) => {
     // custa quase nada; perder intimação custa prazo.
     const podaAte = new Date(`${ini}T00:00:00Z`)
     podaAte.setUTCDate(podaAte.getUTCDate() - 1)
-    await svc
+    //
+    // O ERRO DA PODA É CONTADO (23/10/2026). Era descartado: com a poda falhando,
+    // o cache crescia sem limite e nada dizia. Não é fatal — as intimações já
+    // foram gravadas acima, e o cache fica com linha a mais, não a menos —, mas
+    // vai para o log, para o diagnóstico e para o resumo da tela.
+    const { error: erroPoda } = await svc
       .from('djen_publicacoes')
       .delete()
       .lt('data_disponibilizacao', podaAte.toISOString().slice(0, 10))
+    const podaFalhou = erroPoda ? erroPoda.message : null
+    if (podaFalhou) console.error('djen: falha ao podar o cache:', podaFalhou)
 
     const diagnostico = {
       janela: `${ini} a ${fim}`,
@@ -388,6 +407,10 @@ Deno.serve(async (req: Request) => {
       descartadas_nao_intimacao: naoIntimacao,
       descartadas_processo_nao_cadastrado: processoNaoCadastrado,
       descartadas_fora_das_oabs: foraDasOabs,
+      /** A limpeza do que saiu da janela falhou (a mensagem do banco), ou null. */
+      poda_falhou: podaFalhou,
+      /** `dias_retroativos` da configuração precisou ser corrigido, ou null. */
+      dias_retroativos_ajustado: ajusteDosDias,
     }
     const resumo =
       `${oabSet.size} OABs` +
@@ -399,7 +422,9 @@ Deno.serve(async (req: Request) => {
       (processoNaoCadastrado
         ? ` · ${processoNaoCadastrado} de processos fora da plataforma`
         : '') +
-      (oabsIlegiveis.length ? ` · ${oabsIlegiveis.length} OAB ilegível` : '')
+      (oabsIlegiveis.length ? ` · ${oabsIlegiveis.length} OAB ilegível` : '') +
+      (podaFalhou ? ' · LIMPEZA DO CACHE FALHOU' : '') +
+      (ajusteDosDias ? ` · ${ajusteDosDias}` : '')
 
     return jsonResponse({ ok: true, total: items.length, gravados, resumo, diagnostico })
   } catch (err) {

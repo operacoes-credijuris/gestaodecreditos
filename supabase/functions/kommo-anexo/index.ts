@@ -28,6 +28,7 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { contaKommo } from "../_shared/segredos.ts";
 import { kommoFetch } from "../_shared/kommoFetch.ts";
 import { previaPequena } from "../_shared/previaDoDrive.ts";
+import { urlDoDriveDaConta } from "../_shared/driveDoKommo.ts";
 
 const CORS = corsHeaders;
 // O SUBDOMÍNIO VEM DE integracao_kommo_secret, pelo contaKommo() — como nas
@@ -60,17 +61,13 @@ const UUID = /^[0-9a-f-]{20,64}$/i;
 let driveDaConta: { url: string; em: number; subdominio: string } | null = null;
 const VALIDADE_DRIVE_MS = 60 * 60 * 1000;
 
-async function urlDoDrive(auth: Record<string, string>, subdominio: string): Promise<string | null> {
+/** O drive da conta (com cache). LANÇA com o motivo do Kommo — ver driveDoKommo.ts. */
+async function urlDoDrive(auth: Record<string, string>, subdominio: string): Promise<string> {
   if (driveDaConta && driveDaConta.subdominio === subdominio && Date.now() - driveDaConta.em < VALIDADE_DRIVE_MS) {
     return driveDaConta.url;
   }
-  const res = await kommoFetch(
-    `https://${subdominio}.kommo.com/api/v4/account?with=drive_url`,
-    { headers: auth },
-  );
-  const url = ((await res.json().catch(() => ({}))) as any)?.drive_url;
-  if (!url) return null;
-  driveDaConta = { url: String(url), em: Date.now(), subdominio };
+  const url = await urlDoDriveDaConta(`https://${subdominio}.kommo.com/api/v4`, auth);
+  driveDaConta = { url, em: Date.now(), subdominio };
   return driveDaConta.url;
 }
 
@@ -90,8 +87,12 @@ Deno.serve(async (req) => {
     if (!conta) return json({ erro: "Token ou subdomínio da Kommo não configurado." }, 500);
     const auth = { Authorization: `Bearer ${conta.token}` };
 
-    const drive = await urlDoDrive(auth, conta.subdominio);
-    if (!drive) return json({ erro: "Não consegui descobrir a drive_url da conta Kommo." }, 502);
+    let drive: string;
+    try {
+      drive = await urlDoDrive(auth, conta.subdominio);
+    } catch (e) {
+      return json({ erro: `Não consegui descobrir o drive da conta Kommo: ${(e as Error)?.message ?? e}` }, 502);
+    }
 
     const mRes = await kommoFetch(`${drive}/v1.0/files/${uuid}`, { headers: auth });
     if (!mRes.ok) {
@@ -103,6 +104,8 @@ Deno.serve(async (req) => {
             mRes.status === 404
               ? "Este arquivo não está mais no Kommo (pode ter sido apagado)."
               : `O Kommo recusou os metadados do arquivo (HTTP ${mRes.status}).`,
+          // O MOTIVO DO KOMMO junto (23/10/2026): "HTTP 400" sozinho não diz o que corrigir.
+          ...(mRes.status === 404 ? {} : { detalhe: (await mRes.text().catch(() => "")).slice(0, 300) }),
         },
         mRes.status === 404 ? 404 : 502,
       );

@@ -58,6 +58,11 @@ export interface AnexoDaAnotacao {
   chave: string
   arquivo: File
   estado: EstadoDoAnexo
+  /**
+   * O arquivo JÁ ESTÁ no card (subiu sem nota, e a nota falhou): a próxima
+   * tentativa só grava a nota com ele, sem subi-lo de novo.
+   */
+  noDrive?: ArquivoNoDrive
 }
 
 const doisDigitos = (n: number) => String(n).padStart(2, '0')
@@ -135,6 +140,8 @@ export interface ResultadoDaAnotacao {
   falhas: { chave: string; nome: string; erro: string }[]
   /** Arquivo no card, mas com algo a dizer (a nota do arquivo não subiu). */
   avisos: string[]
+  /** O arquivo que subiu e ficou sem a nota: a tela o guarda para a próxima tentativa. */
+  noDrive?: { chave: string; arquivo: ArquivoNoDrive }
 }
 
 const mensagem = (e: unknown) => (e as Error)?.message ?? String(e)
@@ -164,15 +171,20 @@ export async function enviarAnotacao(
   if (primeiro && passos.subir && passos.anotarComArquivo) {
     fila = anexos.filter((a) => a !== primeiro)
     onEstado(primeiro.chave, { fase: 'enviando', pct: 0 })
-    let noDrive: ArquivoNoDrive | null = null
-    try {
-      noDrive = await passos.subir(primeiro.arquivo, (p) =>
-        onEstado(primeiro.chave, p.fase === 'enviando' ? { fase: 'enviando', pct: p.pct } : { fase: 'gravando' }),
-      )
-    } catch (e) {
-      const erro = mensagem(e)
-      r.falhas.push({ chave: primeiro.chave, nome: primeiro.arquivo.name, erro })
-      onEstado(primeiro.chave, { fase: 'falhou', erro })
+    // JÁ NO CARD de uma tentativa anterior: não sobe de novo (23/10/2026).
+    let noDrive: ArquivoNoDrive | null = primeiro.noDrive ?? null
+    if (!noDrive) {
+      try {
+        noDrive = await passos.subir(primeiro.arquivo, (p) =>
+          onEstado(primeiro.chave, p.fase === 'enviando' ? { fase: 'enviando', pct: p.pct } : { fase: 'gravando' }),
+        )
+      } catch (e) {
+        const erro = mensagem(e)
+        r.falhas.push({ chave: primeiro.chave, nome: primeiro.arquivo.name, erro })
+        onEstado(primeiro.chave, { fase: 'falhou', erro })
+      }
+    } else {
+      onEstado(primeiro.chave, { fase: 'gravando' })
     }
     if (noDrive) {
       try {
@@ -181,8 +193,10 @@ export async function enviarAnotacao(
         r.enviados.push(primeiro.arquivo.name)
       } catch (e) {
         // A NOTA NÃO SUBIU: nada mais sai, como quando o texto falha. O arquivo
-        // ficou na aba Arquivos do card, sem nota.
+        // ficou na aba Arquivos do card, sem nota — e volta no resultado, para a
+        // próxima tentativa não subi-lo de novo.
         r.erroDoTexto = mensagem(e)
+        r.noDrive = { chave: primeiro.chave, arquivo: noDrive }
         onEstado(primeiro.chave, { fase: 'esperando' })
         return r
       }

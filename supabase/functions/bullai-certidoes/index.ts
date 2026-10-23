@@ -41,6 +41,7 @@ import {
   RESERVA_VENCE_MIN,
   reservaVencida,
 } from '../_shared/reservaBullai.ts'
+import { datasDaObtencao } from './regras.ts'
 
 type Servico = ReturnType<typeof serviceClient>
 
@@ -546,7 +547,7 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
       )
       const { data: item } = await svc
         .from('dd_certidao')
-        .select('certidao_codigo, bullai_job_id')
+        .select('certidao_codigo, bullai_job_id, status')
         .eq('id', id)
         .maybeSingle()
       // O ITEM FOI PEDIDO DE NOVO EM OUTRO JOB: o resultado deste não é mais dele
@@ -567,8 +568,9 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
       if (estado.status === 'OBTIDA') {
         mudanca.drive_file_id = arquivos[0]?.drive_file_id ?? null
         mudanca.drive_link = arquivos[0]?.drive_link ?? null
-        mudanca.emitida_em = hoje
-        mudanca.validade_ate = validade
+        // EMISSÃO E VALIDADE SÓ NA PASSAGEM PARA OBTIDA (23/10/2026): o job
+        // aberto regravava "emitida hoje" a cada atualização. Ver regras.ts.
+        Object.assign(mudanca, datasDaObtencao(item?.status as string | null | undefined, hoje, validade))
         mudanca.metodo_obtido = 'bullai'
         mudanca.erro_classe = null
         mudanca.erro_detalhe = null

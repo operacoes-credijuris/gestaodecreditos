@@ -1302,7 +1302,9 @@ function JanelaDeMensagem({
               pedem o texto é a linha embaixo do campo. */}
           {comResumo
             ? '— vai em qualquer saída; ao aprovar, numa nota depois do resumo'
-            : !exigeMotivo
+            : // APROVAR SEM RESUMO GRAVADO também pede o texto (23/10/2026): o
+              // rótulo dizia "opcional" com o botão travado abaixo de 10 letras.
+              !(exigeMotivo || semResumo)
               ? '— opcional'
               : varias
                 ? '— vai para o card com a saída escolhida'
