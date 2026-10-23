@@ -1370,6 +1370,11 @@ export function PainelCertidoes({
       setMunicipiosAnteriores((ced?.municipios_anteriores ?? []).join(', '))
       setEditando(listaS.length === 0)
       setMexeu(false)
+      // O "PREENCHI DO PROCESSO" É DO FORMULÁRIO QUE ACABOU DE SER TROCADO PELO
+      // BANCO (23/10/2026): depois de gravar ou de cancelar a edição, ele seguia
+      // na tela, e o "Editar" seguinte dizia ter preenchido do processo campos
+      // que agora vinham do cadastro gravado.
+      setPreenchido([])
       setAchadosAbertos(null)
       setResidenciaAberta(false)
       setConjugeAberto(false)

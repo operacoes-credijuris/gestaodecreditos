@@ -575,9 +575,13 @@ export function JanelaJustificativa({
               Rascunho para revisão humana: confira os fatos, os números e as fontes antes de enviar.
             </p>
             {erroDoPedido && <Aviso tom="perigo">{erroDoPedido}</Aviso>}
+            {/* SÓ LEITURA COM O ENVIO NO AR (23/10/2026): o que se digitava ali
+                não ia na nota, e o rascunho armado por cima ainda era gravado
+                depois, sobre um texto já enviado. */}
             <textarea
               value={corpo}
               onChange={(e) => aoDigitarCorpo(e.target.value)}
+              readOnly={enviando}
               aria-label="Texto da justificativa técnica"
               spellCheck
               // O CONTORNO E O FOCO DO CAMPO DA CASA (ui/Field): era a borda
@@ -588,7 +592,7 @@ export function JanelaJustificativa({
                 notas === null ? 'min-h-[46vh]' : 'min-h-[36vh]',
               )}
             />
-            {notas !== null && <NotasInternas valor={notas} onChange={aoDigitarNotas} />}
+            {notas !== null && <NotasInternas valor={notas} onChange={aoDigitarNotas} travado={enviando} />}
             <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1 text-xs text-texto-3">
               <span aria-live="polite">
                 {rascunho === 'salvando'
@@ -761,10 +765,13 @@ function NotasInternas({
   valor,
   onChange,
   enviada = false,
+  travado = false,
 }: {
   valor: string
   onChange?: (v: string) => void
   enviada?: boolean
+  /** O envio está no ar: o campo fica à vista, só de leitura. */
+  travado?: boolean
 }) {
   return (
     // NO ESCURO, O ÂMBAR SÓ NO CONTORNO E NO CADEADO (auditoria visual, E7): o
@@ -783,6 +790,7 @@ function NotasInternas({
         <textarea
           value={valor}
           onChange={(e) => onChange(e.target.value)}
+          readOnly={travado}
           aria-label="Notas internas (não vão para o cedente)"
           rows={4}
           spellCheck
