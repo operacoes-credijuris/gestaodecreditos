@@ -78,6 +78,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { AVISO_DE_COPIA_RECUSADA, copiarTexto } from '@/lib/copiar'
 import { useCaixaNaTela, type AjusteDaCaixa } from '@/lib/dentroDaJanela'
 import { invokeFunction } from '@/lib/functions'
 import { enviarArquivo, type ProgressoDoEnvio } from '@/lib/enviarArquivo'
@@ -5586,14 +5587,12 @@ export default function AnaliseCredito() {
 
   /** Copia um texto do card — e diz se deu certo, que é o que se quer saber. */
   const copiar = (texto: string, aviso: string) => {
-    Promise.resolve()
-      .then(() => navigator.clipboard.writeText(texto))
+    // PELO `copiarTexto` (varredura de 23/10/2026): recusada a área de
+    // transferência moderna, ele tenta o jeito antigo antes de desistir.
+    copiarTexto(texto)
       .then(
-        () => toast.success(aviso),
-        () =>
-          toast.error(
-            'Não consegui copiar: o navegador bloqueou a área de transferência. Selecione o texto e copie à mão.',
-          ),
+        (ok) => (ok ? toast.success(aviso) : toast.error(`Não consegui copiar. ${AVISO_DE_COPIA_RECUSADA}`)),
+        () => toast.error(`Não consegui copiar. ${AVISO_DE_COPIA_RECUSADA}`),
       )
   }
 

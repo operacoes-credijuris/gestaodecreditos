@@ -21,6 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Download, FileText, Pencil, RefreshCw, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { copiarTexto } from '@/lib/copiar'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -469,10 +470,11 @@ export function PeticaoModal({
       .filter(Boolean)
       .join('\n')
 
-    try {
-      await navigator.clipboard.writeText(passagem)
+    // PELO `copiarTexto` (varredura de 23/10/2026): recusada a área de
+    // transferência moderna, ele tenta o jeito antigo antes de desistir.
+    if (await copiarTexto(passagem)) {
       toast.success('Contexto copiado. Se o Claude não abrir, cole com Ctrl+V.')
-    } catch {
+    } else {
       toast.toast(
         'Não consegui copiar o contexto. Abrindo o Claude; refaça o pedido por lá.',
         'info',

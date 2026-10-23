@@ -498,9 +498,17 @@ export function formatNome(value: string | null | undefined): string {
  */
 export function sentenceCase(value: string | null | undefined): string {
   if (!value) return ''
-  const s = value.toLocaleLowerCase('pt-BR')
+  // AS SIGLAS CONTINUAM SIGLAS (varredura de 23/10/2026): o tipo de tarefa
+  // vem todo em maiúsculas do ADVBOX, e "EXPEDIÇÃO DE RPV" virava "expedição
+  // de rpv". Como tudo chega maiúsculo, só uma lista diz o que é sigla.
+  const s = value
+    .toLocaleLowerCase('pt-BR')
+    .replace(SIGLAS, (sigla) => sigla.toLocaleUpperCase('pt-BR'))
   return s.charAt(0).toLocaleUpperCase('pt-BR') + s.slice(1)
 }
+
+/** As siglas do dia a dia jurídico que o `sentenceCase` mantém em maiúsculas. */
+const SIGLAS = /(?<![\p{L}\d])(rpv|cpf|cnpj|inss|oab|trf\d?|trt\d*|tj[a-z]{2}|stj|stf|tst|pje|djen|ipca|selic|ec)(?![\p{L}\d])/giu
 
 /**
  * A CONTAGEM COM O PLURAL CERTO (revisão UX, 09/10/2026): "1 arquivo" /

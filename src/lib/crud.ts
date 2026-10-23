@@ -5,6 +5,7 @@ import {
   type QueryKey,
 } from '@tanstack/react-query'
 import { supabase } from './supabase'
+import { lerTodasAsPaginas } from './leituraPaginada'
 
 export interface ListOptions {
   /** Coluna usada na ordenação (default: created_at). */
@@ -32,14 +33,20 @@ export function makeCrud<
   function useList(extraSelect?: string) {
     return useQuery({
       queryKey: extraSelect ? [table, extraSelect] : key,
-      queryFn: async () => {
-        const { data, error } = await supabase
-          .from(table)
-          .select(extraSelect ?? select)
-          .order(orderBy, { ascending })
-        if (error) throw new Error(error.message)
-        return (data ?? []) as unknown as TRow[]
-      },
+      // EM PÁGINAS (varredura de 23/10/2026): numa consulta só, o servidor
+      // devolve no máximo 1000 linhas e não avisa — e esta lista alimenta
+      // Créditos, Requerimentos, Contatos, o Quadro econômico e as Carteiras.
+      // O `id` desempata a ordem, para nenhuma linha repetir ou sumir entre
+      // uma página e outra.
+      queryFn: () =>
+        lerTodasAsPaginas<TRow>((de, ate) =>
+          supabase
+            .from(table)
+            .select(extraSelect ?? select)
+            .order(orderBy, { ascending })
+            .order('id', { ascending: true })
+            .range(de, ate),
+        ),
     })
   }
 

@@ -50,7 +50,7 @@ describe('menu das Configurações', () => {
 
   it('o plano da BullAI', () => {
     expect(textoDoPlanoBullai(null)).toBe('ilimitado')
-    expect(textoDoPlanoBullai(1200)).toBe('1.200 consulta(s)')
+    expect(textoDoPlanoBullai(1200)).toBe('1.200 consultas')
   })
 
   it('o pacote da Skill só é aceito como .zip, e o tamanho nunca é 0 KB', () => {

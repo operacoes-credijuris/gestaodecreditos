@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { makeCrud } from './crud'
 import { supabase } from './supabase'
+import { lerTodasAsPaginas } from './leituraPaginada'
 import { onlyDigits } from './format'
 import type { ParametrosAtualizacao } from './projecao'
 import type {
@@ -140,11 +141,31 @@ export function useInvestidorDados() {
       // Lista de colunas em literal, e não numa constante: o supabase-js infere
       // o tipo do retorno lendo a string do select, e uma const widened para
       // `string` derruba a inferência.
-      const comRepresentante = await supabase
-        .from('investidor_dados')
-        .select(
-          'tipo, nome_chave, nome_exibicao, cpf, rg, representante, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, genero, qualificacao_complemento, atualizado_em',
-        )
+      // EM PÁGINAS (varredura de 23/10/2026): numa consulta só, o servidor para
+      // em 1000 linhas sem avisar — e a pessoa que ficasse de fora abriria o
+      // formulário em branco (ver o upsert abaixo). (tipo, nome_chave) é a
+      // chave: ordem estável entre as páginas.
+      const lerComRepresentante = async () => {
+        try {
+          const linhas = await lerTodasAsPaginas<Record<string, unknown>>((de, ate) =>
+            supabase
+              .from('investidor_dados')
+              .select(
+                'tipo, nome_chave, nome_exibicao, cpf, rg, representante, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, genero, qualificacao_complemento, atualizado_em',
+              )
+              .order('tipo')
+              .order('nome_chave')
+              .range(de, ate),
+          )
+          return { data: linhas, error: null as { code?: string; message: string } | null }
+        } catch (e) {
+          const message = (e as Error).message
+          // A MIGRAÇÃO 0034 AINDA NÃO RODOU: a mensagem do PostgREST é a do 42703.
+          const code = /representante/.test(message) && /does not exist/.test(message) ? '42703' : undefined
+          return { data: null, error: { code, message } }
+        }
+      }
+      const comRepresentante = await lerComRepresentante()
       // 42703 = "column does not exist": banco ainda sem a migração 0034. Lê de
       // novo sem o representante em vez de derrubar a aba inteira — pedir uma
       // coluna que não existe faz o PostgREST recusar a consulta TODA, e Dados
@@ -152,11 +173,19 @@ export function useInvestidorDados() {
       // representante simplesmente aparece quando a migração rodar.
       const resposta =
         comRepresentante.error?.code === '42703'
-          ? await supabase
-              .from('investidor_dados')
-              .select(
-                'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, genero, qualificacao_complemento, atualizado_em',
-              )
+          ? await lerTodasAsPaginas<Record<string, unknown>>((de, ate) =>
+              supabase
+                .from('investidor_dados')
+                .select(
+                  'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, genero, qualificacao_complemento, atualizado_em',
+                )
+                .order('tipo')
+                .order('nome_chave')
+                .range(de, ate),
+            ).then(
+              (data) => ({ data, error: null as { message: string } | null }),
+              (e: Error) => ({ data: null, error: { message: e.message } }),
+            )
           : comRepresentante
       // Este mapa alimenta o formulário, e o Salvar é upsert da LINHA INTEIRA:
       // mapa vazio abriria o formulário em branco e apagaria CPF, banco, conta e

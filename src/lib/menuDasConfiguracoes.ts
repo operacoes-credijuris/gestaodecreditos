@@ -144,7 +144,8 @@ export function extraDoMenu<T>(
 
 /** O plano da BullAI em poucas letras, para caber ao lado do nome no menu. */
 export function textoDoPlanoBullai(restantes: number | null): string {
-  return restantes == null ? 'ilimitado' : `${restantes.toLocaleString('pt-BR')} consulta(s)`
+  // O PLURAL CERTO (varredura de 23/10/2026), e não "consulta(s)".
+  return restantes == null ? 'ilimitado' : `${restantes.toLocaleString('pt-BR')} ${restantes === 1 ? 'consulta' : 'consultas'}`
 }
 
 /**
