@@ -397,7 +397,9 @@ export const TELAS: DefTela[] = [
     key: 'validacao',
     label: 'Revisão',
     statusId: ST_DECISAO,
-    descricaoVazia: 'Nenhum crédito aguardando validação.',
+    // "REVISÃO", O NOME DA ETAPA (23/10/2026): a frase ainda dizia "validação",
+    // o nome de antes de 02/10/2026, sob o título "Nenhum card em Revisão".
+    descricaoVazia: 'Nenhum crédito aguardando revisão.',
   },
   {
     key: 'aprovados',
