@@ -447,6 +447,20 @@ async function conversar(
     resposta = await pedir()
   }
 
+  // CORTADA OU RECUSADA NÃO É TABELA (23/10/2026). No stream, um tool_use que
+  // bate o `max_tokens` chega com o JSON PARCIAL já interpretado pelo SDK — a
+  // lista de faixas pela metade passava por validarAto (cada faixa presente é
+  // válida) e virava a tabela 'pronta' do estado pelo ano inteiro, com as faixas
+  // altas faltando. A pesquisa do teto já recusava este caso; esta não. Volta só
+  // a observação: a etapa trata como "não achei neste documento" e tenta o
+  // próximo, dizendo por quê.
+  const motivoDaParada = resposta.stop_reason === 'max_tokens'
+    ? 'a resposta foi cortada no limite de tamanho, e uma tabela pela metade não entra'
+    : resposta.stop_reason === 'refusal'
+      ? 'a IA recusou a leitura (filtro de segurança da Anthropic)'
+      : null
+  if (motivoDaParada) return { observacao: motivoDaParada }
+
   const uso = resposta.content.find((c) => c.type === 'tool_use' && c.name === ferramenta.name)
   return uso && uso.type === 'tool_use' ? (uso.input as Record<string, unknown>) : null
 }

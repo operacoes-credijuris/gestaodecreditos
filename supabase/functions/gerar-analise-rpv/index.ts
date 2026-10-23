@@ -111,6 +111,7 @@ import {
 // "@1" é qualquer 1.x: uma publicação nova do @std entra em produção sem ninguém
 // aprovar, e o deno.lock já resolvia 1.0.11.
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1.0.11/base64";
+import { estourouOTempo, sinalAteOTeto } from "../_shared/relogioDaInvocacao.ts";
 
 // Helpers do Drive e do Storage: _shared/credijuris.ts, fonte única para esta
 // função, a análise de precatório e a geração de contrato. Já viveram
@@ -316,6 +317,9 @@ async function fetchComRetry(url: string, init: RequestInit, tentativas = 3): Pr
       await r.text().catch(() => '');
       ultimo = new Error(`Claude API ${r.status}`);
     } catch (e) {
+      // O TETO DA INVOCAÇÃO NÃO SE REPETE (23/10/2026): o sinal é o mesmo nas
+      // três tentativas, já vencido — repetir só gastaria a espera entre elas.
+      if (estourouOTempo(e)) throw e;
       if (i === tentativas - 1 || Date.now() - inicio > 30_000) throw e;
       ultimo = e;
     }
@@ -1737,6 +1741,18 @@ async function extrairComFerramenta(
     ferramenta: ReturnType<typeof ferramentaDoEsquema>;
     conteudo: any[];
     maxTokens: number;
+    /**
+     * O começo da invocação (o `_t0` do handler), para o teto das chamadas.
+     *
+     * AS LEITURAS NÃO TINHAM TETO (23/10/2026). A função morre em ~150 s de
+     * parede, calada: sem resposta, sem o `catch` geral — e sem a limpeza das
+     * páginas subidas, que ficavam no bucket para sempre. O caso de sempre era
+     * a segunda leitura dos valores, que roda DEPOIS de uma leitura inteira: o
+     * que sobrava do relógio não cabia nela, e a tela via um 504 em vez de
+     * "a segunda leitura não coube no tempo, rode de novo". Com o sinal, a
+     * chamada é interrompida antes do teto e a falha volta dita.
+     */
+    inicio: number;
   },
 ): Promise<any> {
   // O PROCESSO É LIDO DUAS VEZES — QUALIFICAÇÃO E ANÁLISE — E ERA COBRADO DUAS.
@@ -1775,6 +1791,9 @@ async function extrairComFerramenta(
   const pedir = async (mensagens: unknown[]) => {
     const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
+      // 12 s de folga: o bastante para a resposta de erro sair e o catch geral
+      // limpar as páginas subidas antes de o worker ser morto.
+      signal: sinalAteOTeto(o.inicio, { folgaMs: 12_000 }),
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
@@ -1831,7 +1850,18 @@ async function extrairComFerramenta(
   let raw = '';
   for (let volta = 0; volta < 2; volta++) {
     const _tAntes = Date.now();
-    const data = await pedir(mensagens);
+    let data: any;
+    try {
+      data = await pedir(mensagens);
+    } catch (e) {
+      if (estourouOTempo(e)) {
+        throw new Error(
+          `A leitura (${o.rotulo}) não terminou dentro do tempo da função (cerca de 150 s) e foi interrompida. ` +
+          'Rode de novo — a segunda vez costuma ler o processo do cache e sair mais rápido. Persistindo, reduza os anexos do card.',
+        );
+      }
+      throw e;
+    }
     // O ÚNICO REGISTRO QUE ESTA FUNÇÃO DEIXA. Ela tinha zero `console` em 4.700
     // linhas, e três defeitos desta auditoria eram invisíveis exatamente por
     // isso: a segunda leitura que nunca rodou, o input cortado aceito como
@@ -1896,16 +1926,16 @@ const FECHO_DOCUMENTO =
   'Os VALORES continuam sendo lidos por você quando uma linha do questionário pedir um valor no complemento — ' +
   'o que não se escreve aqui são os campos de precificação, não os números que a pergunta faz parte.';
 
-const extrairPreco = (apiKey: string, contentBlocks: any[]) =>
+const extrairPreco = (apiKey: string, contentBlocks: any[], inicio: number) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'valores', instrucoes: `${SYSTEM_ANALISE}\n\n${FECHO_PRECO}`, ferramenta: FERRAMENTA_PRECO,
-    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS,
+    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS, inicio,
   });
 
-const extrairDocumento = (apiKey: string, contentBlocks: any[]) =>
+const extrairDocumento = (apiKey: string, contentBlocks: any[], inicio: number) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'questionário', instrucoes: `${SYSTEM_ANALISE}\n\n${FECHO_DOCUMENTO}`, ferramenta: FERRAMENTA_DOCUMENTO,
-    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS,
+    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS, inicio,
   });
 
 /**
@@ -1937,11 +1967,11 @@ const RESGATE_INSTRUCOES =
   'DIGA SEMPRE, em origem_valores, de qual documento e de que página o número saiu. ' +
   'E SE MESMO ASSIM NÃO HOUVER VALOR em documento nenhum, devolva null e escreva em origem_valores o que você procurou e não encontrou — isso vira diligência, e é uma resposta útil. O que não serve é devolver nada sem dizer por quê.';
 
-const extrairValoresDeResgate = (apiKey: string, contentBlocks: any[]) =>
+const extrairValoresDeResgate = (apiKey: string, contentBlocks: any[], inicio: number) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'segunda leitura dos valores', instrucoes: RESGATE_INSTRUCOES, ferramenta: FERRAMENTA_RESGATE,
     // 8000, e não 2000: no Opus 5.5 o raciocínio conta dentro do teto.
-    conteudo: contentBlocks, maxTokens: 8000,
+    conteudo: contentBlocks, maxTokens: 8000, inicio,
   });
 
 /**
@@ -1988,7 +2018,7 @@ const COBERTURA_MINIMA_DA_SERIE = 0.75;
  * sobre a pessoa errada — o pior tipo de recusa, porque não há como discordar
  * dela lendo só a tela.
  */
-const extrairQualificacao = (apiKey: string, contentBlocks: any[], cedente?: string) =>
+const extrairQualificacao = (apiKey: string, contentBlocks: any[], inicio: number, cedente?: string) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'qualificação',
     instrucoes:
@@ -2000,7 +2030,7 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[], cedente?: str
         : ''),
     ferramenta: FERRAMENTA_QUALIFICACAO,
     // 12000, e não 4000: no Opus 5.5 o raciocínio conta dentro do teto.
-    conteudo: contentBlocks, maxTokens: 12000,
+    conteudo: contentBlocks, maxTokens: 12000, inicio,
   });
 
 // ============================================================================
@@ -2904,7 +2934,7 @@ Deno.serve(async (req) => {
     // e analisar um processo sem as páginas digitalizadas — que é onde a conta
     // costuma estar — sem erro nenhum, só com números errados.
     if (acao === 'documento') {
-      const doc = await extrairDocumento(cfg.anthropic_api_key, contentBlocks);
+      const doc = await extrairDocumento(cfg.anthropic_api_key, contentBlocks, _t0);
       marcar('leitura do questionário e dos riscos (IA)');
       return jsonResponse({
         ok: true,
@@ -2984,7 +3014,7 @@ Deno.serve(async (req) => {
     // acima do bloco 3b. Vindo pronto, nao se le de novo.
     const qualif = (body.qualificacao && typeof body.qualificacao === 'object')
       ? body.qualificacao
-      : await extrairQualificacao(cfg.anthropic_api_key, contentBlocks, String(body.cedente ?? ''));
+      : await extrairQualificacao(cfg.anthropic_api_key, contentBlocks, _t0, String(body.cedente ?? ''));
 
     // O ANEXO É DESTE PROCESSO? A conferência mora em
     // _shared/confrontoDoAnexo.ts — pura e com teste, e é lá que está escrito
@@ -3107,7 +3137,7 @@ Deno.serve(async (req) => {
     }
 
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
-    dados = await extrairPreco(cfg.anthropic_api_key, contentBlocks);
+    dados = await extrairPreco(cfg.anthropic_api_key, contentBlocks, _t0);
     marcar('leitura dos valores e da auditoria (IA)');
     dados._valor_qualificacao = valorDaTriagem;
 
@@ -3122,7 +3152,7 @@ Deno.serve(async (req) => {
       !(numeroDoCampo(dados.honorarios_sucumbenciais) > 0)
     ) {
       try {
-        const resgate = await extrairValoresDeResgate(cfg.anthropic_api_key, contentBlocks) as Record<string, unknown>;
+        const resgate = await extrairValoresDeResgate(cfg.anthropic_api_key, contentBlocks, _t0) as Record<string, unknown>;
         // QUAIS CAMPOS VIERAM DAQUI, e não só o bruto.
         //
         // A marca era só `_bruto_da_segunda_leitura`: numa cessão de honorários,

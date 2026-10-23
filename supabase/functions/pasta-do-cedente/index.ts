@@ -45,7 +45,10 @@ Deno.serve(async (req: Request) => {
     // NO PRECATÓRIO EXTERNO NÃO SE CRIA PASTA no "Executar análise" (decisão do
     // dono, 06/10/2026): ela só nasce quando a BullAI emite certidão. Resposta
     // neutra (200, sem pasta), para a aba aberta antes da mudança não avisar erro.
-    const { data: card } = await svc.from('kommo_leads').select('pipeline_id').eq('kommo_lead_id', leadId).maybeSingle()
+    // O ERRO DA LEITURA PARA AQUI (Varredura E, 23/10/2026): ignorado, o funil
+    // vinha nulo e o precatório externo ganhava a pasta que a decisão acima proíbe.
+    const { data: card, error: erroCard } = await svc.from('kommo_leads').select('pipeline_id').eq('kommo_lead_id', leadId).maybeSingle()
+    if (erroCard) return jsonResponse({ error: `Não consegui ler o card: ${erroCard.message}` }, 500)
     if (Number((card as { pipeline_id?: number } | null)?.pipeline_id) === 14439516) {
       return jsonResponse({ ok: true, pasta_id: null, ignorado: 'precatorio-externo' })
     }

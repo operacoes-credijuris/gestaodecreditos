@@ -36,6 +36,7 @@ import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
 import { dataPorExtenso, hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 import { ESFORCO_PADRAO_DO_OPUS, semCercaDeMarkdown, textoDaResposta, type PedidoAoOpus } from '../_shared/respostaDoClaude.ts'
 import { normalizarNome } from '../_shared/nucleo/texto.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import { ehPastaCredijuris, ORIGINADOR_CREDIJURIS, pastaDoOriginador } from '../_shared/pastaDoOriginador.ts'
 import {
   type DriveFile,
@@ -47,7 +48,6 @@ import {
   driveListFiles,
   driveFindSharedDrive,
   driveFindChild,
-  driveCreateFolder,
   driveFindOrCreateFolder,
   driveFindChildByTolerantName,
   driveUploadBytes,
@@ -108,6 +108,11 @@ const DRIVE_PASTA_CEDENTE_DOCS = '4. Documentos do cedente e advogado';
 // Raiz das análises de crédito (irmã de "B. Processos" no shared drive).
 // Match tolerante (normalizar + includes) cobre sufixos como "RPV" no nome real.
 const DRIVE_ANALISES_NAME = 'A. Análises de crédito';
+// A busca da análise pelo nº do processo (driveEncontrarAnaliseArquivos):
+// quantas pastas se listam juntas, e por quanto tempo se procura antes de cair
+// na busca pelo nome da pasta.
+const LOTE_DA_BUSCA = 6;
+const ORCAMENTO_DA_BUSCA_MS = 30_000;
 // Tipos nativos do Google Workspace — não baixam com alt=media, precisam de export.
 const GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
@@ -812,7 +817,16 @@ async function readFileAsContent(
 // Claude Extraction
 // ============================================================================
 
-async function callClaude(apiKey: string, content: ClaudeContentBlock[], schema: Vars): Promise<Vars> {
+// A FOLGA PARA O DRIVE (Varredura E, 23/10/2026): a geração é uma chamada só e
+// a Edge Function morre por volta de 150 s, calada. Depois da última leitura da
+// IA ainda vêm a árvore de B. Processos (pastas, 7 subpastas) e os uploads —
+// umas quatro dezenas de chamadas ao Drive. Sem teto, uma leitura lenta levava a
+// invocação ao limite e a tela recebia um erro de rede sem motivo, às vezes com
+// metade dos contratos já no Drive. Com o teto contado do INÍCIO da invocação, a
+// leitura é interrompida antes de qualquer gravação, e a resposta diz por quê.
+const FOLGA_PARA_O_DRIVE_MS = 40_000;
+
+async function callClaude(apiKey: string, content: ClaudeContentBlock[], schema: Vars, inicio: number): Promise<Vars> {
   const userContent: ClaudeContentBlock[] = [
     ...content,
     {
@@ -823,6 +837,7 @@ async function callClaude(apiKey: string, content: ClaudeContentBlock[], schema:
     },
   ];
   const res = await fetch('https://api.anthropic.com/v1/messages', {
+    signal: sinalAteOTeto(inicio, { folgaMs: FOLGA_PARA_O_DRIVE_MS }),
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -844,6 +859,12 @@ async function callClaude(apiKey: string, content: ClaudeContentBlock[], schema:
   }
   const data = await res.json();
   if (data?.stop_reason === 'max_tokens') throw new Error('Claude retornou a extração cortada por tamanho');
+  // A RECUSA NÃO É JSON (Varredura E, 23/10/2026): com `stop_reason: 'refusal'`
+  // o texto que veio é o que o filtro deixou passar, e o erro saía como "JSON
+  // inválido" ou "sem bloco de texto" — mandando procurar defeito na planilha.
+  if (data?.stop_reason === 'refusal') {
+    throw new Error('A IA recusou a leitura destes documentos (filtro de segurança da Anthropic). Tente de novo; se persistir, confira os arquivos enviados.');
+  }
   // Só os blocos de texto: no Opus 5.5 a resposta pode começar por raciocínio.
   const raw = semCercaDeMarkdown(textoDaResposta(data?.content));
   if (!raw) throw new Error('Claude retornou sem bloco de texto');
@@ -874,19 +895,19 @@ async function extractParte(
   apiKey: string,
   paths: string[],
   schema: Vars,
+  inicio: number,
 ): Promise<Vars> {
   const content = await buildContentFromPaths(sb, paths);
-  return callClaude(apiKey, content, schema);
+  return callClaude(apiKey, content, schema, inicio);
 }
 
 async function extractApresentacao(
   apiKey: string,
   content: ClaudeContentBlock[],
   templateVars: string[],
+  inicio: number,
 ): Promise<Vars> {
-  // Passo 1 — campos fixos
-  const fixos = await callClaude(apiKey, content, SCHEMA_APRESENTACAO_FIXOS);
-  // Passo 2 — campos extras que ainda estão no template
+  // Campos extras: os que ainda estão no template e nenhum esquema cobre.
   const conhecidos = new Set([
     ...Object.keys(SCHEMA_CEDENTE),
     ...Object.keys(SCHEMA_ESCRITORIO),
@@ -898,10 +919,17 @@ async function extractApresentacao(
   ]);
   // exclui marcadores de gênero (C_/I_/S_ + I_QL) — preenchidos no código, não pela IA
   const extras = templateVars.filter(v => !conhecidos.has(v) && !/^[CIS]_/.test(v));
-  if (extras.length === 0) return fixos;
+  if (extras.length === 0) return await callClaude(apiKey, content, SCHEMA_APRESENTACAO_FIXOS, inicio);
   const schemaExtras: Vars = {};
   for (const v of extras) schemaExtras[v] = `valor de ${v} encontrado no documento ou null`;
-  const extrasOut = await callClaude(apiKey, content, schemaExtras);
+  // AS DUAS LEITURAS JUNTAS (Varredura E, 23/10/2026): uma não depende da outra
+  // — o esquema dos extras sai do template, não da resposta dos fixos —, e em
+  // sequência eram duas idas ao Opus com os mesmos documentos dentro do teto de
+  // 150 s da invocação. Os fixos continuam prevalecendo sobre os extras.
+  const [fixos, extrasOut] = await Promise.all([
+    callClaude(apiKey, content, SCHEMA_APRESENTACAO_FIXOS, inicio),
+    callClaude(apiKey, content, schemaExtras, inicio),
+  ]);
   for (const [k, v] of Object.entries(extrasOut)) {
     if (v !== null && v !== undefined) fixos[k] = v;
   }
@@ -1148,23 +1176,40 @@ async function driveEncontrarAnaliseArquivos(
   // inclusive) até achar um arquivo com o nº do processo no nome. É o critério mais
   // confiável — o nº é a chave da operação — e não depende de como a pasta foi
   // batizada nem de onde a análise foi largada.
+  //
+  // EM LOTES E COM TETO DE TEMPO (Varredura E, 23/10/2026). Era uma listagem do
+  // Drive por vez, até 200 pastas: num originador com cem cedentes, a análise do
+  // último custava cem idas sequenciais (~40–60 s) ANTES das leituras da IA — e a
+  // invocação inteira morre em ~150 s. Agora as pastas da fila são listadas
+  // LOTE_DA_BUSCA por vez, na mesma ordem de largura (o resultado é o mesmo da
+  // busca sequencial: a primeira pasta da fila com o arquivo vence), e a busca
+  // desiste depois de ORCAMENTO_DA_BUSCA_MS, caindo na busca pelo nome da pasta.
   if (procDigits) {
     const fila: Array<{ pasta: DriveFile; caminho: string }> = [{ pasta: inter, caminho: '' }];
-    for (let visitadas = 0; fila.length > 0 && visitadas < 200; visitadas++) {
-      const { pasta, caminho } = fila.shift()!;
-      const filhos = await driveListFiles(token, `'${pasta.id}' in parents and trashed = false`);
-      const doProcesso = filhos.filter(f => f.mimeType !== FOLDER_MIME && f.name.replace(/\D/g, '').includes(procDigits));
-      if (doProcesso.length > 0) {
-        const analises = doProcesso.filter(f => normalizar(f.name).includes('analisede'));
-        return {
-          folderId: pasta.id,
-          folderName: caminho || pasta.name,
-          arquivos: analises.length ? analises : doProcesso,
-          debug: { originador_id: inter.id, leaf_id: pasta.id, leaf_casou_por: 'arquivo com o nº do processo', pastas_visitadas: visitadas + 1 },
-        };
-      }
-      for (const f of filhos) {
-        if (f.mimeType === FOLDER_MIME) fila.push({ pasta: f, caminho: caminho ? `${caminho}/${f.name}` : f.name });
+    const limite = Date.now() + ORCAMENTO_DA_BUSCA_MS;
+    let visitadas = 0;
+    while (fila.length > 0 && visitadas < 200 && Date.now() < limite) {
+      const lote = fila.splice(0, Math.min(LOTE_DA_BUSCA, 200 - visitadas));
+      const listas = await Promise.all(
+        lote.map(({ pasta }) => driveListFiles(token, `'${pasta.id}' in parents and trashed = false`)),
+      );
+      for (let i = 0; i < lote.length; i++) {
+        const { pasta, caminho } = lote[i];
+        const filhos = listas[i];
+        visitadas++;
+        const doProcesso = filhos.filter(f => f.mimeType !== FOLDER_MIME && f.name.replace(/\D/g, '').includes(procDigits));
+        if (doProcesso.length > 0) {
+          const analises = doProcesso.filter(f => normalizar(f.name).includes('analisede'));
+          return {
+            folderId: pasta.id,
+            folderName: caminho || pasta.name,
+            arquivos: analises.length ? analises : doProcesso,
+            debug: { originador_id: inter.id, leaf_id: pasta.id, leaf_casou_por: 'arquivo com o nº do processo', pastas_visitadas: visitadas },
+          };
+        }
+        for (const f of filhos) {
+          if (f.mimeType === FOLDER_MIME) fila.push({ pasta: f, caminho: caminho ? `${caminho}/${f.name}` : f.name });
+        }
       }
     }
   }
@@ -1503,6 +1548,8 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
   let inputPathsAll: string[] = [];
+  // O relógio da invocação: os tetos das leituras da IA contam daqui.
+  const inicio = Date.now();
 
   try {
     // 1. Auth — usuário autenticado E ativo, no mesmo portão de toda function
@@ -1612,10 +1659,10 @@ Deno.serve(async (req) => {
     // 7. Extrai cedente + escritório primeiro — o nome do cedente define qual pasta
     //    da análise buscar no Drive.
     const cedenteP = inputPaths.cedente.length > 0
-      ? extractParte(sbAdmin, cfg.anthropic_api_key, inputPaths.cedente, SCHEMA_CEDENTE)
+      ? extractParte(sbAdmin, cfg.anthropic_api_key, inputPaths.cedente, SCHEMA_CEDENTE, inicio)
       : Promise.resolve<Vars>({});
     const escritorioP = inputPaths.escritorio.length > 0
-      ? extractParte(sbAdmin, cfg.anthropic_api_key, inputPaths.escritorio, SCHEMA_ESCRITORIO)
+      ? extractParte(sbAdmin, cfg.anthropic_api_key, inputPaths.escritorio, SCHEMA_ESCRITORIO, inicio)
       : Promise.resolve<Vars>({});
     const [cedente, escritorio] = await Promise.all([cedenteP, escritorioP]);
 
@@ -1658,7 +1705,7 @@ Deno.serve(async (req) => {
     }
 
     // 9d. Extrai a apresentação a partir do conteúdo baixado.
-    const apresentacao = await extractApresentacao(cfg.anthropic_api_key, apresentacaoContent, Array.from(allTemplateVars));
+    const apresentacao = await extractApresentacao(cfg.anthropic_api_key, apresentacaoContent, Array.from(allTemplateVars), inicio);
 
     // 9e. Leituras determinísticas da planilha da análise. Dois blocos independentes,
     //     um try cada — antes eles compartilhavam o mesmo try, e uma falha na leitura
@@ -1828,7 +1875,11 @@ Deno.serve(async (req) => {
           { categorias_em_processos: driveDebug.categorias_em_processos, processos_folder_id: processosId },
         );
       }
-      interId = await driveCreateFolder(accessToken, originadorNome, driveDebug.categoria_rpv_id);
+      // ACHAR-OU-CRIAR, e não só criar (Varredura E, 23/10/2026): duas gerações
+      // simultâneas para o mesmo originador novo abriam duas pastas de mesmo nome,
+      // e os contratos se dividiam entre elas. driveFindOrCreateFolder fica com a
+      // mais antiga e manda a sobra para a lixeira.
+      interId = await driveFindOrCreateFolder(accessToken, originadorNome, driveDebug.categoria_rpv_id);
       originadorCriado = true;
       console.log('[gerar-contrato] pasta de originador criada em B. Processos:', originadorNome, interId);
     }
@@ -1922,6 +1973,18 @@ Deno.serve(async (req) => {
     });
 
   } catch (e) {
+    // O TETO DA LEITURA (ver FOLGA_PARA_O_DRIVE_MS): interrompida antes de
+    // qualquer gravação no Drive ou em `contratos` — dizer isso é o que permite
+    // tentar de novo sem medo de duplicar.
+    if (estourouOTempo(e)) {
+      console.error('[gerar-contrato] leitura da IA passou do teto da invocação');
+      return errorResponse(
+        'A leitura dos documentos pela IA demorou mais do que o tempo da geração permite. ' +
+        'Nenhum contrato foi gerado nem enviado ao Drive. Tente de novo; se persistir, envie menos documentos (ou arquivos menores).',
+        504,
+        { gravado: false },
+      );
+    }
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[gerar-contrato] erro:', msg);
     return errorResponse(msg, 500);

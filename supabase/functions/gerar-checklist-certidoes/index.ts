@@ -325,12 +325,18 @@ Deno.serve(async (req) => {
 
     // ---- 2. Catálogo e regras vigentes ----
     const hoje = hojeEmBrasilia()
-    const [{ data: catalogo }, { data: regras }] = await Promise.all([
+    const [{ data: catalogo, error: erroCat }, { data: regras, error: erroReg }] = await Promise.all([
       svc.from('certidao_catalogo').select('*'),
       svc.from('certidao_regra').select('*')
         .lte('vigencia_inicio', hoje)
         .or(`vigencia_fim.is.null,vigencia_fim.gt.${hoje}`),
     ])
+    // LEITURA QUE FALHA É ERRO, não tabela vazia (Varredura E, 23/10/2026): um
+    // tropeço do banco aparecia como "a migration 0042 rodou?" — mandando
+    // procurar defeito de instalação onde não há.
+    if (erroCat || erroReg) {
+      return json({ erro: `Falha ao ler o catálogo e as regras de certidões: ${(erroCat ?? erroReg)!.message}` }, 500)
+    }
     if (!catalogo?.length) {
       return json({ erro: 'Catálogo de certidões vazio — a migration 0042 rodou?' }, 500)
     }
@@ -345,8 +351,14 @@ Deno.serve(async (req) => {
     // gerar pendência de escopo indefinido em vez de sumir do checklist.
     const comarcas: string[] = []
 
-    const { data: lead } = await svc
+    // O ERRO DESTA LEITURA PARA A GERAÇÃO (Varredura E, 23/10/2026). Ignorado,
+    // uma falha passageira virava `cnj = null`, e os itens de regra com {{cnj}}
+    // nasciam SEM o processo nos parâmetros — outro `parametros_hash`, então a
+    // próxima geração (com o cnj lido) os inseria de novo: certidão em dobro no
+    // checklist, uma delas sem escopo. O ON CONFLICT só protege hash igual.
+    const { data: lead, error: erroLead } = await svc
       .from('kommo_leads').select('processo_cnj').eq('kommo_lead_id', leadId).maybeSingle()
+    if (erroLead) return json({ erro: `Falha ao ler o card: ${erroLead.message}` }, 500)
     const cnj: string | null = lead?.processo_cnj ?? null
 
     // ---- 3. Montagem ----

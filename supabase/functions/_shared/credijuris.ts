@@ -43,8 +43,13 @@ import { normalizarParaComparar as normalizar } from './nucleo/texto.ts'
 import { pastaQueFica } from './pastaDuplicada.ts'
 export { normalizar }
 
+// A BARRA INVERTIDA TAMBÉM (Varredura E, 23/10/2026): na linguagem de busca do
+// Drive, `\` e `'` são os dois caracteres que se escapam com `\`. Escapando só o
+// apóstrofo, um nome com `\` ("Silva \ Souza", colado do Windows) quebrava a
+// consulta com 400 — ou, terminando em `\`, comia a aspa de fechamento. A barra
+// vem PRIMEIRO, senão a do apóstrofo escapado seria escapada de novo.
 export function escapeDriveQuery(s: string): string {
-  return s.replace(/'/g, "\\'")
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
 export async function storageGetBytes(
@@ -82,33 +87,51 @@ export async function refreshGoogleAccessToken(
   return data.access_token as string
 }
 
+/**
+ * TODAS AS PÁGINAS (Varredura E, 23/10/2026). Lia só a primeira: o `pageSize`
+ * é um TETO, não uma promessa — com `corpora=allDrives` o Drive devolve páginas
+ * curtas e um `nextPageToken` bem antes de 1000 itens. A pasta procurada (o
+ * cedente, o originador, o arquivo com o nº do processo) podia estar na página
+ * seguinte, e a função dizia "não encontrado" com ela lá. Limite de páginas para
+ * uma consulta errada não virar laço sem fim.
+ */
+const PAGINAS_MAX_DO_DRIVE = 20
+
 export async function driveListFiles(
   token: string,
   query: string,
   driveId?: string,
 ): Promise<DriveFile[]> {
-  const params = new URLSearchParams({
-    q: query,
-    fields: 'files(id,name,mimeType,parents)',
-    includeItemsFromAllDrives: 'true',
-    supportsAllDrives: 'true',
-    pageSize: '1000',
-  })
-  if (driveId) {
-    params.set('corpora', 'drive')
-    params.set('driveId', driveId)
-  } else {
-    params.set('corpora', 'allDrives')
+  const todos: DriveFile[] = []
+  let pageToken: string | undefined
+  for (let pagina = 0; pagina < PAGINAS_MAX_DO_DRIVE; pagina++) {
+    const params = new URLSearchParams({
+      q: query,
+      fields: 'nextPageToken,files(id,name,mimeType,parents)',
+      includeItemsFromAllDrives: 'true',
+      supportsAllDrives: 'true',
+      pageSize: '1000',
+    })
+    if (driveId) {
+      params.set('corpora', 'drive')
+      params.set('driveId', driveId)
+    } else {
+      params.set('corpora', 'allDrives')
+    }
+    if (pageToken) params.set('pageToken', pageToken)
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+      headers: { Authorization: 'Bearer ' + token },
+    })
+    if (!res.ok) {
+      const txt = await res.text()
+      throw new Error(`Drive list (${res.status}): ${txt.slice(0, 300)} | query=${query}`)
+    }
+    const data = await res.json()
+    todos.push(...((data.files as DriveFile[] | undefined) ?? []))
+    pageToken = data.nextPageToken
+    if (!pageToken) break
   }
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
-    headers: { Authorization: 'Bearer ' + token },
-  })
-  if (!res.ok) {
-    const txt = await res.text()
-    throw new Error(`Drive list (${res.status}): ${txt.slice(0, 300)} | query=${query}`)
-  }
-  const data = await res.json()
-  return data.files || []
+  return todos
 }
 
 export async function driveFindSharedDrive(
