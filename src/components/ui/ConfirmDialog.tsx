@@ -39,15 +39,20 @@ export function ConfirmDialog({
   onConfirm: () => void
   onClose: () => void
 }) {
+  // ENQUANTO CONFIRMA, NÃO FECHA (23/10/2026): o Cancelar já ficava desligado,
+  // mas o X e o Esc fechavam no meio da gravação. A ação seguia no servidor e,
+  // ao terminar, o `finally` de quem chamou fechava a confirmação SEGUINTE —
+  // aberta para outro registro nesse meio-tempo. Agora as três saídas esperam.
+  const fechar = loading ? () => {} : onClose
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={fechar}
       title={title}
       size="sm"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
+          <Button variant="ghost" onClick={fechar} disabled={loading}>
             {cancelLabel}
           </Button>
           <Button

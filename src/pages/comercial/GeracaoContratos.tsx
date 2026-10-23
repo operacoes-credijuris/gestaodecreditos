@@ -874,7 +874,10 @@ function ArquivosField({
         }}
         onDragLeave={() => setArrastando(false)}
         onDrop={soltar}
-        className={`flex w-full flex-col items-center justify-center gap-s1 rounded-campo border-[1.5px] border-dashed p-s4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 ${
+        // OS FILHOS NÃO RECEBEM O ARRASTO (`[&>*]:pointer-events-none`, 23/10/2026),
+        // como na caixa do .zip das Skills: passar do ícone para o texto contava
+        // como sair da caixa, e o realce de "pode soltar" piscava.
+        className={`flex w-full flex-col items-center justify-center gap-s1 rounded-campo border-[1.5px] border-dashed p-s4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 [&>*]:pointer-events-none ${
           arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie'
         }`}
       >

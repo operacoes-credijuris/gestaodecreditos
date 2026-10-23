@@ -95,6 +95,13 @@ export function SecaoUsuarios() {
       toast.error('Informe e-mail e senha.')
       return
     }
+    // O MÍNIMO QUE A DICA PROMETE, conferido aqui como na edição (23/10/2026):
+    // senha curta ia até o servidor e voltava com o recado do Supabase, em
+    // inglês ("Password should be at least 6 characters").
+    if (form.password.length < 6) {
+      toast.error('A senha precisa ter ao menos 6 caracteres.')
+      return
+    }
     setSaving(true)
     try {
       await invokeFunction('admin-create-user', {

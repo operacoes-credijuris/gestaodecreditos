@@ -309,7 +309,6 @@ export function nomeParecido(
   return nomesParecidos(consulta, nomes, 1)[0] ?? null
 }
 
-/** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */
 /**
  * Data com hora, minuto e SEGUNDO — para a anotação do Kommo.
  *
@@ -332,6 +331,7 @@ export function formatDataHoraSegundos(value: string | null | undefined): string
   })
 }
 
+/** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const d = new Date(value)
@@ -448,7 +448,9 @@ export function mesesDepois(iso: string, meses: number): string {
   const [y, m, d] = iso.split('-').map(Number)
   const seq = m + meses
   const ano = y + Math.floor((seq - 1) / 12)
-  const mes = ((seq - 1) % 12) + 1
+  // RESTO SEMPRE POSITIVO (23/10/2026): o `%` do JavaScript guarda o sinal, e
+  // "um mês antes de janeiro" saía como mês 0 ("2025-00-…"), e não dezembro.
+  const mes = ((((seq - 1) % 12) + 12) % 12) + 1
   // Dia 0 do mês seguinte = último dia deste mês.
   const ultimoDia = new Date(ano, mes, 0).getDate()
   const dia = Math.min(d, ultimoDia)

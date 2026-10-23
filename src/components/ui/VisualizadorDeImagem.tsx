@@ -19,7 +19,27 @@ export interface ImagemDoVisualizador {
   obter?: (forcar?: boolean) => Promise<string>
 }
 
-type Situacao = { fase: 'carregando' } | { fase: 'pronta'; src: string } | { fase: 'falhou'; erro: string }
+export type Situacao = { fase: 'carregando' } | { fase: 'pronta'; src: string } | { fase: 'falhou'; erro: string }
+
+/**
+ * Em que pé está a imagem à vista.
+ *
+ * A FALHA VENCE O `src` JÁ CONHECIDO (23/10/2026): a imagem que chega com o
+ * endereço pronto (o `blob:` de um print colado) era sempre "pronta", e quando
+ * o navegador não a abria — um arquivo colado que não é imagem — o `onError`
+ * anotava a falha num lugar que ninguém lia. O esqueleto de carregamento ficava
+ * girando para sempre, sem o aviso nem o "Tentar de novo".
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function situacaoDaImagem(
+  atual: Pick<ImagemDoVisualizador, 'chave' | 'src'> | undefined,
+  situacoes: Readonly<Record<string, Situacao>>,
+): Situacao | undefined {
+  if (!atual) return undefined
+  const anotada = situacoes[atual.chave]
+  if (!atual.src) return anotada
+  return anotada?.fase === 'falhou' ? anotada : { fase: 'pronta', src: atual.src }
+}
 
 /**
  * Baixa a imagem com o nome dela.
@@ -106,11 +126,7 @@ export function VisualizadorDeImagem({
 
   const total = imagens.length
   const atual = imagens[indice] as ImagemDoVisualizador | undefined
-  const situacao: Situacao | undefined = atual
-    ? atual.src
-      ? { fase: 'pronta', src: atual.src }
-      : situacoes[atual.chave]
-    : undefined
+  const situacao = situacaoDaImagem(atual, situacoes)
 
   const pedir = useCallback(async (img: ImagemDoVisualizador, forcar = false) => {
     if (!img.obter) return

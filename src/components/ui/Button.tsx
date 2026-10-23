@@ -73,10 +73,16 @@ export function Button({
   className,
   children,
   disabled,
+  // `button` POR PADRÃO (23/10/2026), como o IconButton e o Chip: sem `type`, um
+  // botão dentro de <form> é de envio, e um "Remover arquivo" ou "Voltar ao
+  // card" posto ali gravaria o formulário. Todo envio da plataforma já diz
+  // `type="submit"` com todas as letras — conferido em todos os formulários.
+  type = 'button',
   ...rest
 }: ButtonProps) {
   return (
     <button
+      type={type}
       className={cn(
         // whitespace-nowrap: as alturas são fixas (as de controle), então rótulo
         // que quebra em duas linhas vaza do botão em vez de esticá-lo.

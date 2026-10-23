@@ -171,7 +171,18 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           className="grid h-[36px] w-[36px] shrink-0 place-items-center p-0"
         />
 
-        <div ref={caixaDoMenuRef} className="relative shrink-0">
+        <div
+          ref={caixaDoMenuRef}
+          className="relative shrink-0"
+          // O TAB QUE SAI DO MENU O FECHA (23/10/2026), como o "?" da tela: antes ele
+          // ficava aberto por cima da página enquanto o foco já andava nela. Só
+          // com destino conhecido (`relatedTarget`): no Safari o clique num item
+          // não foca o botão, e um blur sem destino fecharia o menu antes do clique.
+          onBlur={(e) => {
+            const destino = e.relatedTarget as Node | null
+            if (menuOpen && destino && !caixaDoMenuRef.current?.contains(destino)) setMenuOpen(false)
+          }}
+        >
           {/* O `.user-btn` da amostra: pílula com as iniciais na placa
               azul-clara e o primeiro nome; o contorno só aparece sob o mouse. */}
           <button

@@ -50,6 +50,12 @@ const DIZ = {
   metadeCentralPrazo:
     'Descarta o quarto mais rápido e o quarto mais demorado. Metade das operações levou ' +
     'um prazo dentro desta faixa.',
+  // A DICA DO PRAZO É DO PRAZO (23/10/2026): a linha "Mais rápida – mais
+  // demorada" usava a da rentabilidade, que manda procurar as duas na primeira
+  // e na última linha da tabela — ordenada por rentabilidade, não por prazo.
+  maisRapidaDemorada:
+    'São duas operações reais da carteira, não estimativas: a que foi paga mais depressa ' +
+    'depois da compra e a que mais demorou. A coluna Prazo da tabela abaixo mostra o de cada uma.',
   extremoSubconjunto:
     'Não são operações a mais: já estão contadas no total. São as que ficaram fora do ' +
     'intervalo interquartil ampliado da taxa ANUALIZADA — quase sempre por prazo muito ' +
@@ -181,7 +187,7 @@ export default function Performance() {
           <LinhaMetrica
             rotulo="Mais rápida – mais demorada"
             valor={`${dias(carteira.prazo.minimo)} – ${dias(carteira.prazo.maximo)}`}
-            explicacao={DIZ.piorMelhor}
+            explicacao={DIZ.maisRapidaDemorada}
           />
         </Metrica>
       </div>

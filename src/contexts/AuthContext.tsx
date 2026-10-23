@@ -82,20 +82,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return
-      setSession(data.session)
-      if (data.session?.user) {
-        usuarioCorrente.current = data.session.user.id
-        loadProfile(data.session.user.id).finally(() => {
-          if (mounted) setLoading(false)
-        })
-      } else {
-        setLoading(false)
-      }
-    })
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return
+        setSession(data.session)
+        if (data.session?.user) {
+          usuarioCorrente.current = data.session.user.id
+          loadProfile(data.session.user.id).finally(() => {
+            if (mounted) setLoading(false)
+          })
+        } else {
+          setLoading(false)
+        }
+      })
+      // A LEITURA DA SESSÃO QUE LANÇA NÃO PRENDE NO "CARREGANDO…" (23/10/2026):
+      // sem o catch, o `loading` ficava true para sempre (armazenamento
+      // bloqueado, sessão guardada corrompida) e a plataforma não saía da tela
+      // de carregamento — nem para o Entrar. Sem sessão lida, vale "sem sessão".
+      .catch((e: unknown) => {
+        console.error('Falha ao ler a sessão guardada.', e)
+        if (mounted) setLoading(false)
+      })
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+      // A ABERTURA JÁ É DO getSession ACIMA (23/10/2026): o auth-js avisa a
+      // mesma sessão como INITIAL_SESSION ao inscrever, e o perfil era lido duas
+      // vezes a cada carga da plataforma.
+      if (event === 'INITIAL_SESSION') return
       setSession(newSession)
       usuarioCorrente.current = newSession?.user?.id ?? null
       if (newSession?.user) {

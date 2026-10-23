@@ -244,7 +244,11 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') {
                 e.preventDefault()
-                setSel(Math.min(resultados.length - 1, atual + 1))
+                // NUNCA ABAIXO DE ZERO (23/10/2026): com a lista ainda vazia (a
+                // consulta no ar), a seta para baixo punha o destaque em -1, e
+                // quando os resultados chegavam nenhum ficava destacado — o
+                // Enter não abria nada até a pessoa apertar outra seta.
+                setSel(Math.max(0, Math.min(resultados.length - 1, atual + 1)))
               } else if (e.key === 'ArrowUp') {
                 e.preventDefault()
                 setSel(Math.max(0, atual - 1))

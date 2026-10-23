@@ -32,6 +32,7 @@ import {
   valorProjetado,
 } from '@/lib/projecao'
 import { invokeFunction } from '@/lib/functions'
+import { copiarTexto } from '@/lib/copiar'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import {
   montarCarteiraDoInvestidor,
@@ -652,13 +653,22 @@ function Individual() {
   /** Texto de acompanhamento, para colar no WhatsApp junto com o arquivo. */
   async function copiarMensagem() {
     if (!investidor) return
+    let texto: string
     try {
       const { mensagemWhatsapp } = await import('@/lib/relatorioCarteira')
-      await navigator.clipboard.writeText(mensagemWhatsapp(calc))
-      toast.success('Mensagem copiada. É só colar no WhatsApp junto com o relatório.')
+      texto = mensagemWhatsapp(calc)
     } catch {
-      // Área de transferência bloqueada acontece: contexto não seguro, permissão
-      // negada, navegador antigo. Dizer o que houve é melhor que falhar calado.
+      toast.error('Não foi possível montar a mensagem agora. Recarregue a página e tente de novo.')
+      return
+    }
+    // PELO COPIAR DA PLATAFORMA (lib/copiar.ts, 23/10/2026): com o
+    // `navigator.clipboard` direto, o navegador que recusa a área de
+    // transferência moderna (página fora de HTTPS, permissão) não copiava, e o
+    // jeito antigo que o resto da plataforma usa nessa hora nem era tentado.
+    if (await copiarTexto(texto)) {
+      toast.success('Mensagem copiada. É só colar no WhatsApp junto com o relatório.')
+    } else {
+      // Dizer o que houve é melhor que falhar calado.
       toast.error('O navegador não liberou a área de transferência. Gere o relatório e copie o texto de lá.')
     }
   }
