@@ -39,6 +39,9 @@ import type { KommoLead } from './types'
 export const COLUNAS_QUE_MOSTRAM_AS_PROPOSTAS: ReadonlyMap<number, string> = new Map([
   [111533988, 'Externo · Produção de proposta'],
   [112339984, 'Externo · Negociação'],
+  // O NÃO FECHADO DO EXTERNO (27/10/2026, pedido do dono): o cedente recusou,
+  // mas proposta nova ainda chega e é ali que se compara e se registra.
+  [111985976, 'Externo · Não fechado'],
   [111533948, 'Interno · Produção de proposta'],
   [112466260, 'Interno · Negociação'],
   [107830035, 'RPV · Produção de proposta'],

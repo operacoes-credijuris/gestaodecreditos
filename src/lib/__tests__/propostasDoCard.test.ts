@@ -126,22 +126,22 @@ describe('a linha da comissão (a mesma nas duas caixas)', () => {
 })
 
 describe('as colunas em que o indicador aparece', () => {
-  it('as seis: Produção de proposta e Negociação dos três funis', () => {
+  it('as sete: Produção de proposta e Negociação dos três funis, e o Não fechado do Externo (27/10/2026)', () => {
     expect([...COLUNAS_QUE_MOSTRAM_AS_PROPOSTAS.keys()].sort()).toEqual(
-      [107830035, 107830039, 111533948, 111533988, 112339984, 112466260].sort(),
+      [107830035, 107830039, 111533948, 111533988, 111985976, 112339984, 112466260].sort(),
     )
   })
 
-  const COMBINACOES: [string, number, SubdivisaoPrecatorio][] = [
-    ['RPV', FUNIL_RPV, 'interno'],
-    ['Precatório interno', FUNIL_PRECATORIO, 'interno'],
-    ['Precatório externo', FUNIL_PRECATORIO, 'externo'],
+  const COMBINACOES: [string, number, SubdivisaoPrecatorio, string[]][] = [
+    ['RPV', FUNIL_RPV, 'interno', []],
+    ['Precatório interno', FUNIL_PRECATORIO, 'interno', []],
+    ['Precatório externo', FUNIL_PRECATORIO, 'externo', ['não fechado']],
   ]
-  for (const [nome, funil, trilha] of COMBINACOES) {
-    it(`${nome}: só nas abas Produção de proposta e Negociação (das abas que a tela monta)`, () => {
+  for (const [nome, funil, trilha, alem] of COMBINACOES) {
+    it(`${nome}: nas abas Produção de proposta e Negociação${alem.length ? ' e Não fechado' : ''} (das abas que a tela monta)`, () => {
       const abas = abasDoFunil(funil, espelhoDosTresFunis(), trilha)
       const com = abas.filter((a) => mostraAsPropostas(a.statusIds)).map((a) => a.label.toLocaleLowerCase('pt-BR'))
-      expect(com).toEqual(['produção de proposta', 'negociação'])
+      expect(com).toEqual(['produção de proposta', 'negociação', ...alem])
     })
   }
 
