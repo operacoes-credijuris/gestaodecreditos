@@ -60,3 +60,33 @@ export function textoEditado(original: string, novoCorpo: string, editor: string
   const rodape = registrado ? `${registrado} · ${edicao}` : `— ${edicao} pela plataforma Credijuris`
   return `${corpo}\n\n${rodape}`
 }
+
+/**
+ * A NOTA DE ARQUIVO COM TEXTO DE GENTE (27/10/2026, pedido do dono): o "Anotar"
+ * com anexo grava o texto dentro da nota do arquivo (ver notaComArquivo.ts), e
+ * ela também se edita. Devolve o texto dela — ou null quando o texto é só o
+ * nome do arquivo, que o próprio Kommo põe em toda nota de arquivo.
+ */
+export function textoProprioDaNotaDeArquivo(params: Record<string, unknown> | null | undefined): string | null {
+  const p = params ?? {}
+  const limpo = (v: unknown) => String(v ?? '').trim()
+  const texto = limpo(p.text)
+  if (!texto) return null
+  const nomes = [limpo(p.file_name), limpo(p.original_file_name)].filter(Boolean)
+  return nomes.includes(texto) ? null : texto
+}
+
+/**
+ * Os parâmetros do PATCH da nota de arquivo: os do arquivo, como o Kommo os
+ * tem, e o texto novo. Só os campos que a documentação da nota de arquivo
+ * lista — mandar de volta tudo o que a leitura trouxe arriscaria um 400.
+ */
+export function paramsDaNotaDeArquivo(params: Record<string, unknown> | null | undefined, texto: string) {
+  const p = params ?? {}
+  return {
+    ...(p.file_uuid ? { file_uuid: String(p.file_uuid) } : {}),
+    ...(p.version_uuid ? { version_uuid: String(p.version_uuid) } : {}),
+    ...(p.file_name ? { file_name: String(p.file_name) } : {}),
+    text: texto,
+  }
+}

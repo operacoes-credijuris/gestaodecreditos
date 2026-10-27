@@ -5946,9 +5946,16 @@ export default function AnaliseCredito() {
    * LANÇA com a mensagem — a caixa de edição a mostra e fica aberta.
    */
   async function editarNotaDoCard(lead: KommoLead, nota: KommoNota, texto: string) {
-    const r = await invokeFunction<{ texto: string; aviso: string | null }>('kommo-editar-nota', {
+    const r = await invokeFunction<{ texto: string | null; aviso: string | null }>('kommo-editar-nota', {
       lead_id: lead.kommo_lead_id, nota_id: nota.id, texto, autor: analistaNome,
     })
+    // `texto: null` É A NOTA DE ARQUIVO QUE O KOMMO NÃO DEIXOU MUDAR (27/10/2026):
+    // o texto editado foi numa nota nova, que a sincronização traz. A nota do
+    // arquivo segue como estava, e o histórico também.
+    if (r && r.texto === null) {
+      toast.error(r.aviso ?? 'O texto editado foi gravado numa nota nova no card.')
+      return
+    }
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
         l.kommo_lead_id !== lead.kommo_lead_id

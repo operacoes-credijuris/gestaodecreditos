@@ -45,10 +45,10 @@ describe('corpoEditavel e textoEditado', () => {
   it('a função confere a nota no Kommo antes de editar, e a tela tem o lápis no histórico', () => {
     const f = readFileSync(join(__dirname, '..', '..', '..', 'supabase/functions/kommo-editar-nota/index.ts'), 'utf8')
     expect(f).toContain("if (!nota || Number(nota.entity_id) !== leadId)")
-    expect(f).toContain("if (nota.note_type !== 'common')")
+    expect(f).toContain("if (nota.note_type !== 'common' && !deArquivo) {")
     expect(f).toContain('if (ehNotaNossa(original, criadaEm))')
     // O Kommo exige o card no PATCH da nota (400 FieldMissing: entity_id, 23/10/2026).
-    expect(f).toContain("JSON.stringify({ entity_id: leadId, note_type: 'common', params: { text: texto } })")
+    expect(f).toContain(": { entity_id: leadId, note_type: 'common', params: { text: texto } },")
     const t = readFileSync(join(__dirname, '..', '..', 'pages/operacional/AnaliseCredito.tsx'), 'utf8')
     expect(t).toContain('onEditarNota={editarNotaDoCard}')
   })
@@ -66,5 +66,34 @@ describe('o lápis na nota recém-enviada (27/10/2026)', () => {
     expect(t).toContain('id: ids.length === 1 && ids[0] > 0 ? ids[0] : -Date.now(),')
     const j = readFileSync(join(raiz, 'src/components/JustificativaTecnica.tsx'), 'utf8')
     expect(j).toContain('onEnviada?.(lead, texto, r?.nota_kommo_ids ?? [])')
+  })
+})
+
+import { textoProprioDaNotaDeArquivo, paramsDaNotaDeArquivo } from '../../../supabase/functions/_shared/edicaoDeNota.ts'
+import { desdobrarNotaComArquivo } from '@/lib/historicoDeNotas'
+
+describe('a nota com arquivo também se edita (27/10/2026)', () => {
+  it('só a de texto próprio: a que tem só o nome do arquivo não', () => {
+    expect(textoProprioDaNotaDeArquivo({ text: 'Segue o ofício.', file_name: 'oficio.pdf' })).toBe('Segue o ofício.')
+    expect(textoProprioDaNotaDeArquivo({ text: 'oficio.pdf', file_name: 'oficio.pdf' })).toBeNull()
+    expect(textoProprioDaNotaDeArquivo({ text: 'Ofício.PDF', original_file_name: 'Ofício.PDF', file_name: 'oficio.pdf' })).toBeNull()
+    expect(textoProprioDaNotaDeArquivo({})).toBeNull()
+  })
+  it('o PATCH leva o arquivo como está e o texto novo, e nada além', () => {
+    expect(paramsDaNotaDeArquivo({ file_uuid: 'u', version_uuid: 'v', file_name: 'a.pdf', text: 'velho', extra: 1 }, 'novo'))
+      .toEqual({ file_uuid: 'u', version_uuid: 'v', file_name: 'a.pdf', text: 'novo' })
+  })
+  it('no histórico, o texto da nota com arquivo ganha o lápis', () => {
+    const d = desdobrarNotaComArquivo({
+      id: 77, texto: 'Segue o ofício.', criado_em: null, autor: 'Ana', tipo: 'attachment', automatica: false,
+      arquivo_uuid: 'u', arquivo_nome: 'oficio.pdf',
+    })
+    expect(d && notaEditavel(d.texto)).toBe(true)
+    expect(d && notaEditavel(d.anexo)).toBe(false)
+  })
+  it('a função confere se o texto ficou e, não ficando, grava numa nota ao lado', () => {
+    const f = readFileSync(join(__dirname, '..', '..', '..', 'supabase/functions/kommo-editar-nota/index.ts'), 'utf8')
+    expect(f).toContain('if (!textoFicou(texto, depois?.params?.text)) {')
+    expect(f).toContain("const r = await postarNotas(conta, leadId, [texto], { dePessoa: true, autor: editor })")
   })
 })

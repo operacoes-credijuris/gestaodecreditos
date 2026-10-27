@@ -17,7 +17,9 @@ import { contaKommo } from '../_shared/segredos.ts'
 import { kommoFetch } from '../_shared/kommoFetch.ts'
 import { ehNotaNossa } from '../_shared/notaCredijuris.ts'
 import { semEntidadesHtml } from '../_shared/etiquetasDoFundo.ts'
-import { textoEditado } from '../_shared/edicaoDeNota.ts'
+import { textoEditado, paramsDaNotaDeArquivo, textoProprioDaNotaDeArquivo } from '../_shared/edicaoDeNota.ts'
+import { textoFicou } from '../_shared/notaComArquivo.ts'
+import { postarNotas } from '../_shared/anotarNoKommo.ts'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -51,12 +53,15 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: `O Kommo não deixou ler a nota (HTTP ${lida.status}).`, detalhe: (await lida.text().catch(() => '')).slice(0, 300) }, 502)
     }
     const nota = (await lida.json().catch(() => null)) as {
-      entity_id?: number; note_type?: string; created_at?: number; params?: { text?: string }
+      entity_id?: number; note_type?: string; created_at?: number; params?: Record<string, unknown>
     } | null
     if (!nota || Number(nota.entity_id) !== leadId) {
       return jsonResponse({ error: 'Esta nota não é deste card.' }, 400)
     }
-    if (nota.note_type !== 'common') {
+    // A NOTA DE ARQUIVO COM TEXTO TAMBÉM (27/10/2026, pedido do dono): a do
+    // "Anotar" com anexo. A de arquivo sem texto (só o nome dele) não.
+    const deArquivo = nota.note_type === 'attachment' && textoProprioDaNotaDeArquivo(nota.params) !== null
+    if (nota.note_type !== 'common' && !deArquivo) {
       return jsonResponse({ error: 'Só as notas de texto podem ser editadas (não movimentação nem anexo).' }, 400)
     }
     const original = semEntidadesHtml(String(nota.params?.text ?? ''))
@@ -72,7 +77,17 @@ Deno.serve(async (req: Request) => {
       // O `entity_id` É OBRIGATÓRIO (23/10/2026): sem ele o Kommo devolvia 400
       // "FieldMissing: entity_id" — a documentação do PATCH não o lista, mas a
       // validação do Kommo o exige. É o card já conferido acima.
-      { method: 'PATCH', headers, body: JSON.stringify({ entity_id: leadId, note_type: 'common', params: { text: texto } }) },
+      //
+      // NA NOTA DE ARQUIVO, o arquivo vai junto, como o Kommo o tem: só o texto muda.
+      {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(
+          deArquivo
+            ? { entity_id: leadId, note_type: 'attachment', params: paramsDaNotaDeArquivo(nota.params, texto) }
+            : { entity_id: leadId, note_type: 'common', params: { text: texto } },
+        ),
+      },
       { idempotente: true },
     )
     if (!res.ok) {
@@ -82,9 +97,32 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
+    // 2b. A NOTA DE ARQUIVO É CONFERIDA (27/10/2026): editar o texto dela pela
+    // API nunca tinha sido feito, e o Kommo pode aceitar o pedido e guardar o
+    // nome do arquivo no lugar. Não ficando o texto novo, ele vai numa nota de
+    // texto ao lado — como no "Anotar" — e nada do que a pessoa escreveu se perde.
+    let aviso: string | null = null
+    if (deArquivo) {
+      const relida = await kommoFetch(`${base}/leads/notes/${notaId}`, { headers }).catch(() => null)
+      const depois = relida?.ok ? ((await relida.json().catch(() => null)) as { params?: { text?: unknown } } | null) : null
+      if (!textoFicou(texto, depois?.params?.text)) {
+        const r = await postarNotas(conta, leadId, [texto], { dePessoa: true, autor: editor })
+        if (!r.ok) {
+          return jsonResponse({
+            error: 'O Kommo não guardou o texto novo na nota do arquivo, e a nota de texto ao lado também não subiu. Copie o texto antes de fechar.',
+            detalhe: r.detalhe,
+          }, 502)
+        }
+        return jsonResponse({
+          ok: true,
+          texto: null,
+          aviso: 'O Kommo não deixou trocar o texto dentro da nota do arquivo; o texto editado foi gravado numa nota nova, logo abaixo no card.',
+        })
+      }
+    }
+
     // 3. O ESPELHO, na hora. Falhar aqui não desfaz a edição: a próxima
     // sincronização traz o texto novo de qualquer jeito.
-    let aviso: string | null = null
     try {
       const { data: card } = await svc.from('kommo_leads').select('notas').eq('kommo_lead_id', leadId).maybeSingle()
       const notas = Array.isArray(card?.notas) ? (card!.notas as Record<string, unknown>[]) : null

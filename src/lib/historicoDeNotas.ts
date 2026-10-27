@@ -46,8 +46,9 @@ export function nomeDoAnexo(n: KommoNota): string {
  * nota do arquivo (ver supabase/functions/_shared/notaComArquivo.ts). No
  * histórico ela vira o que é: a anotação, com o arquivo dela junto.
  *
- * A ANOTAÇÃO LEVA O `arquivo_uuid`, e é de propósito: a nota no Kommo é de
- * arquivo, e a edição (que só vale para `common`) não aparece para ela.
+ * A ANOTAÇÃO SE EDITA (27/10/2026, pedido do dono): ela sai sem o
+ * `arquivo_uuid` — que fica no arquivo, desenhado embaixo — e com o id da nota
+ * no Kommo; a kommo-editar-nota troca só o texto e mantém o arquivo.
  */
 export function desdobrarNotaComArquivo(n: KommoNota): { texto: KommoNota; anexo: KommoNota } | null {
   const nome = n.arquivo_nome?.trim()
@@ -55,7 +56,7 @@ export function desdobrarNotaComArquivo(n: KommoNota): { texto: KommoNota; anexo
   const texto = String(n.texto ?? '').trim()
   if (!texto || texto === nome || texto === `📎 ${nome}`) return null
   return {
-    texto: { ...n, tipo: 'common' },
+    texto: { ...n, tipo: 'common', arquivo_uuid: null },
     // O ID DO ARQUIVO é outro (a chave da lista): o negativo do da nota, ou,
     // na nota otimista (já negativa), o vizinho dela.
     anexo: { ...n, id: n.id > 0 ? -n.id : n.id - 1, texto: `📎 ${nome}` },
