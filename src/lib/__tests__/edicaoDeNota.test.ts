@@ -53,3 +53,18 @@ describe('corpoEditavel e textoEditado', () => {
     expect(t).toContain('onEditarNota={editarNotaDoCard}')
   })
 })
+
+describe('o lápis na nota recém-enviada (27/10/2026)', () => {
+  const raiz = join(__dirname, '..', '..', '..')
+  it('a kommo-anotar devolve o id da nota de texto, também com o arquivo em nota à parte', () => {
+    const f = readFileSync(join(raiz, 'supabase/functions/kommo-anotar/index.ts'), 'utf8')
+    expect(f).toContain('const notaDeTexto = anexo && !junto ? r.ids[r.ids.length - 1] ?? null : r.ids[0] ?? null;')
+  })
+  it('a tela põe o id do Kommo na nota, e não o provisório', () => {
+    const t = readFileSync(join(raiz, 'src/pages/operacional/AnaliseCredito.tsx'), 'utf8')
+    expect(t).toContain("{ ...base, id: idDe(ids.texto, provisorio), texto, tipo: 'common' },")
+    expect(t).toContain('id: ids.length === 1 && ids[0] > 0 ? ids[0] : -Date.now(),')
+    const j = readFileSync(join(raiz, 'src/components/JustificativaTecnica.tsx'), 'utf8')
+    expect(j).toContain('onEnviada?.(lead, texto, r?.nota_kommo_ids ?? [])')
+  })
+})

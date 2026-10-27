@@ -85,7 +85,13 @@ Deno.serve(async (req) => {
     }
     // O id da nota vai junto, para quem quiser guardá-lo; os chamadores de
     // sempre só leem o `ok`.
-    return json({ ok: true, nota_id: r.ids[0] ?? null, junto: "junto" in r ? r.junto === true : undefined });
+    //
+    // O ID DA NOTA DE TEXTO À PARTE (27/10/2026): com o arquivo em nota
+    // separada, o primeiro id é o do arquivo e o do texto é o último. É por ele
+    // que a tela põe o lápis na nota recém-enviada, sem esperar a sincronização.
+    const junto = "junto" in r ? r.junto === true : undefined;
+    const notaDeTexto = anexo && !junto ? r.ids[r.ids.length - 1] ?? null : r.ids[0] ?? null;
+    return json({ ok: true, nota_id: r.ids[0] ?? null, nota_texto_id: notaDeTexto, junto });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);
   }

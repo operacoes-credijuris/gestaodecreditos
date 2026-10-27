@@ -5962,28 +5962,35 @@ export default function AnaliseCredito() {
 
   async function anotarNoCard(lead: KommoLead, texto: string, anexo?: ArquivoNoDrive) {
     let junto = false
+    let ids: { nota: number | null; texto: number | null } = { nota: null, texto: null }
     try {
       // COM O ARQUIVO (22/10/2026), o texto vai na nota dele — ver
       // supabase/functions/_shared/notaComArquivo.ts.
-      const r = await invokeFunction<{ junto?: boolean }>('kommo-anotar', {
+      const r = await invokeFunction<{ junto?: boolean; nota_id?: number | null; nota_texto_id?: number | null }>('kommo-anotar', {
         lead_id: lead.kommo_lead_id, texto, origem: 'pessoa', autor: analistaNome, ...(anexo ? { anexo } : {}),
       })
       junto = !!anexo && r?.junto === true
+      ids = { nota: r?.nota_id ?? null, texto: r?.nota_texto_id ?? r?.nota_id ?? null }
     } catch (e) {
       toast.error(`A anotação não subiu para o Kommo: ${(e as Error)?.message ?? e}. O texto continua na caixa.`)
       throw e
     }
     const agora = new Date().toISOString()
     const base = { criado_em: agora, autor: analistaNome, automatica: false }
+    // O ID QUE O KOMMO DEU (27/10/2026): com o id provisório (negativo), a nota
+    // recém-enviada ficava sem o lápis de editar até a próxima sincronização —
+    // até 15 minutos. Sem o id na resposta (função antiga), fica o provisório.
+    const provisorio = -Date.now()
+    const idDe = (real: number | null, reserva: number) => (real && real > 0 ? real : reserva)
     // O QUE O CARD MOSTRA ATÉ A PRÓXIMA SINCRONIZAÇÃO: a nota única, ou as duas
     // (o arquivo e o texto) quando o Kommo não guardou o texto na do arquivo.
     const novas: KommoNota[] = junto && anexo
-      ? [{ ...base, id: -Date.now(), texto, tipo: 'attachment', arquivo_uuid: anexo.file_uuid, arquivo_nome: anexo.file_name }]
+      ? [{ ...base, id: idDe(ids.nota, provisorio), texto, tipo: 'attachment', arquivo_uuid: anexo.file_uuid, arquivo_nome: anexo.file_name }]
       : [
           ...(anexo
-            ? [{ ...base, id: -Date.now() - 1, texto: `📎 ${anexo.file_name}`, tipo: 'attachment', arquivo_uuid: anexo.file_uuid, arquivo_nome: anexo.file_name }]
+            ? [{ ...base, id: idDe(ids.nota !== ids.texto ? ids.nota : null, provisorio - 1), texto: `📎 ${anexo.file_name}`, tipo: 'attachment', arquivo_uuid: anexo.file_uuid, arquivo_nome: anexo.file_name }]
             : []),
-          { ...base, id: -Date.now(), texto, tipo: 'common' },
+          { ...base, id: idDe(ids.texto, provisorio), texto, tipo: 'common' },
         ]
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
@@ -6033,9 +6040,12 @@ export default function AnaliseCredito() {
     Boolean(abaAtual?.justificativaTecnica),
   )
   /** A nota subiu: entra no histórico do card já, sem esperar a sincronização. */
-  function justificativaEnviada(lead: KommoLead, texto: string) {
+  function justificativaEnviada(lead: KommoLead, texto: string, ids: readonly number[] = []) {
     const nova: KommoNota = {
-      id: -Date.now(),
+      // UMA NOTA SÓ, O ID DELA (27/10/2026): é o que põe o lápis já. Em várias
+      // partes, o texto inteiro não é nenhuma delas — fica o provisório até a
+      // sincronização trazer as partes.
+      id: ids.length === 1 && ids[0] > 0 ? ids[0] : -Date.now(),
       texto,
       criado_em: new Date().toISOString(),
       autor: analistaNome,

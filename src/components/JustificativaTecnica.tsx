@@ -220,7 +220,7 @@ export function JanelaJustificativa({
   autor: string
   onFechar: () => void
   /** A nota subiu: a página põe o texto no histórico do card sem esperar o sync. */
-  onEnviada?: (lead: KommoLead, texto: string) => void
+  onEnviada?: (lead: KommoLead, texto: string, notaIds?: number[]) => void
 }) {
   const qc = useQueryClient()
   const toast = useToast()
@@ -445,11 +445,11 @@ export function JanelaJustificativa({
     setEnviandoPorCard(travas.current)
     cancelarRelogio()
     try {
-      const r = await invokeFunction<{ partes: number; aviso: string | null }>(FUNCAO, {
+      const r = await invokeFunction<{ partes: number; aviso: string | null; nota_kommo_ids?: number[] }>(FUNCAO, {
         acao: 'enviar', kommo_lead_id: leadId, tentativa: linha.tentativa, texto, autor,
       })
       ultimoEnviado.current = texto
-      onEnviada?.(lead, texto)
+      onEnviada?.(lead, texto, r?.nota_kommo_ids ?? [])
       if (r?.aviso) toast.error(r.aviso)
       else toast.success(
         r?.partes && r.partes > 1
