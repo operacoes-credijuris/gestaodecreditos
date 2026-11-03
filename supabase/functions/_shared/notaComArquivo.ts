@@ -52,12 +52,24 @@ export function corpoDaNotaDeArquivo(leadId: number, anexo: ArquivoNoDrive, text
   ]
 }
 
+/**
+ * SÓ LETRAS E NÚMEROS, sem acento (03/11/2026): a comparação de antes guardava
+ * pontuação e espaço, e um travessão devolvido como `&mdash;`, uma aspa curva
+ * ou um acento em outra forma bastavam para dizer "não ficou" — e a nota de
+ * texto ia ao card ao lado da nota do arquivo que JÁ tinha o texto: a mensagem
+ * aparecia dividida, e repetida.
+ */
 const comparavel = (s: unknown) =>
   semEntidadesHtml(s)
     .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+    // A LETRA ACENTUADA EM ENTIDADE ("&iacute;") vira a letra: o acento sai
+    // logo abaixo de qualquer jeito, e apagar a entidade apagaria a letra.
+    .replace(/&([a-z])(acute|grave|circ|tilde|cedil|uml);/gi, '$1')
+    .replace(/&[a-z]+;/gi, ' ')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
 
 /**
  * O KOMMO GUARDOU O NOSSO TEXTO? Compara o começo (o Kommo devolve HTML
@@ -67,7 +79,7 @@ export function textoFicou(enviado: string, devolvido: unknown): boolean {
   const e = comparavel(enviado)
   const d = comparavel(devolvido)
   if (!e || !d) return false
-  return d.includes(e.slice(0, 60))
+  return d.includes(e.slice(0, 40))
 }
 
 /**

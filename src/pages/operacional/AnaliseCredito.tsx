@@ -6067,6 +6067,42 @@ export default function AnaliseCredito() {
   }
   const [notasDoEnvio, setNotasDoEnvio] = useState<Set<string>>(new Set())
   const partesDoEnvio = useRef<Set<string>>(new Set())
+  /**
+   * O ARQUIVO QUE JÁ SUBIU e ficou sem a nota (ela falhou): a próxima tentativa
+   * só grava a nota com ele, sem subi-lo de novo. Pela parte do envio.
+   */
+  const arquivosNoCard = useRef(new Map<string, ArquivoNoDrive>())
+
+  /**
+   * UM ARQUIVO E O TEXTO NUMA NOTA SÓ (03/11/2026, pedido do dono): "uma
+   * mensagem com o anexo gera uma anotação no Kommo". O mesmo caminho do
+   * "Anotar": o arquivo sobe sem nota (kommo-anexo-enviar com `x-sem-nota`) e a
+   * kommo-anotar grava a nota dele com o texto, conferida — ver
+   * supabase/functions/_shared/notaComArquivo.ts. Antes, a Remessa aos fundos e
+   * o "Anexar e mover" gravavam o texto numa nota e o arquivo em outra.
+   */
+  async function arquivoComTextoNoCard(
+    leadId: number,
+    arquivo: File,
+    texto: string,
+    parte: string,
+    onProgresso: (p: ProgressoDoEnvio) => void,
+  ): Promise<void> {
+    let noDrive = arquivosNoCard.current.get(parte) ?? null
+    if (!noDrive) {
+      const r = await enviarArquivo<{ file_uuid?: string; version_uuid?: string | null; nome?: string }>(
+        'kommo-anexo-enviar',
+        arquivo,
+        { 'x-lead-id': String(leadId), 'x-nome': encodeURIComponent(arquivo.name), 'x-texto': '', 'x-sem-nota': '1' },
+        onProgresso,
+      )
+      if (!r?.file_uuid) throw new Error('o Kommo não devolveu o arquivo enviado')
+      noDrive = { file_uuid: r.file_uuid, version_uuid: r.version_uuid ?? null, file_name: r.nome || arquivo.name }
+      arquivosNoCard.current.set(parte, noDrive)
+    }
+    await invokeFunction('kommo-anotar', { lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome, anexo: noDrive })
+    arquivosNoCard.current.delete(parte)
+  }
   async function moverAposOsFundos(lead: KommoLead) {
     const cfg = abaAtual?.envioAosFundos
     if (!cfg) return
@@ -6114,14 +6150,29 @@ export default function AnaliseCredito() {
           // 1. A ANOTAÇÃO, e depois as imagens, se houver.
           anotar: async () => {
             const feitas = partesDoEnvio.current
+            const parteDe = (a: File) => `${chave}:arquivo:${a.name}:${a.size}:${a.lastModified}`
             if (!feitas.has(`${chave}:texto`)) {
-              onAndamento('Gravando a anotação no Kommo…')
-              await invokeFunction('kommo-anotar', { lead_id: id, texto: nota, origem: 'pessoa', autor: analistaNome })
+              // A ANOTAÇÃO VAI NA NOTA DO PRIMEIRO ARQUIVO (03/11/2026): uma
+              // mensagem, uma nota. Os outros arquivos seguem um por nota.
+              const primeiro = arquivos[0]
+              if (primeiro) {
+                if (primeiro.size > 100 * 1024 * 1024) throw new Error(`${primeiro.name} passa de 100 MB.`)
+                const qual = arquivos.length > 1 ? `arquivo 1 de ${arquivos.length} — ` : ''
+                await arquivoComTextoNoCard(id, primeiro, nota, parteDe(primeiro), (p) =>
+                  p.fase === 'enviando'
+                    ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
+                    : onAndamento(`Gravando a anotação no Kommo…`),
+                )
+                feitas.add(parteDe(primeiro))
+              } else {
+                onAndamento('Gravando a anotação no Kommo…')
+                await invokeFunction('kommo-anotar', { lead_id: id, texto: nota, origem: 'pessoa', autor: analistaNome })
+              }
               feitas.add(`${chave}:texto`)
             }
             for (let i = 0; i < arquivos.length; i++) {
               const a = arquivos[i]
-              const parteDoArquivo = `${chave}:arquivo:${a.name}:${a.size}:${a.lastModified}`
+              const parteDoArquivo = parteDe(a)
               if (feitas.has(parteDoArquivo)) continue
               if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
               const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
@@ -6204,17 +6255,14 @@ export default function AnaliseCredito() {
         throw new Error(msg)
       }
       try {
-        const r = await enviarArquivo<{ aviso?: string | null }>(
-          'kommo-anexo-enviar',
+        // NUMA NOTA SÓ, o arquivo e a anotação (03/11/2026) — ver `arquivoComTextoNoCard`.
+        await arquivoComTextoNoCard(
+          id,
           arquivo,
-          {
-            'x-lead-id': String(id),
-            'x-nome': encodeURIComponent(arquivo.name),
-            'x-texto': encodeURIComponent(cfg.nota),
-          },
+          cfg.nota,
+          `${id}:anexar:${arquivo.name}:${arquivo.size}:${arquivo.lastModified}`,
           onAndamento,
         )
-        if (r?.aviso) toast.error(r.aviso)
       } catch (e) {
         toast.error(`O arquivo não subiu para o Kommo: ${(e as Error).message}`)
         throw e
