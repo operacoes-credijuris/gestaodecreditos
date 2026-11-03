@@ -47,5 +47,8 @@ jobs:
       - name: Verificação de tipos das Edge Functions
         run: deno check --node-modules-dir=none supabase/functions
 
+      # --yes (03/11/2026): a CLI nova pede confirmação antes de subir as
+      # funções e, sem terminal para responder, desistia sem mudar nada — o
+      # deploy falhava em silêncio no meio do dia.
       - name: Deploy de todas as Edge Functions
-        run: supabase functions deploy --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+        run: supabase functions deploy --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" --yes
