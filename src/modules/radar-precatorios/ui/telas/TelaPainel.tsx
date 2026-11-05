@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { IdCenario, Projeto } from '../../dominio/tipos';
 import type { RegrasJuridicas } from '../../regras/regrasJuridicas';
 import type { ResultadoProjecao, LinhaProjecao } from '../../motores/motorProjecao';
