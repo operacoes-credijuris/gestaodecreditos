@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { CampoRastreado as Campo, Centavos, DadoRastreado, ObservacaoFonte, Origem, Projeto } from '../../dominio/tipos';
 import type { RegrasJuridicas } from '../../regras/regrasJuridicas';
 import { calcularEnquadramento } from '../../motores/motorPercentualRCL';
