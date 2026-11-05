@@ -1,10 +1,8 @@
-'use client';
 /**
  * Ponto de entrada para incorporar o Radar de Precatórios em outra
  * aplicação React/Next.js. Tudo fica dentro de <div class="radar">, e o
  * CSS (radar.css) só estiliza o que está dentro dele.
  */
-import React from 'react';
 import { App } from './App';
 import type { Armazenamento } from './persistencia/armazenamento';
 
