@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Esfera, Projeto, Regime } from '../../dominio/tipos';
 import { CampoInteiro, CampoSelecao, CampoTexto, Secao } from '../componentes/base';
 
