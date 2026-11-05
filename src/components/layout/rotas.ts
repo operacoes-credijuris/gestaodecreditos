@@ -50,6 +50,7 @@ export type Tela =
   | 'inteligencia/Previsoes'
   | 'inteligencia/Recortes'
   | 'comercial/CarteirasInvestidores'
+  | 'operacional/RadarPrecatorios'
   | 'comercial/GeracaoContratos'
   | 'comercial/DadosPessoaisBancarios'
   | 'operacional/AnaliseCredito'
@@ -142,7 +143,13 @@ export const ROTAS: readonly Rota[] = [
     tela: 'comercial/CarteirasInvestidores',
     moldura: 'inteligencia/Moldura',
   },
-
+  // Radar de Precatórios (EC 136/2025): sexta aba do Quadro; o módulo mora em pages/operacional.
+  {
+    caminho: '/inteligencia/radar',
+    guarda: 'sessao',
+    tela: 'operacional/RadarPrecatorios',
+    moldura: 'inteligencia/Moldura',
+  },
   // Comercial
   { caminho: '/comercial/contratos', guarda: 'sessao', tela: 'comercial/GeracaoContratos' },
   // Endereço antigo das Carteiras: links salvos continuam funcionando.
