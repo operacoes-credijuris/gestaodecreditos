@@ -84,6 +84,7 @@ describe('telasBuscaveis', () => {
       '/inteligencia/performance',
       '/inteligencia/recortes',
       '/inteligencia/carteiras',
+      '/inteligencia/radar',
     ])
     expect(quadro[0].titulo).toBe('Quadro econômico')
   })
