@@ -49,6 +49,7 @@ const HOJE: ReadonlyArray<{ endereco: string; guarda: Guarda } & Destino> = [
   { endereco: '/inteligencia/previsoes', guarda: 'sessao', tela: 'inteligencia/Previsoes' },
   { endereco: '/inteligencia/recortes', guarda: 'sessao', tela: 'inteligencia/Recortes' },
   { endereco: '/inteligencia/carteiras', guarda: 'sessao', tela: 'comercial/CarteirasInvestidores' },
+  { endereco: '/inteligencia/radar', guarda: 'sessao', tela: 'operacional/RadarPrecatorios' },
   { endereco: '/comercial/contratos', guarda: 'sessao', tela: 'comercial/GeracaoContratos' },
   { endereco: '/comercial/carteiras', guarda: 'sessao', redireciona: '/inteligencia/carteiras' },
   { endereco: '/comercial/dados-pessoais', guarda: 'sessao', tela: 'comercial/DadosPessoaisBancarios' },
@@ -138,13 +139,12 @@ function oQueAbre(r: Rota | undefined) {
 }
 
 describe('rotas: os 19 endereços de hoje', () => {
-  it('a tabela tem os 19, sem repetir', () => {
-    expect(HOJE).toHaveLength(19)
-    expect(new Set(HOJE.map((h) => h.endereco)).size).toBe(19)
-    expect(ROTAS).toHaveLength(19)
-    expect(new Set(ROTAS.map((r) => r.caminho)).size).toBe(19)
+    it('a tabela tem os 20, sem repetir', () => {
+    expect(HOJE).toHaveLength(20)
+    expect(new Set(HOJE.map((h) => h.endereco)).size).toBe(20)
+    expect(ROTAS).toHaveLength(20)
+    expect(new Set(ROTAS.map((r) => r.caminho)).size).toBe(20)
   })
-
   it.each(HOJE)('$endereco abre o mesmo de hoje', ({ endereco, ...esperado }) => {
     expect(oQueAbre(resolver(endereco))).toEqual(esperado)
   })
@@ -361,7 +361,7 @@ describe('rotas: a lista é a do App.tsx', () => {
   const porCaminho = (a: Rota, b: Rota) => a.caminho.localeCompare(b.caminho)
 
   it('o leitor acha as rotas do App (senão o teste não está testando nada)', () => {
-    expect(rotasDoApp(APP)).toHaveLength(19)
+    expect(rotasDoApp(APP)).toHaveLength(20)
   })
 
   it('cada rota do App está na lista, com a mesma tela, o mesmo guarda e a mesma moldura, e vice-versa', () => {
@@ -424,6 +424,7 @@ const QUADRO = [
   '/inteligencia/performance',
   '/inteligencia/recortes',
   '/inteligencia/carteiras',
+  '/inteligencia/radar',
 ]
 
 /** O fonte de um módulo de `src/pages`, sem os comentários de JSX. */
@@ -481,7 +482,7 @@ describe('rotas: a moldura do Quadro econômico', () => {
     // cliente do Supabase e os gráficos.
     expect(niveisDoCabecalho(fonteDaPagina('inteligencia/Moldura'))).toEqual(['1'])
     const telas = ROTAS.filter((r) => r.moldura).map((r) => r.tela as Tela)
-    expect(telas).toHaveLength(5)
+    expect(telas).toHaveLength(6)
     for (const tela of telas) {
       const fonte = fonteDaPagina(tela)
       const niveis = niveisDoCabecalho(fonte)
