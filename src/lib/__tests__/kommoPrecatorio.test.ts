@@ -740,7 +740,7 @@ describe('abas da trilha Externa', () => {
    * plataforma própria; a etiqueta de cada um é das da casa (senão a
    * kommo-etiquetar a recusaria), e o destino é Em precificação — pelo id.
    */
-  it('a Remessa aos fundos tem os checks do BTG e da PJus, e leva a Em precificação', () => {
+  it('a Remessa aos fundos tem os checks do BTG, da PJus e da Domus, e leva a Em precificação', () => {
     const remessa = abas.find((a) => a.key === ABA_APROVADOS_EXTERNO)!
     // DOIS DESFECHOS POR FUNDO (01/10/2026): aceito ou reprovado. O BTG COM
     // TRÊS — mudou de propósito em 07/10/2026: "Cotado BTG" no varejo, "Enviado
@@ -751,14 +751,18 @@ describe('abas da trilha Externa', () => {
       // O ERRO DA PLATAFORMA (07/10/2026): nem enviado nem reprovado, e faz o check.
       ['BTG', [['Cotado BTG', false], ['Enviado BTG', false], ['Reprovado BTG', true], ['Erro BTG', false]]],
       ['PJus', [['Enviado PJus', false], ['Reprovado PJus', true], ['Erro PJus', false]]],
+      // A DOMUS (05/11/2026): igual à PJus.
+      ['Domus', [['Enviado Domus', false], ['Reprovado Domus', true], ['Erro Domus', false]]],
     ])
     expect(remessa.envioAosFundos!.fundos.flatMap((f) => f.atos.filter((a) => a.erro).map((a) => a.etiqueta))).toEqual([
       'Erro BTG',
       'Erro PJus',
+      'Erro Domus',
     ])
     for (const f of remessa.envioAosFundos!.fundos) {
       for (const a of f.atos) expect(etiquetaCanonica(a.etiqueta), a.etiqueta).toBe(a.etiqueta)
-      expect(f.plataforma, f.fundo).toMatch(/^https:\/\//)
+      // A DOMUS AINDA SEM O LINK (05/11/2026): o atalho só aparece com ele.
+      if (f.plataforma !== undefined) expect(f.plataforma, f.fundo).toMatch(/^https:\/\//)
     }
     expect(remessa.envioAosFundos?.destino).toBe(idExt('EM PRECIFICAÇÃO'))
     expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533984, 'EM PRECIFICAÇÃO')).toBe(true)

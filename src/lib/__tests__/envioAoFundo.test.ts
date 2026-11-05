@@ -328,8 +328,8 @@ describe('as abas do envio ao BTG', () => {
 })
 
 describe('registrarEnvioAoFundo — o Atacado grava "Enviado BTG" sem cotação', () => {
-  it('a cotação digitada no Varejo NÃO vai: só a anotação e a etiqueta, e o card segue com a PJus feita', async () => {
-    const f = passosFalsos({ tagsDepois: ['Enviado BTG', 'Enviado PJus'] })
+  it('a cotação digitada no Varejo NÃO vai: só a anotação e a etiqueta, e o card segue com a PJus e a Domus feitas', async () => {
+    const f = passosFalsos({ tagsDepois: ['Enviado BTG', 'Enviado PJus', 'Enviado Domus'] })
     const andamento: string[] = []
     const r = await registrarEnvioAoFundo({
       ...base,
@@ -342,7 +342,7 @@ describe('registrarEnvioAoFundo — o Atacado grava "Enviado BTG" sem cotação'
     })
     expect(f.chamadas).toEqual(['anotar', 'etiquetar', 'mover'])
     expect(f.cotacoesEnviadas).toEqual([null])
-    expect(r).toEqual({ tags: ['Enviado BTG', 'Enviado PJus'], cotacao: null, movido: true })
+    expect(r).toEqual({ tags: ['Enviado BTG', 'Enviado PJus', 'Enviado Domus'], cotacao: null, movido: true })
     expect(andamento[0]).toBe('Pondo a etiqueta "Enviado BTG"…')
   })
 
@@ -367,11 +367,14 @@ describe('o check da Remessa vale com Enviado ou Cotado', () => {
     expect(desfechoDoFundo(btg, null)).toBeNull()
   })
 
-  it('com os dois fundos feitos, o card segue — com Enviado ou com Cotado no BTG', () => {
-    expect(fundosFeitos(remessa.fundos, ['Cotado BTG', 'Enviado PJus'])).toBe(true)
-    expect(fundosFeitos(remessa.fundos, ['Enviado BTG', 'Enviado PJus'])).toBe(true)
-    expect(fundosFeitos(remessa.fundos, ['Enviado BTG', 'Reprovado PJus'])).toBe(true)
+  // OS TRÊS FUNDOS DESDE 05/11/2026 (a Domus entrou): só com BTG, PJus e Domus
+  // feitos o card segue — com qualquer desfecho de cada um, inclusive o Erro.
+  it('com os três fundos feitos, o card segue — com Enviado ou com Cotado no BTG', () => {
+    expect(fundosFeitos(remessa.fundos, ['Cotado BTG', 'Enviado PJus', 'Enviado Domus'])).toBe(true)
+    expect(fundosFeitos(remessa.fundos, ['Enviado BTG', 'Enviado PJus', 'Reprovado Domus'])).toBe(true)
+    expect(fundosFeitos(remessa.fundos, ['Enviado BTG', 'Reprovado PJus', 'Erro Domus'])).toBe(true)
+    expect(fundosFeitos(remessa.fundos, ['Cotado BTG', 'Enviado PJus'])).toBe(false)
     expect(fundosFeitos(remessa.fundos, ['Enviado BTG'])).toBe(false)
-    expect(fundosFeitos(remessa.fundos, ['Enviado PJus'])).toBe(false)
+    expect(fundosFeitos(remessa.fundos, ['Enviado PJus', 'Enviado Domus'])).toBe(false)
   })
 })

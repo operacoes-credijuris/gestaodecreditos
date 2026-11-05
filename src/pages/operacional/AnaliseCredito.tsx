@@ -2235,16 +2235,19 @@ function ChecksDosFundos({
                 <span className="font-medium text-texto-2">· {palavraDoAto(ato.etiqueta)}</span>
               )}
             </button>
-            <a
-              href={f.plataforma}
-              target="_blank"
-              rel="noreferrer"
-              title={`Abrir a plataforma ${doFundo(f)}`}
-              aria-label={`Abrir a plataforma ${doFundo(f)}`}
-              className="grid h-[30px] max-sm:h-controle place-items-center border-l border-borda px-s2 text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
-            >
-              <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
-            </a>
+            {/* SEM O LINK, SEM O ATALHO (05/11/2026): a Domus entrou antes do endereço dela. */}
+            {f.plataforma && (
+              <a
+                href={f.plataforma}
+                target="_blank"
+                rel="noreferrer"
+                title={`Abrir a plataforma ${doFundo(f)}`}
+                aria-label={`Abrir a plataforma ${doFundo(f)}`}
+                className="grid h-[30px] max-sm:h-controle place-items-center border-l border-borda px-s2 text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
+              >
+                <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
+              </a>
+            )}
           </span>
         )
       })}
@@ -2479,15 +2482,17 @@ function JanelaDoEnvioAoFundo({
       dirty={sujo}
       title={`Envio ${aoFundo(fundo)}`}
       description={
-        <a
-          href={fundo.plataforma}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-s1 font-medium text-marca-texto hover:underline"
-        >
-          Abrir a plataforma {doFundo(fundo)}
-          <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
-        </a>
+        fundo.plataforma ? (
+          <a
+            href={fundo.plataforma}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-s1 font-medium text-marca-texto hover:underline"
+          >
+            Abrir a plataforma {doFundo(fundo)}
+            <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
+          </a>
+        ) : undefined
       }
       rodapeInicio={atos.some(foraDoEnvio) ? atos.filter(foraDoEnvio).map(botaoDoAto) : undefined}
       footer={

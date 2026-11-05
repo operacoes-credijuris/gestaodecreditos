@@ -143,7 +143,12 @@ export interface FundoDoEnvio {
   fundo: string
   /** "o BTG", "a PJus" — para a tela escrever "envio ao BTG" e "envio à PJus". */
   artigo: 'o' | 'a'
-  plataforma: string
+  /**
+   * O endereço da plataforma do fundo. OPCIONAL desde 05/11/2026: a Domus entrou
+   * na remessa antes de a casa ter o link dela — sem ele, a tela só não mostra
+   * o atalho.
+   */
+  plataforma?: string
   /**
    * TODOS os desfechos do fundo — qualquer um faz o check dele na remessa,
    * inclusive o da aba que não está aberta (o "Enviado BTG" do atacado conta
@@ -654,8 +659,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       {
         key: ABA_APROVADOS_EXTERNO,
         // PRIMEIRO AS PLATAFORMAS DOS FUNDOS, DEPOIS A PRECIFICAÇÃO (29/09/2026):
-        // BTG e PJus recebem o crédito nas plataformas deles; com os dois checks
-        // feitos, o card vai para Em precificação — já com as duas etiquetas.
+        // BTG, PJus e — desde 05/11/2026 — Domus recebem o crédito nas
+        // plataformas deles; com os três checks feitos, o card vai para Em
+        // precificação, já com as etiquetas.
         envioAosFundos: {
           fundos: [
             {
@@ -706,6 +712,22 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
                 {
                   etiqueta: 'Erro PJus',
                   nota: 'A plataforma da PJus deu erro: o crédito não foi enviado nem reprovado.',
+                  erro: true,
+                },
+              ],
+            },
+            // A DOMUS NA REMESSA (05/11/2026, pedido do dono): "funciona igualzinho
+            // à PJus". O card só segue para Em precificação com os três checks
+            // feitos — BTG, PJus e Domus —, com qualquer desfecho de cada um.
+            {
+              fundo: 'Domus',
+              artigo: 'a',
+              atos: [
+                { etiqueta: 'Enviado Domus', nota: 'Crédito enviado à Domus.' },
+                { etiqueta: 'Reprovado Domus', nota: 'Crédito reprovado pela Domus.', reprova: true },
+                {
+                  etiqueta: 'Erro Domus',
+                  nota: 'A plataforma da Domus deu erro: o crédito não foi enviado nem reprovado.',
                   erro: true,
                 },
               ],
