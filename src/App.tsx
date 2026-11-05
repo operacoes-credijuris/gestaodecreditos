@@ -30,7 +30,7 @@ const Processos = telaSobDemanda(() => import('@/pages/operacional/execucao/Proc
 const Requerimentos = telaSobDemanda(() => import('@/pages/operacional/execucao/Requerimentos'))
 const ContatosServentias = telaSobDemanda(() => import('@/pages/operacional/execucao/ContatosServentias'))
 const Configuracoes = telaSobDemanda(() => import('@/pages/configuracoes/Configuracoes'))
-
+const RadarPrecatorios = telaSobDemanda(() => import('@/pages/operacional/RadarPrecatorios'))
 export default function App() {
   return (
     <Routes>
@@ -43,7 +43,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to={INICIO} replace />} />
+               <Route path="/operacional/radar-precatorios" element={<RadarPrecatorios />} />
         {/* A GESTÃO ESTRATÉGICA SAIU (30/09/2026): o endereço antigo, salvo em
             favorito ou histórico, leva ao início. */}
         <Route path="/estrategica" element={<Navigate to={INICIO} replace />} />
