@@ -1,4 +1,3 @@
-import React from 'react';
 import type { BaseDeposito, Cenario, Choque, IdCenario, MomentoDeposito, Projeto, TipoChoque } from '../../dominio/tipos';
 import { ROTULO_MOMENTO } from '../../motores/motorAtualizacao';
 import { cenariosPadrao } from '../../exemplo/municipioExemplo';
