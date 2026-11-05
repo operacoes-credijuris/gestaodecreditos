@@ -102,6 +102,7 @@ export const ABAS_DO_QUADRO: readonly NavAba[] = [
   { label: 'Performance', to: '/inteligencia/performance' },
   { label: 'Recortes', to: '/inteligencia/recortes' },
   { label: 'Carteiras', to: '/inteligencia/carteiras' },
+    { label: 'Radar de precatórios', to: '/inteligencia/radar' },
 ]
 
 export const NAVIGATION: NavSection[] = [

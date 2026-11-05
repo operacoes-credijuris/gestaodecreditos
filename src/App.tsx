@@ -30,7 +30,7 @@ const Processos = telaSobDemanda(() => import('@/pages/operacional/execucao/Proc
 const Requerimentos = telaSobDemanda(() => import('@/pages/operacional/execucao/Requerimentos'))
 const ContatosServentias = telaSobDemanda(() => import('@/pages/operacional/execucao/ContatosServentias'))
 const Configuracoes = telaSobDemanda(() => import('@/pages/configuracoes/Configuracoes'))
-
+const RadarPrecatorios = telaSobDemanda(() => import('@/pages/operacional/RadarPrecatorios'))
 export default function App() {
   return (
     <Routes>
@@ -42,8 +42,7 @@ export default function App() {
             <AppLayout />
           </ProtectedRoute>
         }
-      >
-        <Route index element={<Navigate to={INICIO} replace />} />
+      >         <Route index element={<Navigate to={INICIO} replace />} />
         {/* A GESTÃO ESTRATÉGICA SAIU (30/09/2026): o endereço antigo, salvo em
             favorito ou histórico, leva ao início. */}
         <Route path="/estrategica" element={<Navigate to={INICIO} replace />} />
@@ -62,6 +61,8 @@ export default function App() {
           {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
               mesmo núcleo de cálculo das demais telas de Inteligência. */}
           <Route path="carteiras" element={<CarteirasInvestidores />} />
+                    {/* Radar de Precatórios: teto e fila de pagamento do ente devedor (EC 136/2025). */}
+          <Route path="radar" element={<RadarPrecatorios />} />
         </Route>
 
         {/* Comercial */}
