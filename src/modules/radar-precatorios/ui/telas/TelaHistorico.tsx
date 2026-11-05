@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Centavos, LinhaHistorico, Movimento, Origem, Projeto, TipoMovimento, TipoSerie } from '../../dominio/tipos';
 import { conciliarHistorico, estatisticasHistoricas, interpretarSerie } from '../../motores/motorEstoque';
 import { aplicarMovimentos, conservacaoLivros, ROTULO_MOVIMENTO } from '../../motores/motorFluxoCaixa';
