@@ -144,12 +144,8 @@ export const ROTAS: readonly Rota[] = [
     moldura: 'inteligencia/Moldura',
   },
   // Radar de Precatórios (EC 136/2025): sexta aba do Quadro; o módulo mora em pages/operacional.
-  {
-    caminho: '/inteligencia/radar',
-    guarda: 'sessao',
-    tela: 'operacional/RadarPrecatorios',
-    moldura: 'inteligencia/Moldura',
-  },
+  // RADAR DESLIGADO (05/11/2026): o arquivo de regras jurídicas do módulo (regras/regrasJuridicas.ts) subiu vazio e o site não montava. Os arquivos do Radar ficam; religar = desfazer este commit.
+  // { caminho: '/inteligencia/radar', guarda: 'sessao', tela: 'operacional/RadarPrecatorios', moldura: 'inteligencia/Moldura' },
   // Comercial
   { caminho: '/comercial/contratos', guarda: 'sessao', tela: 'comercial/GeracaoContratos' },
   // Endereço antigo das Carteiras: links salvos continuam funcionando.

@@ -30,7 +30,8 @@ const Processos = telaSobDemanda(() => import('@/pages/operacional/execucao/Proc
 const Requerimentos = telaSobDemanda(() => import('@/pages/operacional/execucao/Requerimentos'))
 const ContatosServentias = telaSobDemanda(() => import('@/pages/operacional/execucao/ContatosServentias'))
 const Configuracoes = telaSobDemanda(() => import('@/pages/configuracoes/Configuracoes'))
-const RadarPrecatorios = telaSobDemanda(() => import('@/pages/operacional/RadarPrecatorios'))
+// RADAR DESLIGADO (05/11/2026): o arquivo de regras jurídicas do módulo (regras/regrasJuridicas.ts) subiu vazio e o site não montava. Os arquivos do Radar ficam; religar = desfazer este commit.
+// const RadarPrecatorios = telaSobDemanda(() => import('@/pages/operacional/RadarPrecatorios'))
 export default function App() {
   return (
     <Routes>
@@ -61,8 +62,9 @@ export default function App() {
           {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
               mesmo núcleo de cálculo das demais telas de Inteligência. */}
           <Route path="carteiras" element={<CarteirasInvestidores />} />
-                    {/* Radar de Precatórios: teto e fila de pagamento do ente devedor (EC 136/2025). */}
-          <Route path="radar" element={<RadarPrecatorios />} />
+          {/* Radar de Precatórios: teto e fila de pagamento do ente devedor (EC 136/2025).
+              DESLIGADO em 05/11/2026 — ver a nota no import, acima.
+          <Route path="radar" element={<RadarPrecatorios />} /> */}
         </Route>
 
         {/* Comercial */}

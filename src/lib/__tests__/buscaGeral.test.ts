@@ -84,7 +84,7 @@ describe('telasBuscaveis', () => {
       '/inteligencia/performance',
       '/inteligencia/recortes',
       '/inteligencia/carteiras',
-      '/inteligencia/radar',
+      // '/inteligencia/radar' — o Radar está desligado (05/11/2026).
     ])
     expect(quadro[0].titulo).toBe('Quadro econômico')
   })

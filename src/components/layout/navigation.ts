@@ -102,7 +102,8 @@ export const ABAS_DO_QUADRO: readonly NavAba[] = [
   { label: 'Performance', to: '/inteligencia/performance' },
   { label: 'Recortes', to: '/inteligencia/recortes' },
   { label: 'Carteiras', to: '/inteligencia/carteiras' },
-    { label: 'Radar de precatórios', to: '/inteligencia/radar' },
+  // RADAR DESLIGADO (05/11/2026): o arquivo de regras jurídicas do módulo (regras/regrasJuridicas.ts) subiu vazio e o site não montava. Os arquivos do Radar ficam; religar = desfazer este commit.
+  // { label: 'Radar de precatórios', to: '/inteligencia/radar' },
 ]
 
 export const NAVIGATION: NavSection[] = [
