@@ -761,8 +761,8 @@ describe('abas da trilha Externa', () => {
     ])
     for (const f of remessa.envioAosFundos!.fundos) {
       for (const a of f.atos) expect(etiquetaCanonica(a.etiqueta), a.etiqueta).toBe(a.etiqueta)
-      // A DOMUS AINDA SEM O LINK (05/11/2026): o atalho só aparece com ele.
-      if (f.plataforma !== undefined) expect(f.plataforma, f.fundo).toMatch(/^https:\/\//)
+      // OS TRÊS COM O LINK (a Domus desde 05/11/2026): o atalho só aparece com ele.
+      expect(f.plataforma, f.fundo).toMatch(/^https:\/\//)
     }
     expect(remessa.envioAosFundos?.destino).toBe(idExt('EM PRECIFICAÇÃO'))
     expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533984, 'EM PRECIFICAÇÃO')).toBe(true)

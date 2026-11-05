@@ -722,6 +722,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
             {
               fundo: 'Domus',
               artigo: 'a',
+              plataforma: 'https://portal.dolcap.com/login',
               atos: [
                 { etiqueta: 'Enviado Domus', nota: 'Crédito enviado à Domus.' },
                 { etiqueta: 'Reprovado Domus', nota: 'Crédito reprovado pela Domus.', reprova: true },
