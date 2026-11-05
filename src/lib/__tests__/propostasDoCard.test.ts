@@ -43,18 +43,18 @@ describe('propostasCadastradas — o que conta como proposta', () => {
     campo('PJUS', 'R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)'),
     campo('BTG', 'R$ 850.000,00 / R$ 40.000,00'),
     campo('PX Ativos', 'R$ 1.234.567,89 / Spread'),
-    campo('Invest Precatórios', 'aguardando o comitê de quinta'),
+    campo('Domus', 'aguardando o comitê de quinta'),
     campo('K & WC Ativos', ''),
     campo('Precatur', '—'),
     campo('Carbon', '   '),
   ])
 
   it('o campo com valor legível e o escrito à mão contam; vazio, "—" e espaços, não', () => {
-    expect(propostasCadastradas(c).map((l) => l.fundo)).toEqual(['PJus', 'BTG', 'PX Ativos', 'Invest Precatórios'])
+    expect(propostasCadastradas(c).map((l) => l.fundo)).toEqual(['PJus', 'BTG', 'PX Ativos', 'Domus'])
   })
 
   it('o escrito à mão vem como está, sem valor (a tela o mostra cortado, com o texto na dica)', () => {
-    const mao = propostasCadastradas(c).find((l) => l.fundo === 'Invest Precatórios')!
+    const mao = propostasCadastradas(c).find((l) => l.fundo === 'Domus')!
     expect(mao.cotacao).toEqual({ texto: 'aguardando o comitê de quinta', proposta: null, comissao: null })
   })
 

@@ -52,8 +52,8 @@ describe('faltaDataDeEtiqueta e desdeQuandoAEtiqueta', () => {
   })
 
   it('acha a data tolerando caixa e acento', () => {
-    const datas = { 'Enviado Invest Precatórios': '2026-09-27T00:00:00.000Z' }
-    expect(desdeQuandoAEtiqueta(datas, 'enviado invest precatorios')).toBe('2026-09-27T00:00:00.000Z')
+    const datas = { 'Enviado Domus': '2026-09-27T00:00:00.000Z' }
+    expect(desdeQuandoAEtiqueta(datas, 'ENVIADO domus')).toBe('2026-09-27T00:00:00.000Z')
     expect(desdeQuandoAEtiqueta(datas, 'Cotado PJus')).toBeNull()
     expect(desdeQuandoAEtiqueta(null, 'Cotado PJus')).toBeNull()
   })

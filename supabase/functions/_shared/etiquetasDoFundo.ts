@@ -114,7 +114,18 @@ const FUNDOS: readonly FundoDaCasa[] = [
     erroDePlataforma: true,
   },
   { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
-  { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  // A DOMUS NO LUGAR DA INVEST PRECATÓRIOS (05/11/2026, pedido do dono): a casa
+  // deixou de trabalhar com a Invest e fechou com a Domus, que tem plataforma
+  // própria — por isso o "Erro Domus", como o da PJus e o do BTG. As etiquetas
+  // da Invest que ficaram nos cards seguem no Kommo, agora como etiqueta de
+  // fora da lista (cinza, com o "x" para tirar).
+  {
+    destino: 'Domus',
+    atos: ATOS_DA_PRECIFICACAO,
+    artigo: 'da',
+    comissoes: MODALIDADES_DA_COMISSAO,
+    erroDePlataforma: true,
+  },
   { destino: 'K & WC Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
   { destino: 'Precatur', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
   { destino: 'Carbon', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },

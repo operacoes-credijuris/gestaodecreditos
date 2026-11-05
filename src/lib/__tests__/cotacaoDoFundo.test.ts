@@ -502,7 +502,7 @@ describe('o campo do fundo, pelo nome', () => {
   it('a chave ignora caixa, acento e símbolo', () => {
     expect(chaveDoNome('PJUS')).toBe(chaveDoNome('PJus'))
     expect(chaveDoNome('K&WC Ativos')).toBe(chaveDoNome('K & WC Ativos'))
-    expect(chaveDoNome('Invest Precatorios')).toBe(chaveDoNome('Invest Precatórios'))
+    expect(chaveDoNome('DOMUS!')).toBe(chaveDoNome('Domus'))
   })
 
   it('o grupo é reconhecido com ou sem acento e barra', () => {
@@ -517,7 +517,7 @@ describe('o campo do fundo, pelo nome', () => {
       campo(1, 'PJUS'),
       campo(2, 'BTG'),
       campo(3, 'PX Ativos'),
-      campo(4, 'Invest Precatórios'),
+      campo(4, 'Domus'),
       campo(5, 'K & WC Ativos'),
       campo(6, 'Precatur'),
       campo(7, 'Carbon'),

@@ -32,7 +32,7 @@ describe('nomes com entidades HTML', () => {
           campo('Numero do processo', '0000179-28.2024.5.05.0001'),
           campo('BTG', 'R$ 150.306,33 / R$ 18.949,76'),
           campo('PJUS', 'R$ 249.000,00 / R$ 9.960,00'),
-          campo('Invest Precatórios', 'R$ 35.000,00 / R$ 15.000,00'),
+          campo('Domus', 'R$ 35.000,00 / R$ 15.000,00'),
           campo('Precatur', 'R$ 280.084,19 / R$ 53.862,34 (Spread 10%)'),
           campo('PX Ativos', 'R$ 385.351,41 / R$ 39.648,59'),
           campo('K &amp; WC Ativos', 'R$ 195.122,52 / R$ 15.000,00'),
@@ -41,7 +41,7 @@ describe('nomes com entidades HTML', () => {
       },
     }
     const p = propostasCadastradas(card as never)
-    expect(p.map((l) => l.fundo)).toEqual(['PJus', 'BTG', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur'])
+    expect(p.map((l) => l.fundo)).toEqual(['PJus', 'BTG', 'PX Ativos', 'Domus', 'K & WC Ativos', 'Precatur'])
     expect(p.every((l) => l.cotacao?.proposta !== null)).toBe(true)
     expect(cotacoesDoCard(card.raw.custom_fields_values)['K & WC Ativos']?.proposta).not.toBeNull()
   })

@@ -52,9 +52,10 @@ describe('as etiquetas da precificação', () => {
       'Enviado PX Ativos',
       'Cotado PX Ativos',
       'Reprovado PX Ativos',
-      'Enviado Invest Precatórios',
-      'Cotado Invest Precatórios',
-      'Reprovado Invest Precatórios',
+      'Enviado Domus',
+      'Cotado Domus',
+      'Reprovado Domus',
+      'Erro Domus',
       'Enviado K & WC Ativos',
       'Cotado K & WC Ativos',
       'Reprovado K & WC Ativos',
@@ -82,7 +83,7 @@ describe('as etiquetas da precificação', () => {
       'PJus',
       'BTG',
       'PX Ativos',
-      'Invest Precatórios',
+      'Domus',
       'K & WC Ativos',
       'Precatur',
       'Carbon',
@@ -103,12 +104,13 @@ describe('as etiquetas da precificação', () => {
  * PROPÓSITO em 07/10/2026: o "Enviado BTG" é o crédito de atacado.
  */
 describe('os atos de cada fundo', () => {
-  it('três em cada fundo; o BTG e a PJus com o Erro da plataforma (07/10/2026)', () => {
+  it('três em cada fundo; o BTG, a PJus e a Domus com o Erro da plataforma (07/10/2026)', () => {
     const atos = Object.fromEntries(etiquetasPorDestino().map((g) => [g.destino, g.etiquetas.map((e) => e.ato)]))
-    for (const f of ['PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
+    for (const f of ['PX Ativos', 'K & WC Ativos', 'Precatur', 'Carbon']) {
       expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado'])
     }
-    for (const f of ['PJus', 'BTG']) expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado', 'Erro'])
+    // A DOMUS TAMBÉM (05/11/2026): plataforma própria, como a PJus e o BTG.
+    for (const f of ['PJus', 'BTG', 'Domus']) expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado', 'Erro'])
   })
 
   // A OBSERVAÇÃO DISCRETA DO SELETOR: só o "Enviado BTG" a tem, e diz quando usar.
@@ -126,7 +128,7 @@ describe('comissoesDoFundo', () => {
   it('o BTG só aceita a limitada; os outros, limitada e spread', () => {
     expect(comissoesDoFundo('BTG')).toEqual(['limitada'])
     expect(comissoesDoFundo(' btg ')).toEqual(['limitada'])
-    for (const f of ['PJus', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
+    for (const f of ['PJus', 'PX Ativos', 'Domus', 'K & WC Ativos', 'Precatur', 'Carbon']) {
       expect(comissoesDoFundo(f), f).toEqual(['limitada', 'spread'])
     }
   })
@@ -161,9 +163,10 @@ describe('irmasDaEtiqueta', () => {
     expect(irmasDaEtiqueta('Reprovado Carbon')).toEqual(['Enviado Carbon', 'Cotado Carbon'])
     // O "&" e o acento não confundem a troca.
     expect(irmasDaEtiqueta('Cotado K & WC Ativos')).toEqual(['Enviado K & WC Ativos', 'Reprovado K & WC Ativos'])
-    expect(irmasDaEtiqueta('cotado invest precatorios')).toEqual([
-      'Enviado Invest Precatórios',
-      'Reprovado Invest Precatórios',
+    expect(irmasDaEtiqueta('cotado domus')).toEqual([
+      'Enviado Domus',
+      'Reprovado Domus',
+      'Erro Domus',
     ])
   })
 
@@ -238,7 +241,7 @@ describe('etiquetaCanonica', () => {
     expect(etiquetaCanonica('Enviado PJUS')).toBe('Enviado PJus')
     expect(mesmaEtiqueta('Reprovado PJUS', 'Reprovado PJus')).toBe(true)
     expect(etiquetaCanonica('  REPROVADO   BTG  ')).toBe('Reprovado BTG')
-    expect(etiquetaCanonica('enviado invest precatorios')).toBe('Enviado Invest Precatórios')
+    expect(etiquetaCanonica('ENVIADO DOMUS')).toBe('Enviado Domus')
     expect(etiquetaCanonica('reprovado k & wc ativos')).toBe('Reprovado K & WC Ativos')
   })
 
@@ -335,7 +338,7 @@ describe('mensagemDaProposta', () => {
   it('o BTG é "do", os outros são "da"', () => {
     expect(mensagemDaProposta('BTG')).toBe('Seguir com a proposta do BTG.')
     expect(mensagemDaProposta('PX Ativos')).toBe('Seguir com a proposta da PX Ativos.')
-    expect(mensagemDaProposta('invest precatorios')).toBe('Seguir com a proposta da Invest Precatórios.')
+    expect(mensagemDaProposta('domus')).toBe('Seguir com a proposta da Domus.')
   })
 })
 
