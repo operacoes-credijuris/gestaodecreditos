@@ -42,7 +42,7 @@ export default function App() {
             <AppLayout />
           </ProtectedRoute>
         }
-      >
+      >         <Route index element={<Navigate to={INICIO} replace />} />
         {/* A GESTÃO ESTRATÉGICA SAIU (30/09/2026): o endereço antigo, salvo em
             favorito ou histórico, leva ao início. */}
         <Route path="/estrategica" element={<Navigate to={INICIO} replace />} />
