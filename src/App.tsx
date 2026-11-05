@@ -43,7 +43,6 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-               <Route path="/operacional/radar-precatorios" element={<RadarPrecatorios />} />
         {/* A GESTÃO ESTRATÉGICA SAIU (30/09/2026): o endereço antigo, salvo em
             favorito ou histórico, leva ao início. */}
         <Route path="/estrategica" element={<Navigate to={INICIO} replace />} />
@@ -62,6 +61,8 @@ export default function App() {
           {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
               mesmo núcleo de cálculo das demais telas de Inteligência. */}
           <Route path="carteiras" element={<CarteirasInvestidores />} />
+                    {/* Radar de Precatórios: teto e fila de pagamento do ente devedor (EC 136/2025). */}
+          <Route path="radar" element={<RadarPrecatorios />} />
         </Route>
 
         {/* Comercial */}
