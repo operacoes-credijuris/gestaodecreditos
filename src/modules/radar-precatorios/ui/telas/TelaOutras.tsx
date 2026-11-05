@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Leitura24, Projeto, Verificacao24 } from '../../dominio/tipos';
 import type { RegrasJuridicas } from '../../regras/regrasJuridicas';
 import { preverRecebimentoIndividual } from '../../motores/motorFila';
