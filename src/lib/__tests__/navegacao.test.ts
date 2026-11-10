@@ -98,7 +98,7 @@ describe('menu', () => {
     // a carteira, o que vem, o que já rendeu, onde está o capital e, por fim,
     // cada investidor. Lista explícita: trocar a ordem tem de ser de propósito.
     expect(ABAS_DO_QUADRO.map((a) => a.label)).toEqual([
-       'Visão geral', 'Previsões', 'Performance', 'Recortes', 'Carteiras', // 'Radar de precatórios' — desligado (05/11/2026)
+           'Visão geral', 'Previsões', 'Performance', 'Recortes', 'Carteiras', 'Radar de precatórios',
     ])
   })
 
@@ -161,7 +161,7 @@ const ACESO: ReadonlyArray<[string, string | null]> = [
   ['/inteligencia/performance', 'Quadro econômico'],
   ['/inteligencia/recortes', 'Quadro econômico'],
   ['/inteligencia/carteiras', 'Quadro econômico'],
-  // ['/inteligencia/radar', 'Quadro econômico'] — o Radar está desligado (05/11/2026).
+  ['/inteligencia/radar', 'Quadro econômico'],
   ['/configuracoes', 'Configurações'],
   // As variantes que o react-router aceita para a mesma tela (rotas.test.ts).
   ['/operacional/analise/', 'Análise de crédito'],
