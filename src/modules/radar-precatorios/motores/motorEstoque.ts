@@ -62,7 +62,10 @@ export function exercicioDePagamento(dataApresentacaoISO: string, regras: Regras
   const ano = Number(m[1]);
   const mes = Number(m[2]);
   const dia = Number(m[3]);
-  const { mes: mc, dia: dc } = regras.dataCorte;
+   // Data de corte vigente no ano da apresentação: 1º/jul até 2021 (redação
+  // original do § 5º), 2/abr de 2022 a 2025 (EC 114/2021) e, a partir de 2026,
+  // a das regras (1º/fev, EC 136/2025).
+  const { mes: mc, dia: dc } = ano <= 2021 ? { mes: 7, dia: 1 } : ano <= 2025 ? { mes: 4, dia: 2 } : regras.dataCorte;
   const ateCorte = mes < mc || (mes === mc && dia <= dc);
   return ateCorte ? ano + 1 : ano + 2;
 }
