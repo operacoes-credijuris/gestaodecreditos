@@ -47,16 +47,17 @@ export const LIMITE_DO_RASCUNHO = 20_000
  * aberta, e a conversa aberta continuava com o id dela — a pergunta seguinte
  * gravava as mensagens da conversa A POR CIMA da conversa B, que se perdia.
  *
- * Agora cada troca de conversa muda uma marca. A resposta:
- * - SEMPRE é gravada na conversa em que a pergunta foi feita (`idNoEnvio`; null
- *   = a conversa ainda não existia e nasce agora);
- * - só vai para a TELA (e só adota o id novo) se a conversa na tela ainda é
- *   aquela.
+ * PELO ID, E NÃO MAIS POR UMA MARCA DE TROCA (12/11/2026). Com a marca, sair de
+ * A e voltar a A antes da resposta contava como "outra conversa": a resposta
+ * era gravada mas não aparecia, e a pergunta seguinte em A a apagava. Agora toda
+ * conversa nasce com id (`novoIdDeConversa`, lib/telaDoAssistente.ts), e a
+ * resposta:
+ * - SEMPRE é gravada na conversa em que a pergunta foi feita (`idNoEnvio`);
+ * - entra na TELA quando a conversa aberta é essa — reaberta, inclusive.
  */
 export function destinoDaResposta(
-  marcaNoEnvio: number,
-  marcaAgora: number,
-  idNoEnvio: string | null,
-): { naTela: boolean; gravarEm: string | null } {
-  return { naTela: marcaNoEnvio === marcaAgora, gravarEm: idNoEnvio }
+  idNoEnvio: string,
+  idAgora: string,
+): { naTela: boolean; gravarEm: string } {
+  return { naTela: idNoEnvio === idAgora, gravarEm: idNoEnvio }
 }

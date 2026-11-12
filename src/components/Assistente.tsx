@@ -1,4 +1,14 @@
-import { Suspense, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import {
+  Suspense,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent as KeyboardEventReact,
+  type Reducer,
+  type RefObject,
+} from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Sparkles,
@@ -31,9 +41,30 @@ import {
   LIMITE_DO_RASCUNHO,
   textoDaConversa,
 } from '@/lib/conversaDoAssistente'
+import {
+  anexoPrecisaDeSkill,
+  comAcaoResolvida,
+  comPergunta,
+  comResposta,
+  contarSkills,
+  enterEnvia,
+  historicoParaOModelo,
+  normalizarMensagem,
+  novoIdDeConversa,
+  pendenciasReducer,
+  proximaOpcao,
+  skillsDoPedido,
+  skillsValidas,
+  tituloDaConversa,
+  type AcaoDePendencia,
+  type AcaoProposta,
+  type ContatoSugerido,
+  type Mensagem,
+  type Pendencias,
+} from '@/lib/telaDoAssistente'
 import { formatDateTime } from '@/lib/format'
 import { copiarTexto } from '@/lib/copiar'
-import { haDialogoAberto } from '@/lib/dialogo'
+import { FOCAVEIS, haDialogoAberto } from '@/lib/dialogo'
 import { pecaSobDemanda } from '@/lib/telaSobDemanda'
 import {
   BUCKET_ARQUIVOS,
@@ -97,29 +128,94 @@ function guardarModelo(key: string) {
   }
 }
 
-interface AcaoProposta {
-  tipo: 'gerar_peticao'
-  processo_id: string
-  numero_cnj: string | null
-  cessionario: string | null
-  instrucao: string
+// A MENSAGEM, A AÇÃO PROPOSTA E O CONTATO moram em lib/telaDoAssistente.ts
+// (12/11/2026), com a lógica pura que os testes exercitam.
+
+/**
+ * Um pedido ao assistente, guardado enquanto está em curso: é o que o "Tentar
+ * de novo" reenvia — os MESMOS anexos, Skills e Base do Kommo da pergunta que
+ * falhou, e não os que estão marcados agora.
+ */
+interface Pedido {
+  pergunta: Mensagem
+  anexos: File[]
+  /** `undefined`: a lista de Skills não tinha chegado — o campo não vai. */
+  skills: string[] | undefined
+  comBaseDoKommo: boolean
 }
 
-interface ContatoSugerido {
-  nome_contato: string | null
-  whatsapp: string
-  mensagem: string
+const reduzirPendencias = pendenciasReducer as Reducer<Pendencias<Pedido>, AcaoDePendencia<Pedido>>
+
+/** Lista vazia ESTÁVEL: um `[]` novo a cada render disparava a rolagem de novo. */
+const SEM_MENSAGENS: Mensagem[] = []
+
+/** A BASE DO KOMMO LEMBRADA neste navegador (lib/preferencias.ts). */
+const PREF_BASE_KOMMO = 'assistente.base_kommo'
+
+/** Tela de toque (celular, tablet): o Enter quebra a linha, e o botão envia. */
+function telaDeToque(): boolean {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches
+  } catch {
+    return false
+  }
 }
 
-interface Mensagem {
-  role: 'user' | 'assistant'
-  content: string
-  /** Presente só na última resposta que propôs uma ação — some ao confirmar/cancelar. */
-  acaoProposta?: AcaoProposta
-  /** Arquivos que uma Skill gerou nesta resposta (ver Configurações → Skills). */
-  arquivos?: ArquivoGerado[]
-  /** Contato + mensagem prontos pra abrir o WhatsApp e copiar de um clique. */
-  contatoSugerido?: ContatoSugerido
+/** O painel ocupa a tela inteira (abaixo do `sm`, 640px)? */
+function usePainelEmTelaCheia(): boolean {
+  const consulta = '(max-width: 639px)'
+  const [cheia, setCheia] = useState(() => {
+    try {
+      return window.matchMedia(consulta).matches
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    let mq: MediaQueryList
+    try {
+      mq = window.matchMedia(consulta)
+    } catch {
+      return
+    }
+    const mudou = () => setCheia(mq.matches)
+    mq.addEventListener?.('change', mudou)
+    return () => mq.removeEventListener?.('change', mudou)
+  }, [])
+  return cheia
+}
+
+/**
+ * SETAS, HOME, END E ESCAPE NAS LISTAS DE MODELO E DE SKILLS (12/11/2026). Eram
+ * só botões soltos: o teclado tinha de passar por todos no Tab, e o Escape
+ * fechava a lista sem devolver o foco ao botão que a abriu.
+ */
+function teclasDaLista(e: KeyboardEventReact<HTMLElement>, fechar: () => void) {
+  if (e.key === 'Escape') {
+    // PARA AQUI: o Escape fecha a lista, e não o painel atrás dela.
+    e.preventDefault()
+    e.stopPropagation()
+    e.nativeEvent.stopImmediatePropagation()
+    fechar()
+    return
+  }
+  const opcoes = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'))
+  const i = proximaOpcao(opcoes.indexOf(document.activeElement as HTMLElement), opcoes.length, e.key)
+  if (i === null) return
+  e.preventDefault()
+  opcoes[i]?.focus()
+}
+
+/** Ao abrir a lista, o foco entra nela: na opção marcada, ou na primeira. */
+function useFocoNaLista(aberta: boolean, lista: RefObject<HTMLElement>) {
+  useEffect(() => {
+    if (!aberta) return
+    const el = lista.current
+    const alvo =
+      el?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]') ??
+      el?.querySelector<HTMLElement>('[role="option"]')
+    alvo?.focus()
+  }, [aberta, lista])
 }
 
 interface RespostaAssistente {
@@ -197,7 +293,26 @@ export function Assistente({
       delete raiz.dataset.assistente
     }
   }, [aberto, escondido])
-  const [mensagens, setMensagens] = useState<Mensagem[]>([])
+  // AS CONVERSAS ABERTAS NESTA VISITA, POR ID (12/11/2026), e a tela mostra a
+  // atual. Era uma lista só, a da tela: sair de A com uma pergunta em curso e
+  // voltar a A relia a conversa do banco SEM a pergunta, a resposta chegava e
+  // não aparecia, e a pergunta seguinte em A gravava por cima dela. Guardadas
+  // por id, a pergunta pendente e a resposta que chega vão para a conversa
+  // certa, esteja ela na tela ou não.
+  const [conversaAtualId, setConversaAtualId] = useState(() => novoIdDeConversa())
+  const conversaNaTela = useRef(conversaAtualId)
+  conversaNaTela.current = conversaAtualId
+  const [conversas, setConversas] = useState<Record<string, Mensagem[]>>({})
+  const mensagens = conversas[conversaAtualId] ?? SEM_MENSAGENS
+  /** Muda as mensagens de uma conversa aberta nesta visita (a da tela ou não). */
+  function mudarConversa(id: string, mudar: (msgs: Mensagem[]) => Mensagem[]) {
+    setConversas((atual) => ({ ...atual, [id]: mudar(atual[id] ?? SEM_MENSAGENS) }))
+  }
+  // O PEDIDO EM CURSO E O ERRO, POR CONVERSA (lib/telaDoAssistente.ts).
+  const [pendencias, despachar] = useReducer(reduzirPendencias, {})
+  const pendenciaAtual = pendencias[conversaAtualId]
+  const carregando = pendenciaAtual?.estado === 'enviando'
+  const erro = pendenciaAtual?.estado === 'erro' ? pendenciaAtual.erro : null
   // O RASCUNHO DA PERGUNTA FICA GUARDADO neste navegador, por pessoa
   // (lib/conversaDoAssistente.ts): recarregar a página — ou o "recarregar" do
   // aviso de versão nova — não leva embora a pergunta longa pela metade.
@@ -212,16 +327,16 @@ export function Assistente({
     gravarPreferencia(chaveRascunho, texto)
   }, [chaveRascunho, texto])
   const copiar = useCopiarTexto()
-  const [carregando, setCarregando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
+  const telaCheia = usePainelEmTelaCheia()
   const [modelo, setModelo] = useState(() => lerModeloGuardado() || MODELO_PADRAO)
 
   // Histórico de conversas
   const [historicoAberto, setHistoricoAberto] = useState(false)
-  const [conversaAtualId, setConversaAtualId] = useState<string | null>(null)
-  /** Muda a cada troca de conversa ("Nova", abrir outra): ver destinoDaResposta. */
-  const marcaDaConversa = useRef(0)
   const [excluirId, setExcluirId] = useState<string | null>(null)
+  /** Conversas excluídas nesta visita: a resposta que ainda chegar não as recria. */
+  const excluidas = useRef(new Set<string>())
+  /** Uma gravação por vez em cada conversa (ver `gravarNoBanco`). */
+  const filaDeGravacao = useRef(new Map<string, Promise<void>>())
 
   // Ação proposta confirmada: abre a mesma tela de revisão da tela de Execução.
   const [peticaoAlvo, setPeticaoAlvo] = useState<{
@@ -232,6 +347,13 @@ export function Assistente({
 
   const [modeloAberto, setModeloAberto] = useState(false)
   const modeloRef = useRef<HTMLDivElement>(null)
+  const listaDeModelos = useRef<HTMLDivElement>(null)
+  useFocoNaLista(modeloAberto, listaDeModelos)
+  /** Fecha a lista e devolve o foco ao botão que a abriu. */
+  function fecharModelos() {
+    setModeloAberto(false)
+    modeloRef.current?.querySelector<HTMLElement>('button[aria-haspopup]')?.focus()
+  }
 
   // Skills selecionadas PARA ESTA CONVERSA — subconjunto das ativas em
   // Configurações. Começa com todas marcadas (mesmo comportamento de antes de
@@ -239,11 +361,24 @@ export function Assistente({
   const [skillsAberto, setSkillsAberto] = useState(false)
   const [skillsSelecionadas, setSkillsSelecionadas] = useState<Set<string>>(new Set())
   const skillsRef = useRef<HTMLDivElement>(null)
+  const listaDeSkills = useRef<HTMLDivElement>(null)
+  useFocoNaLista(skillsAberto, listaDeSkills)
+  function fecharSkills() {
+    setSkillsAberto(false)
+    skillsRef.current?.querySelector<HTMLElement>('button[aria-haspopup]')?.focus()
+  }
   // A BASE DO KOMMO (12/11/2026, pedido do dono): ligada, cada pergunta leva o
   // espelho inteiro dos cards da análise de crédito ao assistente, que faz as
   // contas em código — os relatórios que a chefia pede (reprovados e por quê,
-  // não fechados, pagos e valores). Fica ligada até a pessoa desligar.
-  const [comBaseDoKommo, setComBaseDoKommo] = useState(false)
+  // não fechados, pagos e valores). Fica ligada até a pessoa desligar — E
+  // LEMBRADA NESTE NAVEGADOR (12/11/2026): antes voltava desligada a cada
+  // recarga, ao contrário do que este comentário prometia. Começa desligada.
+  const [comBaseDoKommo, setComBaseDoKommo] = useState(() =>
+    lerPreferenciaValida(PREF_BASE_KOMMO, false, (v): v is boolean => typeof v === 'boolean'),
+  )
+  useEffect(() => {
+    gravarPreferencia(PREF_BASE_KOMMO, comBaseDoKommo)
+  }, [comBaseDoKommo])
 
   // Arquivos anexados à próxima pergunta — limpos depois do envio.
   const [arquivos, setArquivos] = useState<File[]>([])
@@ -300,6 +435,20 @@ export function Assistente({
     novas.forEach((id) => skillsConhecidas.current.add(id))
     setSkillsSelecionadas((atual) => new Set([...atual, ...novas]))
   }, [skillsQuery.data])
+  // SÓ AS QUE AINDA EXISTEM contam e vão no pedido (lib/telaDoAssistente.ts).
+  const totalDeSkills = contarSkills(skillsSelecionadas, skillsQuery.data ?? [], comBaseDoKommo)
+  const algumaSkillMarcada = skillsValidas(skillsSelecionadas, skillsQuery.data ?? []).length > 0
+
+  // O ANEXO QUE SÓ UMA SKILL LÊ (planilha, Word…), SEM SKILL MARCADA: avisa
+  // antes de enviar (12/11/2026). Antes a pergunta ia, o servidor recusava, e o
+  // erro mandava "ativar uma Skill em Configurações" a quem só a tinha
+  // desmarcado. Com a lista ainda chegando, não avisa: o pedido vai sem o campo
+  // e o servidor usa todas as ativas. A Base do Kommo liga o container também.
+  const anexosSemLeitor =
+    skillsQuery.isSuccess && !algumaSkillMarcada && !comBaseDoKommo
+      ? arquivos.filter((f) => anexoPrecisaDeSkill(f.type))
+      : []
+  const haSkillCadastrada = (skillsQuery.data ?? []).length > 0
 
   // Rola para a última mensagem a cada troca — sem isso a resposta nova nasce
   // fora da área visível justamente quando a pessoa está esperando por ela.
@@ -414,54 +563,70 @@ export function Assistente({
   }
 
   /**
-   * Grava (ou atualiza) a conversa atual. Sempre melhor-esforço: uma falha
-   * aqui não pode derrubar a conversa que a pessoa está tendo — o histórico é
+   * Grava uma mudança numa conversa. Sempre melhor-esforço: uma falha aqui não
+   * pode derrubar a conversa que a pessoa está tendo — o histórico é
    * conveniência, não o produto principal do assistente.
+   *
+   * RELÊ A LINHA E APLICA A MUDANÇA SOBRE ELA (12/11/2026), em vez de gravar a
+   * lista da tela por cima: a tela podia estar atrasada (a resposta que chegou
+   * com outra conversa aberta), e gravar o que ela tinha apagava o que o banco
+   * já sabia. E UMA GRAVAÇÃO POR VEZ em cada conversa: a pergunta e a resposta
+   * saem em sequência, e duas leituras ao mesmo tempo perderiam uma das duas.
+   * Sem linha no banco, a conversa nasce ali, com o id que já tinha na tela.
    */
-  async function salvarConversa(msgs: Mensagem[], idDaConversa: string | null, marca: number) {
-    if (!user) return
-    try {
-      if (idDaConversa) {
-        await supabase
+  function gravarNoBanco(id: string, mudar: (msgs: Mensagem[]) => Mensagem[]): Promise<void> {
+    if (!user) return Promise.resolve()
+    const dono = user.id
+    const anterior = filaDeGravacao.current.get(id) ?? Promise.resolve()
+    const proxima = anterior.then(async () => {
+      try {
+        if (excluidas.current.has(id)) return
+        const { data, error } = await supabase
           .from('assistente_conversas')
-          .update({
-            mensagens: msgs,
-            modelo,
-            atualizado_em: new Date().toISOString(),
-          })
-          .eq('id', idDaConversa)
-      } else {
-        const primeira = msgs.find((m) => m.role === 'user')?.content ?? 'Conversa'
-        const titulo = primeira.length > 60 ? `${primeira.slice(0, 60)}…` : primeira
-        const { data } = await supabase
-          .from('assistente_conversas')
-          .insert({ user_id: user.id, titulo, mensagens: msgs, modelo })
-          .select('id')
-          .single()
-        // Só adota o id se a conversa na tela ainda é a que nasceu agora.
-        if (data && marcaDaConversa.current === marca) setConversaAtualId(data.id as string)
+          .select('mensagens')
+          .eq('id', id)
+          .maybeSingle()
+        if (error) throw error
+        // A exclusão pode ter chegado durante a leitura: a conversa não volta.
+        if (excluidas.current.has(id)) return
+        if (data) {
+          const guardadas = ((data.mensagens ?? []) as Mensagem[]).map(normalizarMensagem)
+          const { error: e2 } = await supabase
+            .from('assistente_conversas')
+            .update({ mensagens: mudar(guardadas), modelo, atualizado_em: new Date().toISOString() })
+            .eq('id', id)
+          if (e2) throw e2
+        } else {
+          const msgs = mudar([])
+          const { error: e2 } = await supabase
+            .from('assistente_conversas')
+            .insert({ id, user_id: dono, titulo: tituloDaConversa(msgs), mensagens: msgs, modelo })
+          if (e2) throw e2
+        }
+        qc.invalidateQueries({ queryKey: ['assistente_conversas', dono] })
+      } catch {
+        /* histórico é conveniência — não interrompe o chat */
       }
-      qc.invalidateQueries({ queryKey: ['assistente_conversas', user.id] })
-    } catch {
-      /* histórico é conveniência — não interrompe o chat */
-    }
+    })
+    filaDeGravacao.current.set(id, proxima)
+    return proxima
   }
 
   function novaConversa() {
-    marcaDaConversa.current += 1
-    setMensagens([])
-    setConversaAtualId(null)
-    setErro(null)
+    setConversaAtualId(novoIdDeConversa())
     setHistoricoAberto(false)
   }
 
   function carregarConversa(c: ConversaSalva) {
-    marcaDaConversa.current += 1
-    setMensagens(c.mensagens ?? [])
+    // A VERSÃO DESTA VISITA VENCE A DA LISTA: ela tem a pergunta em curso e a
+    // resposta que chegou com outra conversa aberta, e a lista do histórico
+    // pode ser de antes delas.
+    const jaAberta = conversas[c.id]
+    const msgs = jaAberta ?? (c.mensagens ?? []).map(normalizarMensagem)
+    if (!jaAberta) setConversas((atual) => (atual[c.id] ? atual : { ...atual, [c.id]: msgs }))
     setConversaAtualId(c.id)
-    setErro(null)
     setHistoricoAberto(false)
-    void renovarLinks(c.mensagens ?? [])
+    void renovarLinks(c.id, msgs)
   }
 
   /**
@@ -472,7 +637,7 @@ export function Assistente({
    * próprios arquivos, então o navegador resolve sozinho. Falhando, ficam os
    * links antigos — o mesmo que acontecia antes.
    */
-  async function renovarLinks(msgs: Mensagem[]) {
+  async function renovarLinks(id: string, msgs: Mensagem[]) {
     const caminhos = [
       ...new Set(
         msgs
@@ -488,7 +653,7 @@ export function Assistente({
     const novos = new Map<string, string>()
     for (const d of data) if (d.path && d.signedUrl && !d.error) novos.set(d.path, d.signedUrl)
     if (novos.size === 0) return
-    setMensagens((atual) =>
+    mudarConversa(id, (atual) =>
       atual.map((m) =>
         m.arquivos
           ? {
@@ -508,6 +673,9 @@ export function Assistente({
     if (!excluirId) return
     const id = excluirId
     setExcluirId(null)
+    // MARCADA ANTES DE APAGAR: uma resposta em curso que chegue no meio não
+    // recria a conversa (ver `gravarNoBanco`).
+    excluidas.current.add(id)
     try {
       // O supabase-js NÃO LANÇA: devolve `{ error }`. Sem conferir, a falha
       // passava calada — a conversa continuava no banco, e a atual perdia o
@@ -515,31 +683,86 @@ export function Assistente({
       // em vez de continuar aquela.
       const { error } = await supabase.from('assistente_conversas').delete().eq('id', id)
       if (error) throw new Error(`Não foi possível excluir a conversa: ${error.message}`)
-      if (id === conversaAtualId) setConversaAtualId(null)
+      despachar({ tipo: 'descartou', conversa: id })
+      setConversas((atual) => {
+        const resto = { ...atual }
+        delete resto[id]
+        return resto
+      })
+      // A CONVERSA EXCLUÍDA SAI DA TELA: a tela começa uma nova.
+      if (id === conversaNaTela.current) setConversaAtualId(novoIdDeConversa())
       qc.invalidateQueries({ queryKey: ['assistente_conversas', user?.id] })
     } catch (e) {
+      excluidas.current.delete(id)
       toast.error((e as Error).message)
     }
   }
 
-  async function enviar(pergunta: string) {
+  /** Pergunta nova, do campo ou de uma sugestão. */
+  function enviar(pergunta: string) {
     const limpa = pergunta.trim()
     if (!limpa || carregando) return
+    // O AVISO JÁ ESTÁ À VISTA, acima do campo (`anexosSemLeitor`): a pergunta não
+    // sai para ser recusada pelo servidor.
+    if (anexosSemLeitor.length > 0) return
 
+    const id = conversaAtualId
+    const anexos = arquivos
+    const nomes = anexos.map((f) => f.name)
+    const msgPergunta: Mensagem = {
+      role: 'user',
+      content: limpa,
+      ...(nomes.length > 0 ? { anexos: nomes } : {}),
+    }
+    // A PERGUNTA QUE FALHOU E FOI REESCRITA no campo dá lugar à nova, em vez de
+    // ficar pendurada sem resposta (`comPergunta`).
+    const falhou = pendenciaAtual?.estado === 'erro' ? pendenciaAtual.pedido.pergunta.content : null
+    const mudar = (msgs: Mensagem[]) => comPergunta(msgs, msgPergunta, falhou)
     // O histórico enviado é o de ANTES desta pergunta: a função recebe a
     // pergunta atual separada, no campo `pergunta`.
-    const historico = mensagens
-    const comPergunta = [...historico, { role: 'user' as const, content: limpa }]
-    setMensagens(comPergunta)
+    const historico = mudar(mensagens).slice(0, -1)
+    mudarConversa(id, mudar)
     setTexto('')
-    setErro(null)
-    setCarregando(true)
-    const anexos = arquivos
-    const skillsArray = [...skillsSelecionadas]
-    // A conversa em que a pergunta foi feita: a resposta volta para ELA, mesmo
-    // que a pessoa abra outra enquanto espera (destinoDaResposta).
-    const marca = marcaDaConversa.current
-    const idNoEnvio = conversaAtualId
+    // OS ANEXOS SAEM DO CAMPO E VÃO PARA A BOLHA DA PERGUNTA (12/11/2026): ficando
+    // no campo durante a espera, iam junto com a próxima pergunta, até em outra
+    // conversa. O "Tentar de novo" os reenvia (ficam no pedido).
+    setArquivos([])
+    // A PERGUNTA É GRAVADA JÁ: se a resposta falhar, ou a pessoa sair da
+    // conversa, ela está lá quando a conversa for reaberta.
+    void gravarNoBanco(id, mudar)
+    void pedirResposta(id, historico, {
+      pergunta: msgPergunta,
+      anexos,
+      skills: skillsDoPedido(skillsQuery.isSuccess, skillsSelecionadas, skillsQuery.data),
+      comBaseDoKommo,
+    })
+  }
+
+  /**
+   * "TENTAR DE NOVO": reenvia o pedido que falhou como foi — os mesmos anexos,
+   * Skills e Base do Kommo. A pergunta já está na conversa (a última fala, sem
+   * resposta); o histórico é o que vem antes dela, sem duplicá-la.
+   */
+  function tentarDeNovo() {
+    if (pendenciaAtual?.estado !== 'erro') return
+    const { pedido } = pendenciaAtual
+    const id = conversaAtualId
+    const ultima = mensagens[mensagens.length - 1]
+    const jaNaConversa = ultima?.role === 'user' && ultima.content === pedido.pergunta.content
+    const fim = jaNaConversa ? mensagens.length - 1 : mensagens.length
+    // O texto e os anexos devolvidos ao campo quando falhou saem de lá: vão de novo pelo botão.
+    if (texto.trim() === pedido.pergunta.content) setTexto('')
+    setArquivos((atual) => atual.filter((f) => !pedido.anexos.includes(f)))
+    void pedirResposta(id, mensagens.slice(0, fim), pedido)
+  }
+
+  async function pedirResposta(id: string, anteriores: Mensagem[], pedido: Pedido) {
+    despachar({ tipo: 'enviou', conversa: id, pedido })
+    const { pergunta, anexos, skills, comBaseDoKommo } = pedido
+    const limpa = pergunta.content
+    // AS NOTAS DO QUE CADA MENSAGEM LEVAVA (contato, petição, arquivos, anexos)
+    // vão no texto — o modelo só vê texto (`historicoParaOModelo`).
+    const historico = historicoParaOModelo(anteriores)
     try {
       let respostaFn: RespostaAssistente
       if (anexos.length > 0) {
@@ -549,7 +772,7 @@ export function Assistente({
         form.append('pergunta', limpa)
         form.append('historico', JSON.stringify(historico))
         form.append('modelo', modelo)
-        form.append('skills', JSON.stringify(skillsArray))
+        if (skills) form.append('skills', JSON.stringify(skills))
         if (comBaseDoKommo) form.append('base_kommo', 'true')
         anexos.forEach((f) => form.append('arquivo', f))
         respostaFn = await invokeFunctionForm<RespostaAssistente>('assistente', form)
@@ -558,38 +781,42 @@ export function Assistente({
           pergunta: limpa,
           historico,
           modelo,
-          skills: skillsArray,
+          ...(skills ? { skills } : {}),
           ...(comBaseDoKommo ? { base_kommo: true } : {}),
         })
       }
       const { resposta, truncada, acao_proposta, contato_sugerido, arquivos: arquivosGerados } =
         respostaFn
-      // Aviso no PRÓPRIO texto, e não num selo à parte: lista cortada no meio
-      // parece completa, e quem lê usa o pedaço como se fosse o todo.
-      const conteudo = truncada
-        ? `${resposta}\n\n---\n\n**Resposta interrompida** por tamanho. Peça um recorte menor (por tribunal, por período) para ver o restante.`
-        : resposta
-      const comResposta: Mensagem[] = [
-        ...comPergunta,
-        {
-          role: 'assistant',
-          content: conteudo,
-          acaoProposta: acao_proposta,
-          arquivos: arquivosGerados,
-          contatoSugerido: contato_sugerido,
-        },
-      ]
-      const destino = destinoDaResposta(marca, marcaDaConversa.current, idNoEnvio)
-      if (destino.naTela) setMensagens(comResposta)
-      // Só os anexos que foram COM esta pergunta saem do campo.
-      setArquivos((atual) => atual.filter((f) => !anexos.includes(f)))
-      void salvarConversa(comResposta, destino.gravarEm, marca)
+      // O AVISO DE CORTE É UMA MARCA, desenhada à parte (12/11/2026): no texto,
+      // ia junto no "Copiar resposta" e de volta ao modelo no histórico.
+      const msgResposta: Mensagem = {
+        role: 'assistant',
+        content: resposta,
+        ...(acao_proposta ? { acaoProposta: acao_proposta } : {}),
+        ...(arquivosGerados?.length ? { arquivos: arquivosGerados } : {}),
+        ...(contato_sugerido ? { contatoSugerido: contato_sugerido } : {}),
+        ...(truncada ? { truncada: true } : {}),
+      }
+      despachar({ tipo: 'respondeu', conversa: id })
+      if (excluidas.current.has(id)) return
+      const mudar = (msgs: Mensagem[]) => comResposta(msgs, pergunta, msgResposta)
+      // A RESPOSTA VAI PARA A CONVERSA EM QUE SE PERGUNTOU (destinoDaResposta) —
+      // na tela se ela está aberta, reaberta inclusive; senão, fica guardada
+      // para quando for reaberta.
+      const destino = destinoDaResposta(id, conversaNaTela.current)
+      setConversas((atual) => (atual[id] ? { ...atual, [id]: mudar(atual[id]) } : atual))
+      void gravarNoBanco(destino.gravarEm, mudar)
     } catch (e) {
-      // A pergunta continua na tela; o erro aparece embaixo. Recolher a
-      // pergunta obrigaria a pessoa a digitar tudo de novo para tentar.
-      if (marca === marcaDaConversa.current) setErro((e as Error).message)
-    } finally {
-      setCarregando(false)
+      // A pergunta continua na conversa; o erro aparece embaixo dela, com o
+      // "Tentar de novo" — também quando a pessoa volta de outra conversa.
+      despachar({ tipo: 'falhou', conversa: id, erro: (e as Error).message })
+      // E O TEXTO VOLTA AO CAMPO (12/11/2026), com os anexos, se o campo está
+      // vazio e a conversa está na tela: dá para corrigir a pergunta e enviar,
+      // sem digitar tudo de novo.
+      if (!excluidas.current.has(id) && destinoDaResposta(id, conversaNaTela.current).naTela) {
+        setTexto((t) => (t.trim() ? t : limpa))
+        setArquivos((atual) => (atual.length > 0 ? atual : anexos))
+      }
     }
   }
 
@@ -611,11 +838,17 @@ export function Assistente({
     window.open(`https://wa.me/${digitos}`, '_blank', 'noopener,noreferrer')
   }
 
-  /** Remove só o cartão de proposta daquela mensagem (Cancelar). */
-  function descartarAcao(indice: number) {
-    setMensagens((atual) =>
-      atual.map((m, i) => (i === indice ? { ...m, acaoProposta: undefined } : m)),
-    )
+  /**
+   * Fecha o cartão de proposta daquela mensagem (Cancelar ou Confirmar) E GRAVA
+   * NA CONVERSA (12/11/2026): antes só saía da tela, e a conversa reaberta
+   * trazia o cartão de volta, pronto para gerar a mesma petição outra vez.
+   */
+  function resolverAcao(indice: number, estado: 'confirmada' | 'cancelada') {
+    const id = conversaAtualId
+    const conteudo = mensagens[indice]?.content ?? ''
+    const mudar = (msgs: Mensagem[]) => comAcaoResolvida(msgs, indice, conteudo, estado)
+    mudarConversa(id, mudar)
+    void gravarNoBanco(id, mudar)
   }
 
   /** Confirmar: carrega o crédito e abre a MESMA tela de revisão da Execução. */
@@ -629,7 +862,7 @@ export function Assistente({
       toast.error('Não foi possível carregar o crédito para gerar a petição.')
       return
     }
-    descartarAcao(indice)
+    resolverAcao(indice, 'confirmada')
     setPeticaoAlvo({
       processo: data as Processo,
       instrucao: a.instrucao,
@@ -671,14 +904,42 @@ export function Assistente({
     'flex h-controle w-full items-center gap-s2 rounded-controle px-s2 text-left text-corpo text-texto',
     'hover:bg-superficie-3 focus:outline-none focus-visible:bg-superficie-3',
   )
+  // A LISTA CABE NA TELA (12/11/2026): no celular, a de Skills saía do botão
+  // para a direita com 220px de largura mínima e era cortada na borda — com nome
+  // de Skill comprido, sumia o fim. Agora tem largura máxima (a da tela menos as
+  // margens; no computador, a do painel), e o nome comprido corta com "…".
   const menuFlutuante =
-    'absolute bottom-full left-0 z-20 mb-s1 min-w-[220px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
+    'absolute bottom-full z-20 mb-s1 min-w-[220px] max-w-[calc(100vw-16px)] sm:max-w-[300px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
+
+  /**
+   * NO CELULAR O PAINEL É A TELA INTEIRA — e então é modal (12/11/2026): o Tab
+   * não sai dele para a página escondida atrás. No computador ele é um painel
+   * no canto, e a página continua usável com ele aberto.
+   */
+  function prenderTab(e: KeyboardEventReact<HTMLDivElement>) {
+    if (e.key !== 'Tab' || !telaCheia) return
+    const focaveis = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCAVEIS)).filter(
+      (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
+    )
+    if (focaveis.length === 0) return
+    const primeiro = focaveis[0]
+    const ultimo = focaveis[focaveis.length - 1]
+    if (e.shiftKey && document.activeElement === primeiro) {
+      e.preventDefault()
+      ultimo.focus()
+    } else if (!e.shiftKey && document.activeElement === ultimo) {
+      e.preventDefault()
+      primeiro.focus()
+    }
+  }
 
   return (
     <>
       <div
         role="dialog"
         aria-label="Assistente de dados"
+        aria-modal={telaCheia ? true : undefined}
+        onKeyDown={prenderTab}
         className={cn(
           // O PAINEL na camada dele (z-assistente-painel), abaixo das janelas que
           // ele mesmo abre. No escuro, a borda forte e o anel claro o separam da
@@ -857,15 +1118,30 @@ export function Assistente({
 
               {mensagens.map((m, i) =>
                 m.role === 'user' ? (
-                  <p
+                  <div
                     key={i}
                     className={cn(
                       'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca px-s3 py-[8px]',
-                      'whitespace-pre-wrap text-corpo text-white [overflow-wrap:anywhere]',
+                      'text-corpo text-white [overflow-wrap:anywhere]',
                     )}
                   >
-                    {m.content}
-                  </p>
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                    {/* OS ANEXOS DA PERGUNTA, pelo nome (12/11/2026): saem do
+                        campo ao enviar e ficam aqui, para se saber o que foi junto. */}
+                    {m.anexos && m.anexos.length > 0 && (
+                      <ul aria-label="Anexos" className="mt-[6px] flex flex-wrap justify-end gap-[4px]">
+                        {m.anexos.map((nome, j) => (
+                          <li
+                            key={`${nome}-${j}`}
+                            className="inline-flex h-[22px] max-w-full items-center gap-[4px] rounded-full bg-white/15 px-[8px] text-xs text-white"
+                          >
+                            <Paperclip className="h-[12px] w-[12px] shrink-0" aria-hidden />
+                            <span className="max-w-[160px] truncate">{nome}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 ) : (
                   // A resposta pode trazer tabela de processos: ocupa a largura
                   // inteira, senão a tabela nasce comprimida.
@@ -893,6 +1169,19 @@ export function Assistente({
                       </Suspense>
                     </div>
 
+                    {/* O CORTE POR TAMANHO, À PARTE DO TEXTO (12/11/2026): lista
+                        cortada no meio parece completa, então o aviso continua
+                        à vista — mas não vai no "Copiar" nem volta ao modelo. */}
+                    {m.truncada && (
+                      <p className="mt-s2 flex items-start gap-[6px] rounded-campo border border-aviso-borda bg-aviso-fundo px-s2 py-[6px] text-sm text-texto">
+                        <AlertCircle className="mt-[2px] h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
+                        <span>
+                          <strong>Resposta interrompida</strong> por tamanho. Peça um recorte menor
+                          (por tribunal, por período) para ver o restante.
+                        </span>
+                      </p>
+                    )}
+
                     {m.arquivos && m.arquivos.length > 0 && (
                       <div className="mt-s2 grid gap-s1">
                         {m.arquivos.map((f) => (
@@ -910,7 +1199,15 @@ export function Assistente({
                       </div>
                     )}
 
-                    {m.acaoProposta && (
+                    {m.acaoProposta && m.acaoResolvida && (
+                      <p className="mt-s2 text-xs text-texto-3">
+                        {m.acaoResolvida === 'confirmada'
+                          ? `Petição do processo ${m.acaoProposta.numero_cnj ?? '(a confirmar)'} aberta para revisão.`
+                          : 'Proposta de petição cancelada.'}
+                      </p>
+                    )}
+
+                    {m.acaoProposta && !m.acaoResolvida && (
                       <div className="mt-s2 grid gap-s1 rounded-flutuante border border-info-borda bg-marca-leve p-s3">
                         <p className="font-bold text-texto">
                           Gerar petição — processo {m.acaoProposta.numero_cnj ?? '(a confirmar)'}
@@ -926,7 +1223,7 @@ export function Assistente({
                             type="button"
                             size="md"
                             variant="ghost"
-                            onClick={() => descartarAcao(i)}
+                            onClick={() => resolverAcao(i, 'cancelada')}
                           >
                             Cancelar
                           </Button>
@@ -989,7 +1286,10 @@ export function Assistente({
               )}
 
               {/* O ERRO FICA NUMA CAIXA À PARTE, depois da conversa: não entra no
-                  histórico, e a pergunta continua lá para tentar de novo. */}
+                  histórico, e a pergunta continua lá para tentar de novo. É DA
+                  CONVERSA (12/11/2026): o erro de uma pergunta feita antes de
+                  abrir outra aparece quando se volta a ela, com o "Tentar de
+                  novo" — que reenvia os mesmos anexos, Skills e Base do Kommo. */}
               {erro && (
                 <div
                   role="alert"
@@ -999,7 +1299,18 @@ export function Assistente({
                   )}
                 >
                   <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0" />
-                  <span className="break-words text-texto">{erro}</span>
+                  <div className="grid min-w-0 flex-1 justify-items-start gap-s2">
+                    <span className="break-words text-texto">{erro}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      icon={<RefreshCw className="h-[14px] w-[14px]" />}
+                      onClick={tentarDeNovo}
+                    >
+                      Tentar de novo
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -1040,20 +1351,47 @@ export function Assistente({
               </div>
             )}
 
+            {anexosSemLeitor.length > 0 && (
+              <p
+                id="assistente-aviso-anexo"
+                role="alert"
+                className="flex items-start gap-[6px] rounded-campo border border-aviso-borda bg-aviso-fundo px-s2 py-[6px] text-sm text-texto"
+              >
+                <AlertCircle className="mt-[2px] h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  {haSkillCadastrada
+                    ? 'Marque uma Skill para ler este tipo de arquivo'
+                    : 'Nenhuma Skill ativa lê este tipo de arquivo — ative uma em Configurações → Skills, ou envie em PDF, imagem ou texto'}
+                  {' '}({anexosSemLeitor.map((f) => f.name).join(', ')}).
+                </span>
+              </p>
+            )}
+
             <textarea
               ref={campo}
               rows={2}
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
               onKeyDown={(e) => {
-                // Enter envia, Shift+Enter quebra linha — convenção de chat.
-                if (e.key === 'Enter' && !e.shiftKey) {
+                // Enter envia, Shift+Enter quebra linha — convenção de chat. NO
+                // CELULAR (toque) o Enter quebra a linha e quem envia é o botão;
+                // e o Enter de uma composição (acento, IME) nunca envia.
+                if (
+                  enterEnvia({
+                    key: e.key,
+                    shiftKey: e.shiftKey,
+                    isComposing: e.nativeEvent.isComposing,
+                    keyCode: e.keyCode,
+                    toque: telaDeToque(),
+                  })
+                ) {
                   e.preventDefault()
                   enviar(texto)
                 }
               }}
               placeholder="Faça uma pergunta…"
               aria-label="Pergunta"
+              aria-describedby={anexosSemLeitor.length > 0 ? 'assistente-aviso-anexo' : undefined}
               className={cn(
                 // A BORDA E O FOCO DOS CAMPOS (ui/Field.tsx): a `borda-controle`
                 // (3:1, o campo vazio se vê como campo) e o halo do anel.
@@ -1066,7 +1404,9 @@ export function Assistente({
             {/* Seletor de modelo, no mesmo lugar do claude.ai: abaixo da caixa de
                 texto, um botão compacto que abre a lista ao clicar. Skills e o
                 clipe de anexo ficam do lado dele, e o Enviar na ponta direita. */}
-            <div className="flex items-center gap-s1">
+            {/* RELATIVA: no celular a lista de Skills se ancora nesta linha, e
+                não no botão — assim ocupa a largura da linha e não sai da tela. */}
+            <div className="relative flex items-center gap-s1">
               <div className="relative" ref={modeloRef}>
                 <Button
                   type="button"
@@ -1083,7 +1423,13 @@ export function Assistente({
                 </Button>
 
                 {modeloAberto && (
-                  <div role="listbox" aria-label="Modelo" className={menuFlutuante}>
+                  <div
+                    ref={listaDeModelos}
+                    role="listbox"
+                    aria-label="Modelo"
+                    onKeyDown={(e) => teclasDaLista(e, fecharModelos)}
+                    className={cn(menuFlutuante, 'left-0')}
+                  >
                     {MODELOS.map((m) => (
                       <button
                         key={m.key}
@@ -1092,7 +1438,7 @@ export function Assistente({
                         aria-selected={m.key === modelo}
                         onClick={() => {
                           trocarModelo(m.key)
-                          setModeloAberto(false)
+                          fecharModelos()
                         }}
                         className={itemDeMenu}
                       >
@@ -1112,7 +1458,7 @@ export function Assistente({
                   da lista, e não depende de skill cadastrada em Configurações. */}
               {(
 
-                <div className="relative" ref={skillsRef}>
+                <div className="sm:relative" ref={skillsRef}>
                   <Button
                     type="button"
                     variant="ghost"
@@ -1126,14 +1472,17 @@ export function Assistente({
                         ganhava o espaço do gap além do próprio. */}
                     <span>
                       Skills
-                      {skillsSelecionadas.size + (comBaseDoKommo ? 1 : 0) > 0 &&
-                        ` (${skillsSelecionadas.size + (comBaseDoKommo ? 1 : 0)})`}
+                      {totalDeSkills > 0 && ` (${totalDeSkills})`}
                     </span>
                     <ChevronDown className="h-[16px] w-[16px]" />
                   </Button>
 
                   {skillsAberto && (
-                    <div className={menuFlutuante}>
+                    <div
+                      ref={listaDeSkills}
+                      onKeyDown={(e) => teclasDaLista(e, fecharSkills)}
+                      className={cn(menuFlutuante, 'inset-x-0 sm:inset-x-auto sm:left-0')}
+                    >
                       <p
                         id="assistente-skills-titulo"
                         className="px-s2 pb-s1 pt-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3"
@@ -1166,7 +1515,7 @@ export function Assistente({
                             {comBaseDoKommo && <Check className="h-[12px] w-[12px]" />}
                           </span>
                           <Database className="h-[14px] w-[14px] shrink-0 text-texto-3" aria-hidden />
-                          <span className="truncate">Base do Kommo (relatórios)</span>
+                          <span className="min-w-0 truncate">Base do Kommo (relatórios)</span>
                         </button>
                         {(skillsQuery.data ?? []).map((s) => {
                           const marcada = skillsSelecionadas.has(s.skill_id)
@@ -1189,7 +1538,7 @@ export function Assistente({
                               >
                                 {marcada && <Check className="h-[12px] w-[12px]" />}
                               </span>
-                              <span className="truncate">{s.nome}</span>
+                              <span className="min-w-0 truncate">{s.nome}</span>
                             </button>
                           )
                         })}
@@ -1214,7 +1563,7 @@ export function Assistente({
 
               <button
                 type="submit"
-                disabled={!texto.trim() || carregando}
+                disabled={!texto.trim() || carregando || anexosSemLeitor.length > 0}
                 aria-label="Enviar pergunta"
                 title="Enviar pergunta"
                 className={cn(

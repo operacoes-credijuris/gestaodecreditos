@@ -12,13 +12,14 @@ import { destinoDaResposta } from '../conversaDoAssistente'
 const ler = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
 
 describe('Assistente: a resposta volta para a conversa em que se perguntou', () => {
+  // PELO ID DA CONVERSA desde 12/11/2026 (a marca de troca tratava "voltei a A"
+  // como outra conversa) — ver também assistenteTela.test.ts.
   it('a conversa não mudou: vai para a tela e é gravada nela', () => {
-    expect(destinoDaResposta(3, 3, 'a')).toEqual({ naTela: true, gravarEm: 'a' })
-    expect(destinoDaResposta(0, 0, null)).toEqual({ naTela: true, gravarEm: null })
+    expect(destinoDaResposta('a', 'a')).toEqual({ naTela: true, gravarEm: 'a' })
   })
 
   it('abriu outra conversa enquanto esperava: grava na de origem, sem tocar a tela', () => {
-    expect(destinoDaResposta(3, 4, 'a')).toEqual({ naTela: false, gravarEm: 'a' })
+    expect(destinoDaResposta('a', 'b')).toEqual({ naTela: false, gravarEm: 'a' })
   })
 
   it('o componente grava pelo id do envio, não pelo id da conversa aberta agora', () => {
@@ -26,10 +27,10 @@ describe('Assistente: a resposta volta para a conversa em que se perguntou', () 
     // Antes: `salvarConversa(comResposta)` lia `conversaAtualId` — a conversa
     // aberta no momento, que podia já ser outra.
     expect(src).not.toMatch(/salvarConversa\(comResposta\)/)
-    expect(src).toMatch(/salvarConversa\(comResposta, destino\.gravarEm, marca\)/)
-    expect(src).toMatch(/if \(destino\.naTela\) setMensagens\(comResposta\)/)
-    // As duas trocas de conversa mudam a marca.
-    expect(src.match(/marcaDaConversa\.current \+= 1/g)?.length).toBe(2)
+    expect(src).toMatch(/const destino = destinoDaResposta\(id, conversaNaTela\.current\)/)
+    expect(src).toMatch(/void gravarNoBanco\(destino\.gravarEm, mudar\)/)
+    // A resposta entra na conversa do envio (`id`), aberta ou não.
+    expect(src).toMatch(/setConversas\(\(atual\) => \(atual\[id\] \? \{ \.\.\.atual, \[id\]: mudar\(atual\[id\]\) \} : atual\)\)/)
   })
 })
 
