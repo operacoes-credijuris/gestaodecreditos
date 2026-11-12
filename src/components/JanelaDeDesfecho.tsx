@@ -171,10 +171,10 @@ export function JanelaDeDesfecho({
   /**
    * O texto no campo já incorpora os achados marcados, pela mão da IA.
    *
-   * NÃO É COSMÉTICO: é o que libera o Confirmar quando há achado marcado. Sem
-   * ele, marcar dois riscos e confirmar mandava ao card o despejo cru —
-   * "- [IMPEDITIVO] ... - [ALTO] ..." numa linha só —, que é exatamente o que a
-   * redação pela IA existe para evitar.
+   * HOJE SÓ MUDA OS RÓTULOS ("Redigir de novo") — 12/11/2026: o Confirmar
+   * deixou de depender dele (ver `podeEnviar`, "o que libera o Confirmar é o
+   * texto escrito"). Este comentário dizia o contrário, e convidava a
+   * "restaurar" o pedágio que foi tirado de propósito.
    */
   const [revisado, setRevisado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -295,7 +295,10 @@ export function JanelaDeDesfecho({
   // UMA REGRA SÓ PARA TODO JEITO DE FECHAR: o X, o Escape e o fundo passam pelo
   // `dirty` do Modal, e o Cancelar do rodapé passa por aqui — antes ele fechava
   // sem perguntar, e o motivo escrito ia embora com um clique.
-  const sujo = motivo.trim().length > 0
+  // SUJO É O QUE MUDOU (12/11/2026): com o motivo sugerido já no campo (a
+  // análise de RPV o preenche), fechar sem mexer perguntava "Descartar
+  // alterações?" sobre um texto que ninguém escreveu.
+  const sujo = motivo.trim().length > 0 && motivo.trim() !== (motivoSugerido ?? '').trim()
   const cancelar = async () => {
     if (sujo && !(await perguntarDescarte())) return
     onFechar()

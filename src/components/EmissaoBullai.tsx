@@ -327,7 +327,11 @@ export function EmissaoBullai({
       </div>
     )
   }
-  if (catalogo.error) {
+  // SÓ SEM CATÁLOGO NENHUM (12/11/2026): no TanStack Query 5 a releitura que
+  // falha (a do saldo, depois de cada "Extrair", ou a da volta à janela) liga o
+  // `error` e MANTÉM o `data` — e um soluço de rede logo depois de um pedido
+  // pago trocava a seção inteira (andamento, seleção, pasta) por "indisponível".
+  if (catalogo.error && !catalogo.data) {
     return (
       <div className={moldura}>
         <CaixaSuave>

@@ -1526,8 +1526,17 @@ export function AnaliseRpvModal({
         if (selecao.length) {
           const totalSel = selecao.reduce((n, x) => n + x.numeros.length, 0)
           setPasso(`Preparando ${totalSel} página(s) digitalizada(s) para leitura por imagem…`)
-          const { data: { user } } = await supabase.auth.getUser()
-          if (!user) throw new Error('Sessão expirada — faça login de novo.')
+          // O ERRO DO `getUser` É LIDO (12/11/2026): ele vai à rede e, falhando,
+          // devolve `{ user: null, error }` sem lançar — um soluço de rede aqui
+          // virava "Sessão expirada", e a pessoa saía e entrava à toa.
+          const { data: { user }, error: erroDaSessao } = await supabase.auth.getUser()
+          if (!user) {
+            throw new Error(
+              erroDaSessao && !/session missing|expired|invalid jwt/i.test(erroDaSessao.message)
+                ? `Não consegui confirmar a sessão (${erroDaSessao.message}) — confira a conexão e tente de novo.`
+                : 'Sessão expirada — faça login de novo.',
+            )
+          }
           jobId = crypto.randomUUID()
           let enviadas = 0
           const falhas: string[] = []
