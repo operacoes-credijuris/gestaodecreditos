@@ -19,8 +19,13 @@ import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_sh
 // "@latest" traria mudança de comportamento a produção sem ninguém mexer aqui.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
-import { resolverModeloDoAssistente } from '../_shared/modeloDoAssistente.ts'
-import { type EtapaDoEspelho, type LinhaDoEspelho, montarBaseDoKommo } from '../_shared/baseDoKommo.ts'
+import { aceitaRaciocinioAdaptativo, resolverModeloDoAssistente } from '../_shared/modeloDoAssistente.ts'
+import {
+  baseDoKommoEmPedacos,
+  COLUNAS_DO_SISTEMA,
+  type EtapaDoEspelho,
+  type LinhaDoEspelho,
+} from '../_shared/baseDoKommo.ts'
 import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 // A CHAVE DA ANTHROPIC VEM DO MÓDULO DE SEGREDOS (varredura de 23/10/2026): havia
 // aqui uma cópia idêntica da função, que é o tipo de cópia que diverge no dia em
@@ -28,10 +33,31 @@ import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import { estourouOTempo, sinalAteOTeto, tempoAteOTeto } from '../_shared/relogioDaInvocacao.ts'
 import {
+  lerPorIds,
   lerTodasAsLinhas,
   type LeituraCompleta,
   type PaginaDoBanco,
 } from '../_shared/leituraPaginada.ts'
+import { normalizarNome } from '../_shared/nucleo/texto.ts'
+import {
+  cortarPorTamanho,
+  dataAAAAMMDD,
+  escolherInvestidor,
+  type FichaDaPessoa,
+  formasDoNumero,
+  grupoDoValor,
+  inteiroEntre,
+  inteiroPositivoOuNulo,
+  investidoresDistintos,
+  type PapelDaPessoa,
+  paradosDaCarteira,
+  pareceNumeroDeProcesso,
+  pessoasDoAssistente,
+  regexDosDigitos,
+  soDigitos,
+  TETO_DE_CARACTERES_DO_HISTORICO,
+  traduzirErroDaAnthropic,
+} from '../_shared/regrasDoAssistente.ts'
 
 /** Teto de idas e voltas com o modelo. Barreira contra laço infinito. */
 const MAX_RODADAS = 8
@@ -310,7 +336,7 @@ const FERRAMENTAS: Anthropic.Tool[] = [
               numero_processo: { type: 'string' },
               desde: {
                 type: 'string',
-                description: 'Só andamentos DEPOIS desta data (AAAA-MM-DD).',
+                description: 'Andamentos A PARTIR desta data, inclusive (AAAA-MM-DD).',
               },
             },
             required: ['numero_processo', 'desde'],
@@ -419,6 +445,10 @@ const FERRAMENTAS: Anthropic.Tool[] = [
         prazo_ate: {
           type: 'string',
           description: 'Só tarefas com prazo fatal até esta data (AAAA-MM-DD).',
+        },
+        prazo_de: {
+          type: 'string',
+          description: 'Só tarefas com prazo fatal a partir desta data (AAAA-MM-DD).',
         },
         vencidas: {
           type: 'boolean',
@@ -608,6 +638,10 @@ const FERRAMENTAS: Anthropic.Tool[] = [
           type: 'string',
           description: 'Número do processo ou nome do cedente/card.',
         },
+        parados_ha_dias: {
+          type: 'integer',
+          description: 'Só cards na MESMA coluna há pelo menos N dias, do mais parado ao menos.',
+        },
         limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
       },
     },
@@ -616,8 +650,9 @@ const FERRAMENTAS: Anthropic.Tool[] = [
     name: 'creditos_a_vencer',
     description:
       'Créditos ativos/complementares ainda não liquidados, com expectativa de ' +
-      'liquidação nos próximos 30 dias — já agrupados por urgência (hoje/atrasado, ' +
-      'esta semana, este mês), sem você precisar fazer a conta de data. Use para ' +
+      'liquidação vencida ou nos próximos 30 dias — já agrupados por urgência (atrasados, ' +
+      'próximos 7 dias, de 8 a 30 dias), cada grupo com o total exato, sem você ' +
+      'precisar fazer a conta de data. Use para ' +
       '"o que vence essa semana", "créditos próximos da liquidação".',
     input_schema: { type: 'object', properties: {} },
   },
@@ -627,7 +662,7 @@ const FERRAMENTAS: Anthropic.Tool[] = [
       'Créditos ativos/complementares SEM nenhuma movimentação recente — mesmo ' +
       'critério da aba Publicações e Movimentações → Paralisados (padrão: mais de ' +
       '20 dias sem andamento; quem nunca teve andamento também entra). Devolve ' +
-      'ordenado do menos parado ao mais parado. Use para "quais processos estão ' +
+      'do MAIS parado ao menos parado, e quem nunca teve andamento no fim. Use para "quais processos estão ' +
       'parados", "processos sem andamento".',
     input_schema: {
       type: 'object',
@@ -831,6 +866,7 @@ interface Filtravel {
   gte: (c: string, v: unknown) => unknown
   lt: (c: string, v: unknown) => unknown
   gt: (c: string, v: unknown) => unknown
+  filter: (c: string, op: string, v: unknown) => unknown
 }
 
 /** Um item do array `filtros` que as ferramentas de crédito recebem. */
@@ -875,6 +911,22 @@ function aplicarFiltrosGenericos<T>(q: T, filtros: unknown): { query: T; avisos:
     const valor = bruto?.valor
     if (operador !== 'vazio' && operador !== 'nao_vazio' && (valor === undefined || valor === null)) {
       avisos.push(`Filtro em "${campo}" sem valor — ignorado.`)
+      continue
+    }
+    // O NÚMERO DO PROCESSO CASA PELOS DÍGITOS (12/11/2026), com ou sem máscara:
+    // o cadastro guarda dos dois jeitos (digitado à mão ou vindo do Drive), e o
+    // `ilike` com o texto do modelo só achava o crédito escrito do mesmo jeito.
+    // `igual` exige o número inteiro; `contem`, um trecho.
+    if (
+      campo === 'numero_cnj' &&
+      (operador === 'igual' || operador === 'contem') &&
+      pareceNumeroDeProcesso(valor)
+    ) {
+      r = r.filter(
+        campo,
+        'imatch',
+        regexDosDigitos(String(valor), { inteiro: operador === 'igual' }),
+      ) as Filtravel
       continue
     }
     switch (operador) {
@@ -1061,10 +1113,16 @@ async function executar(
         liquidados: 0,
       })
       const total = zero()
+      // O MESMO NOME ESCRITO DE DOIS JEITOS É UM GRUPO SÓ (12/11/2026): "Fulano",
+      // "fulano " e "Fulano  de Tal" eram grupos separados, cada um com um pedaço
+      // da carteira. Agrupa pela chave normalizada; o rótulo é a primeira grafia.
+      const rotuloDaChave = new Map<string, string>()
       for (const l of (data ?? []) as unknown as Record<string, unknown>[]) {
         soma(total, l)
         if (dimensao !== 'nenhum') {
-          const k = String(l[dimensao] ?? 'não informado') || 'não informado'
+          const { chave, rotulo } = grupoDoValor(dimensao, l[dimensao])
+          if (!rotuloDaChave.has(chave)) rotuloDaChave.set(chave, rotulo)
+          const k = rotuloDaChave.get(chave)!
           grupos[k] ??= zero()
           soma(grupos[k], l)
         }
@@ -1090,9 +1148,12 @@ async function executar(
       const busca = String(args.numero_processo ?? '')
       const digitos = busca.replace(/\D/g, '')
       // Por número quando vier número; por nome do cedente quando vier nome.
+      // O NÚMERO CASA PELOS DÍGITOS, com ou sem máscara (12/11/2026): os 7
+      // primeiros achavam qualquer crédito com o mesmo começo, e o número
+      // sem pontuação não achava o cadastrado com ela.
       let q = svc.from('processos').select(COLUNAS_PROCESSO_FICHA).limit(3)
       q = digitos.length >= 6
-        ? q.ilike('numero_cnj', `%${digitos.slice(0, 7)}%`)
+        ? q.filter('numero_cnj', 'imatch', regexDosDigitos(digitos, { inteiro: digitos.length >= 20 }))
         : q.ilike('cedente', `%${busca}%`)
       const { data: achados, error } = await q
       if (error) return JSON.stringify({ erro: error.message })
@@ -1117,10 +1178,9 @@ async function executar(
       const p = lista[0]
       const idProc = String(p.id)
       const dig = String(p.numero_cnj ?? '').replace(/\D/g, '')
-      const quantasMov = Math.min(
-        typeof args.movimentacoes === 'number' ? args.movimentacoes : 15,
-        40,
-      )
+      // INTEIRO ENTRE 1 E 40 (12/11/2026): `movimentacoes: 7.5` ia como
+      // `limit=7.5` e o PostgREST recusava; zero ou negativo vinha vazio.
+      const quantasMov = inteiroEntre(args.movimentacoes, { min: 1, max: 40, padrao: 15 })
 
       const [apensos, resumo, tarefas, movs, pubs] = await Promise.all([
         svc.from('apensos').select('*').eq('processo_id', idProc).limit(20),
@@ -1151,33 +1211,63 @@ async function executar(
           ? svc
               .from('djen_publicacoes')
               .select('data_disponibilizacao, tipo_comunicacao, tratada, raw')
-              .ilike('numero_processo', `%${dig.slice(0, 7)}%`)
+              // PELOS DÍGITOS INTEIROS, com ou sem máscara: os 7 primeiros
+              // casavam publicação de outro processo com o mesmo começo.
+              .filter('numero_processo', 'imatch', regexDosDigitos(dig, { inteiro: true }))
               .order('data_disponibilizacao', { ascending: false })
               .limit(8)
           : Promise.resolve({ data: [], error: null }),
       ])
 
+      // A PARTE QUE FALHOU É DITA, E NÃO ENTREGUE VAZIA (12/11/2026): sem olhar
+      // `.error`, a consulta que caiu chegava como "nenhuma tarefa", "nenhuma
+      // movimentação" — e o modelo afirmava a ausência como fato. O campo vira
+      // null e o motivo vai em `falhas`.
+      const falhas: Record<string, string> = {}
+      const ouFalha = <T>(nomeDaParte: string, r: { data: T | null; error: { message: string } | null }, vazio: T) => {
+        if (r.error) {
+          falhas[nomeDaParte] = r.error.message
+          return null
+        }
+        return r.data ?? vazio
+      }
+      const apensosLidos = ouFalha('apensos', apensos, [])
+      const resumoLido = ouFalha('resumo_da_carteira', resumo, null)
+      const tarefasLidas = ouFalha('tarefas', tarefas, [])
+      const movsLidas = ouFalha('movimentacoes', movs, [])
+      const pubsLidas = ouFalha('publicacoes', pubs, [])
+
       // Cronológico CRESCENTE: lida de trás para frente, a sequência causal se
       // desfaz — dois ciclos de "alvará expedido / devolvido" viram três, com o
       // último parecendo pendente. Mesma lição da carteira-resumo.
-      const movCrescente = [...((movs.data ?? []) as Record<string, unknown>[])].reverse()
+      const movCrescente = movsLidas
+        ? [...(movsLidas as Record<string, unknown>[])].reverse()
+        : null
 
       return JSON.stringify({
         encontrado: true,
         moeda: 'BRL',
         cadastro: p,
-        apensos: apensos.data ?? [],
-        resumo_da_carteira: resumo.data ?? null,
-        tarefas: tarefas.data ?? [],
+        apensos: apensosLidos,
+        resumo_da_carteira: resumoLido,
+        tarefas: tarefasLidas,
         movimentacoes_do_mais_antigo_ao_mais_recente: movCrescente,
-        publicacoes_recentes: ((pubs.data ?? []) as Record<string, unknown>[]).map(
-          (x) => ({
-            data: x.data_disponibilizacao,
-            tipo: x.tipo_comunicacao,
-            tratada: x.tratada,
-            texto: textoDjen(x.raw)?.slice(0, 1200) ?? null,
-          }),
-        ),
+        publicacoes_recentes: pubsLidas
+          ? (pubsLidas as Record<string, unknown>[]).map((x) => ({
+              data: x.data_disponibilizacao,
+              tipo: x.tipo_comunicacao,
+              tratada: x.tratada,
+              texto: textoDjen(x.raw)?.slice(0, 1200) ?? null,
+            }))
+          : null,
+        falhas: Object.keys(falhas).length
+          ? {
+              ...falhas,
+              aviso:
+                'Estas partes da ficha NÃO foram lidas (vêm null). Não diga que ' +
+                'não existem — diga que não deu para consultar.',
+            }
+          : undefined,
         aviso:
           'O andamento mais recente da lista descreve onde o processo está hoje; ' +
           'nada da sua resposta pode contrariá-lo.',
@@ -1191,55 +1281,98 @@ async function executar(
       }
       const cortados = pedidos.slice(0, LIMITE_LER_HISTORICO) as Record<string, unknown>[]
       const alemDoLimite = pedidos.length > LIMITE_LER_HISTORICO
+      // Andamentos por FONTE e por processo. Pede-se um a mais para saber se
+      // havia mais do que o teto.
+      const POR_FONTE = 20
+      // O TETO DE TEXTO dividido entre os processos da chamada: cada um tem a
+      // sua parte, e nenhum come a dos outros.
+      const orcamentoPorProcesso = Math.floor(TETO_DE_CARACTERES_DO_HISTORICO / cortados.length)
 
       const resultados = await Promise.all(
         cortados.map(async (p) => {
           const numero = String(p?.numero_processo ?? '')
-          const desde = String(p?.desde ?? '')
-          const digitos = numero.replace(/\D/g, '')
-          if (!digitos || !desde) {
+          const desde = dataAAAAMMDD(p?.desde)
+          const digitos = soDigitos(numero)
+          if (digitos.length < 6 || !desde) {
             return {
               numero_processo: numero || null,
               erro: 'Informe numero_processo e desde (AAAA-MM-DD).',
             }
           }
-          const prefixo = digitos.slice(0, 7)
+          const numeroInteiro = digitos.length >= 20
+          // DO MAIS NOVO PARA O MAIS ANTIGO, e depois invertido (12/11/2026). A
+          // leitura era crescente com teto de 20: num processo movimentado, os 20
+          // PRIMEIROS depois de `desde` vinham e os mais novos — justamente o que
+          // diz se algo mudou depois do "concluso" — ficavam de fora, calados.
+          //
+          // `gte`, e não `gt`: `desde` é a data do andamento que casou, e o que
+          // aconteceu NO MESMO DIA, depois dele (a decisão logo após a conclusão),
+          // sumia. E pelos DÍGITOS (o processo inteiro quando vem inteiro), não
+          // pelos 7 primeiros, que traziam andamento de outro processo.
+          let qMov = svc
+            .from('advbox_movimentacoes')
+            .select('data, conteudo')
+            .gte('data', desde)
+          qMov = numeroInteiro
+            ? qMov.eq('numero_digits', digitos)
+            : qMov.ilike('numero_digits', `%${digitos}%`)
           const [mov, pub] = await Promise.all([
-            svc
-              .from('advbox_movimentacoes')
-              .select('data, conteudo')
-              .ilike('numero_processo', `%${prefixo}%`)
-              .gt('data', desde)
-              .order('data', { ascending: true })
-              .limit(20),
+            qMov
+              .order('data', { ascending: false })
+              .order('id', { ascending: false })
+              .limit(POR_FONTE + 1),
             svc
               .from('djen_publicacoes')
               .select('data_disponibilizacao, tipo_comunicacao, raw')
-              .ilike('numero_processo', `%${prefixo}%`)
-              .gt('data_disponibilizacao', desde)
-              .order('data_disponibilizacao', { ascending: true })
-              .limit(20),
+              .filter('numero_processo', 'imatch', regexDosDigitos(digitos, { inteiro: numeroInteiro }))
+              .gte('data_disponibilizacao', desde)
+              .order('data_disponibilizacao', { ascending: false })
+              .order('id', { ascending: false })
+              .limit(POR_FONTE + 1),
           ])
+          // CADA FONTE COM O SEU ERRO: antes, uma fonte caída passava calada
+          // (só a queda das duas virava erro) e o histórico parcial era lido como
+          // o histórico inteiro.
           if (mov.error && pub.error) {
-            return { numero_processo: numero, erro: mov.error.message }
+            return {
+              numero_processo: numero,
+              erro_movimentacoes: mov.error.message,
+              erro_publicacoes: pub.error.message,
+            }
           }
+          const movs = ((mov.data ?? []) as Record<string, unknown>[])
+          const pubs = ((pub.data ?? []) as Record<string, unknown>[])
+          const truncadoNoBanco = movs.length > POR_FONTE || pubs.length > POR_FONTE
           // Texto INTEIRO, sem cortar — é o que diferencia esta ferramenta de
           // buscar_movimentacoes: aqui o modelo lê pra entender, não só pra achar.
-          const andamentos = [
-            ...((mov.data ?? []) as Record<string, unknown>[]).map((m) => ({
+          const todos = [
+            ...movs.slice(0, POR_FONTE).map((m) => ({
               data: m.data,
               fonte: 'movimentacao' as const,
               texto: m.conteudo,
             })),
-            ...((pub.data ?? []) as Record<string, unknown>[]).map((x) => ({
+            ...pubs.slice(0, POR_FONTE).map((x) => ({
               data: x.data_disponibilizacao,
               fonte: 'publicacao' as const,
               texto: textoDjen(x.raw),
             })),
           ].sort((a, b) => String(a.data ?? '').localeCompare(String(b.data ?? '')))
+          const { andamentos, cortado: truncadoPorTamanho } = cortarPorTamanho(todos, orcamentoPorProcesso)
           return {
             numero_processo: numero,
             quantidade_andamentos: andamentos.length,
+            movimentacoes_lidas: Math.min(movs.length, POR_FONTE),
+            publicacoes_lidas: Math.min(pubs.length, POR_FONTE),
+            erro_movimentacoes: mov.error?.message,
+            erro_publicacoes: pub.error?.message,
+            // true = havia mais andamentos desde `desde` do que vieram: chegaram os
+            // MAIS RECENTES; os mais antigos do período ficaram de fora.
+            truncado: truncadoNoBanco || truncadoPorTamanho || undefined,
+            motivo_do_corte: truncadoNoBanco
+              ? `mais de ${POR_FONTE} andamentos numa das fontes — vieram os mais recentes`
+              : truncadoPorTamanho
+                ? 'o texto passou do teto de tamanho da chamada — vieram os mais recentes'
+                : undefined,
             andamentos,
           }
         }),
@@ -1250,6 +1383,17 @@ async function executar(
           ? `Só os primeiros ${LIMITE_LER_HISTORICO} processos desta lista foram lidos ` +
             '— peça o restante numa chamada seguinte.'
           : undefined,
+        aviso_de_corte: resultados.some((r) => 'truncado' in r && r.truncado)
+          ? 'Algum processo veio com `truncado: true`: os andamentos MAIS RECENTES estão ' +
+            'aqui, mas não todos os do período. Para ler o começo, peça de novo com um ' +
+            '`desde` mais recente ou menos processos por chamada.'
+          : undefined,
+        aviso_de_fonte:
+          resultados.some((r) => 'erro_movimentacoes' in r && r.erro_movimentacoes) ||
+          resultados.some((r) => 'erro_publicacoes' in r && r.erro_publicacoes)
+            ? 'Uma das fontes (movimentações ou publicações) falhou em algum processo — ' +
+              'o histórico dele está incompleto; diga isso na resposta.'
+            : undefined,
         resultados,
       })
     }
@@ -1257,11 +1401,14 @@ async function executar(
     case 'buscar_movimentacoes': {
       const texto = String(args.texto ?? '')
       if (!texto) return JSON.stringify({ erro: 'Informe o texto a procurar.' })
-      const dias = typeof args.dias === 'number' ? args.dias : null
-      const maxProcessos = Math.min(
-        typeof args.limite === 'number' ? args.limite : PROCESSOS_POR_BUSCA,
-        PROCESSOS_POR_BUSCA,
-      )
+      // INTEIROS POSITIVOS (12/11/2026): `dias: 7.5` virava data inválida e
+      // `limite: 0` devolvia lista vazia apresentada como "nada encontrado".
+      const dias = inteiroPositivoOuNulo(args.dias)
+      const maxProcessos = inteiroEntre(args.limite, {
+        min: 1,
+        max: PROCESSOS_POR_BUSCA,
+        padrao: PROCESSOS_POR_BUSCA,
+      })
 
       // Duas fontes independentes: andamentos do ADVBOX e publicações do DJEN.
       // Consultamos as duas porque a mesma fase pode aparecer só em uma delas.
@@ -1306,7 +1453,7 @@ async function executar(
         filtra(
           svc
             .from('advbox_movimentacoes')
-            .select('numero_processo, data, conteudo')
+            .select('numero_processo, numero_digits, data, conteudo')
             .order('data', { ascending: false })
             .limit(LINHAS_VARRIDAS),
           'data',
@@ -1340,18 +1487,30 @@ async function executar(
       // limite e escondiam nove outros processos — que é o que a pessoa quer
       // ver. O trecho é cortado em 220 caracteres: o suficiente para conferir
       // que casou de verdade, sem despejar o andamento inteiro.
+      //
+      // O PROCESSO É A CHAVE DE DÍGITOS (12/11/2026), e não o texto cru: o ADVBOX
+      // e o DJEN gravam o mesmo número com e sem máscara, e o mesmo processo
+      // aparecia DUAS vezes na lista, contado duas vezes em
+      // `processos_distintos_encontrados`. As grafias vistas de cada um ficam
+      // guardadas para a verificação de atualidade abaixo.
       interface Achado {
         numero_processo: string
         data: string | null
         fonte: 'movimentacao' | 'publicacao'
         trecho: string | null
       }
+      const chaveDoProcesso = (numero: string) => soDigitos(numero) || numero
       const porProcesso = new Map<string, Achado>()
+      const grafiasPorChave = new Map<string, Set<string>>()
       const registra = (a: Achado) => {
         if (!a.numero_processo) return
-        const atual = porProcesso.get(a.numero_processo)
+        const chave = chaveDoProcesso(a.numero_processo)
+        let grafias = grafiasPorChave.get(chave)
+        if (!grafias) grafiasPorChave.set(chave, (grafias = new Set()))
+        grafias.add(a.numero_processo)
+        const atual = porProcesso.get(chave)
         if (!atual || (a.data ?? '') > (atual.data ?? '')) {
-          porProcesso.set(a.numero_processo, a)
+          porProcesso.set(chave, a)
         }
       }
       const corta = (t: string | null) =>
@@ -1359,7 +1518,7 @@ async function executar(
 
       for (const m of mov.data ?? []) {
         registra({
-          numero_processo: m.numero_processo,
+          numero_processo: m.numero_processo || m.numero_digits,
           data: m.data,
           fonte: 'movimentacao',
           trecho: corta(m.conteudo),
@@ -1396,30 +1555,46 @@ async function executar(
       // acendia — processo da amostra empurrado para fora do corte por outros
       // mais ativos saía como "sem andamento mais recente", sem aviso nenhum.
       const CAP_VERIFICACAO = 1000
-      const numerosDaAmostra = [
-        ...new Set(amostra.map((a) => a.numero_processo).filter(Boolean)),
+      const chavesDaAmostra = [
+        ...new Set(amostra.map((a) => chaveDoProcesso(a.numero_processo)).filter(Boolean)),
+      ]
+      // Os dígitos (para o ADVBOX, que tem a coluna só-dígitos) e TODAS as grafias
+      // (para o DJEN, que não tem): as vistas na busca e as duas formas padrão
+      // do CNJ — o processo achado só no ADVBOX pode estar mascarado no DJEN.
+      const digitosDaAmostra = chavesDaAmostra.filter((c) => /^\d+$/.test(c))
+      const grafiasDaAmostra = [
+        ...new Set(
+          chavesDaAmostra.flatMap((c) => [...(grafiasPorChave.get(c) ?? []), ...formasDoNumero(c)]),
+        ),
       ]
       const maisRecentePorProcesso = new Map<
         string,
         { data: string | null; fonte: 'movimentacao' | 'publicacao'; trecho: string | null }
       >()
-      let verificacaoTruncada = false
-      if (numerosDaAmostra.length > 0) {
+      let verificacaoLimitada = false
+      if (chavesDaAmostra.length > 0) {
         const [movRecentes, pubRecentes] = await Promise.all([
-          svc
-            .from('advbox_movimentacoes')
-            .select('numero_processo, data, conteudo')
-            .in('numero_processo', numerosDaAmostra)
-            .order('data', { ascending: false })
-            .limit(CAP_VERIFICACAO),
+          digitosDaAmostra.length > 0
+            ? svc
+                .from('advbox_movimentacoes')
+                .select('numero_processo, numero_digits, data, conteudo')
+                .in('numero_digits', digitosDaAmostra)
+                .order('data', { ascending: false })
+                .limit(CAP_VERIFICACAO)
+            : Promise.resolve({ data: [], error: null }),
           svc
             .from('djen_publicacoes')
             .select('numero_processo, data_disponibilizacao, raw')
-            .in('numero_processo', numerosDaAmostra)
+            .in('numero_processo', grafiasDaAmostra)
             .order('data_disponibilizacao', { ascending: false })
             .limit(CAP_VERIFICACAO),
         ])
-        verificacaoTruncada =
+        // A VERIFICAÇÃO QUE FALHOU TAMBÉM LIMITA (12/11/2026): com erro, a
+        // consulta voltava sem linhas e todo processo saía como "sem andamento
+        // mais recente" — o "ainda concluso" afirmado sem ter sido conferido.
+        verificacaoLimitada =
+          !!movRecentes.error ||
+          !!pubRecentes.error ||
           (movRecentes.data?.length ?? 0) >= CAP_VERIFICACAO ||
           (pubRecentes.data?.length ?? 0) >= CAP_VERIFICACAO
         const registraRecente = (
@@ -1428,14 +1603,15 @@ async function executar(
           fonte: 'movimentacao' | 'publicacao',
           trecho: string | null,
         ) => {
-          const atual = maisRecentePorProcesso.get(numero)
+          const chave = chaveDoProcesso(numero)
+          const atual = maisRecentePorProcesso.get(chave)
           if (!atual || (data ?? '') > (atual.data ?? '')) {
-            maisRecentePorProcesso.set(numero, { data, fonte, trecho })
+            maisRecentePorProcesso.set(chave, { data, fonte, trecho })
           }
         }
         for (const m of (movRecentes.data ?? []) as Record<string, unknown>[]) {
           registraRecente(
-            String(m.numero_processo),
+            String(m.numero_digits || m.numero_processo),
             m.data as string | null,
             'movimentacao',
             corta(m.conteudo as string | null),
@@ -1452,7 +1628,7 @@ async function executar(
       }
 
       const processosComVerificacao = amostra.map((a) => {
-        const maisRecente = maisRecentePorProcesso.get(a.numero_processo)
+        const maisRecente = maisRecentePorProcesso.get(chaveDoProcesso(a.numero_processo))
         const superado = !!maisRecente && (maisRecente.data ?? '') > (a.data ?? '')
         return {
           ...a,
@@ -1490,8 +1666,9 @@ async function executar(
         pode_haver_mais_antigos:
           varreduraTruncada || todos.length > amostra.length || contagemIncompleta,
         // Só quando true é que a checagem de "houve algo mais recente" pode ter
-        // ficado incompleta para algum processo muito ativo da amostra.
-        verificacao_de_atualidade_limitada: verificacaoTruncada || undefined,
+        // ficado incompleta — processo muito ativo na amostra, ou a consulta da
+        // checagem falhou.
+        verificacao_de_atualidade_limitada: verificacaoLimitada || undefined,
         processos: processosComVerificacao,
       })
     }
@@ -1503,11 +1680,20 @@ async function executar(
         .from('djen_publicacoes')
         .select('id', { count: 'exact', head: true })
       if (typeof args.tratada === 'boolean') q = q.eq('tratada', args.tratada)
-      if (typeof args.dias === 'number')
-        q = q.gte('data_disponibilizacao', desde(args.dias))
+      // INTEIRO POSITIVO (12/11/2026): `dias: 7.5` dava data inválida e a
+      // contagem inteira falhava.
+      const dias = inteiroPositivoOuNulo(args.dias)
+      if (dias) q = q.gte('data_disponibilizacao', desde(dias))
       const { count, error } = await q
       if (error) return JSON.stringify({ erro: error.message })
-      return JSON.stringify({ total: count ?? 0, filtros: args })
+      return JSON.stringify({
+        total: count ?? 0,
+        filtros: args,
+        aviso:
+          args.dias !== undefined && !dias
+            ? '`dias` precisa ser um inteiro positivo — a contagem foi feita sem janela de dias.'
+            : undefined,
+      })
     }
 
     case 'resumo_cessoes': {
@@ -1545,24 +1731,39 @@ async function executar(
     }
 
     case 'listar_publicacoes': {
+      // O TOTAL EXATO VEM JUNTO (12/11/2026): "quantas intimações pendentes" era
+      // respondido pelo tamanho da lista, que para no teto.
+      const teto = limite(args.limite)
       let q = svc
         .from('djen_publicacoes')
-        .select('numero_processo, data_disponibilizacao, sigla_tribunal, tipo_comunicacao, tratada, raw')
+        .select('numero_processo, data_disponibilizacao, sigla_tribunal, tipo_comunicacao, tratada, raw', {
+          count: 'exact',
+        })
         .order('data_disponibilizacao', { ascending: false })
-        .limit(limite(args.limite))
+        .order('id', { ascending: false })
+        .limit(teto)
       if (typeof args.tratada === 'boolean') q = q.eq('tratada', args.tratada)
-      if (typeof args.dias === 'number')
-        q = q.gte('data_disponibilizacao', desde(args.dias))
+      const dias = inteiroPositivoOuNulo(args.dias)
+      if (dias) q = q.gte('data_disponibilizacao', desde(dias))
       if (args.numero_processo) {
-        const d = String(args.numero_processo).replace(/\D/g, '')
-        // Casa pelo prefixo de dígitos: o DJEN grava o número em formatos
-        // variados e a coluna não é normalizada.
-        q = q.ilike('numero_processo', `%${(d || String(args.numero_processo)).slice(0, 7)}%`)
+        const d = soDigitos(args.numero_processo)
+        // PELOS DÍGITOS, com ou sem máscara (12/11/2026): o DJEN grava o número
+        // dos dois jeitos. Os 7 primeiros traziam publicação de outro processo
+        // com o mesmo começo; o número inteiro casa só ele.
+        q = d.length >= 6
+          ? q.filter('numero_processo', 'imatch', regexDosDigitos(d, { inteiro: d.length >= 20 }))
+          : q.ilike('numero_processo', `%${String(args.numero_processo)}%`)
       }
-      const { data, error } = await q
+      const { data, error, count } = await q
       if (error) return JSON.stringify({ erro: error.message })
+      const voltaram = data?.length ?? 0
       return JSON.stringify({
-        quantidade_retornada: data?.length ?? 0,
+        total: count ?? null,
+        quantidade_retornada: voltaram,
+        aviso_limite:
+          count !== null && count > voltaram
+            ? `Há ${count} publicações com estes filtros; a lista traz as ${voltaram} mais recentes.`
+            : undefined,
         publicacoes: ((data ?? []) as Record<string, unknown>[]).map((p) => ({
           numero_processo: p.numero_processo,
           data: p.data_disponibilizacao,
@@ -1577,42 +1778,82 @@ async function executar(
     }
 
     case 'listar_tarefas': {
-      let q = svc
-        .from('advbox_tarefas')
-        .select(
-          'numero_processo, tipo, data, date_deadline, notes, responsaveis, ' +
-            'important, urgent, concluida',
-        )
-        .order('date_deadline', { ascending: true, nullsFirst: false })
-        .limit(limite(args.limite))
-      if (typeof args.concluida === 'boolean') q = q.eq('concluida', args.concluida)
-      if (args.tipo) q = q.ilike('tipo', `%${args.tipo}%`)
-      if (args.numero_processo) {
-        const d = String(args.numero_processo).replace(/\D/g, '')
-        if (d.length >= 6) q = q.eq('numero_digits', d)
-        else q = q.ilike('numero_processo', `%${args.numero_processo}%`)
+      const teto = limite(args.limite)
+      const avisosDeFiltro: string[] = []
+      const prazoAte = args.prazo_ate === undefined ? null : dataAAAAMMDD(args.prazo_ate)
+      const prazoDe = args.prazo_de === undefined ? null : dataAAAAMMDD(args.prazo_de)
+      if (args.prazo_ate !== undefined && !prazoAte) avisosDeFiltro.push('`prazo_ate` não é uma data AAAA-MM-DD — ignorado.')
+      if (args.prazo_de !== undefined && !prazoDe) avisosDeFiltro.push('`prazo_de` não é uma data AAAA-MM-DD — ignorado.')
+      // Os filtros que o banco aplica, numa consulta nova a cada chamada (a
+      // leitura paginada pede uma por página).
+      const filtrar = <Q,>(q0: Q): Q => {
+        let q = q0 as unknown as Filtravel
+        if (typeof args.concluida === 'boolean') q = q.eq('concluida', args.concluida) as Filtravel
+        if (args.tipo) q = q.ilike('tipo', `%${args.tipo}%`) as Filtravel
+        if (args.numero_processo) {
+          // TRECHO DO NÚMERO TAMBÉM CASA (12/11/2026): só o número inteiro achava
+          // a tarefa; "o que a equipe faz no 0001234" voltava vazio. O número
+          // inteiro continua exato; o trecho procura nos dígitos.
+          const d = soDigitos(args.numero_processo)
+          if (d.length >= 20) q = q.eq('numero_digits', d) as Filtravel
+          else if (d.length >= 4) q = q.ilike('numero_digits', `%${d}%`) as Filtravel
+          else q = q.ilike('numero_processo', `%${args.numero_processo}%`) as Filtravel
+        }
+        if (prazoAte) q = q.lte('date_deadline', prazoAte) as Filtravel
+        if (prazoDe) q = q.gte('date_deadline', prazoDe) as Filtravel
+        if (args.vencidas === true) {
+          // Vencida = prazo fatal no passado E ainda não concluída. Sem o segundo
+          // filtro, tarefa cumprida no prazo apareceria como atrasada.
+          q = (q.lt('date_deadline', desde(0)) as Filtravel).eq('concluida', false) as Filtravel
+        }
+        return q as unknown as Q
       }
-      if (typeof args.prazo_ate === 'string') q = q.lte('date_deadline', args.prazo_ate)
-      if (args.vencidas === true) {
-        // Vencida = prazo fatal no passado E ainda não concluída. Sem o segundo
-        // filtro, tarefa cumprida no prazo apareceria como atrasada.
-        q = q.lt('date_deadline', desde(0)).eq('concluida', false)
-      }
-      const { data, error } = await q
-      if (error) return JSON.stringify({ erro: error.message })
-      let tarefas = (data ?? []) as unknown as Record<string, unknown>[]
-      // Responsável é jsonb (lista de nomes): filtra em memória, porque `ilike`
-      // não entra dentro do array.
+      const COLUNAS_TAREFA =
+        'numero_processo, tipo, data, date_deadline, notes, responsaveis, important, urgent, concluida'
+
+      let tarefas: Record<string, unknown>[]
+      let total: number | null
       if (args.responsavel) {
-        const alvo = String(args.responsavel).toLowerCase()
-        tarefas = tarefas.filter((t) =>
-          (Array.isArray(t.responsaveis) ? (t.responsaveis as unknown[]) : [])
-            .some((r) => String(r).toLowerCase().includes(alvo)),
+        // O RESPONSÁVEL FILTRA SOBRE TODAS AS TAREFAS, E NÃO SOBRE AS 20 PRIMEIRAS
+        // (12/11/2026). `responsaveis` é jsonb (lista de nomes) e o PostgREST não
+        // procura trecho dentro dele, então o filtro é em memória — mas era feito
+        // DEPOIS do teto: "quantas tarefas a Ana tem" olhava as 20 primeiras de
+        // todo mundo e respondia 3. Agora lê todas as que passam pelos outros
+        // filtros, filtra, conta e só então corta. Sem acento e sem caixa.
+        const lidas = await lerTudo(
+          () => filtrar(svc.from('advbox_tarefas').select(COLUNAS_TAREFA)),
+          ['date_deadline', 'id'],
         )
+        if (lidas.erro) return JSON.stringify({ erro: lidas.erro })
+        if (lidas.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
+        const alvo = normalizarNome(String(args.responsavel))
+        const todas = lidas.linhas.filter((t) =>
+          (Array.isArray(t.responsaveis) ? (t.responsaveis as unknown[]) : [])
+            .some((r) => normalizarNome(String(r)).includes(alvo)),
+        )
+        total = todas.length
+        tarefas = todas.slice(0, teto)
+      } else {
+        const { data, error, count } = await filtrar(
+          svc.from('advbox_tarefas').select(COLUNAS_TAREFA, { count: 'exact' }),
+        )
+          .order('date_deadline', { ascending: true, nullsFirst: false })
+          .order('id', { ascending: true })
+          .limit(teto)
+        if (error) return JSON.stringify({ erro: error.message })
+        tarefas = (data ?? []) as unknown as Record<string, unknown>[]
+        total = count ?? null
       }
       return JSON.stringify({
         hoje: desde(0),
+        total,
         quantidade_retornada: tarefas.length,
+        aviso_limite:
+          total !== null && total > tarefas.length
+            ? `Há ${total} tarefas com estes filtros; a lista traz ${tarefas.length} (as de prazo mais próximo). ` +
+              'Para dizer quantas são, use `total`.'
+            : undefined,
+        avisos: avisosDeFiltro.length ? avisosDeFiltro : undefined,
         legenda: {
           date_deadline: 'prazo fatal; null = tarefa sem prazo',
           concluida: 'true = já cumprida',
@@ -1636,18 +1877,35 @@ async function executar(
       // tabela `investimentos` é o registro comercial e pode não refletir a
       // carteira real; responder por ela daria número diferente do que a pessoa
       // vê em Carteiras de Investimento.
-      const { data, error } = await svc
-        .from('processos')
-        .select(`id, ${COLUNAS_PROCESSO}`)
-        .ilike('cessionario', `%${nome}%`)
-      if (error) return JSON.stringify({ erro: error.message })
-      const creditos = (data ?? []) as Record<string, unknown>[]
-      if (creditos.length === 0) {
+      // PAGINADO: a carteira de um investidor grande passa de mil créditos.
+      const lidos = await lerTudo(
+        () => svc.from('processos').select(`id, ${COLUNAS_PROCESSO}`).ilike('cessionario', `%${nome}%`),
+        ['id'],
+      )
+      if (lidos.erro) return JSON.stringify({ erro: lidos.erro })
+      if (lidos.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
+      if (lidos.linhas.length === 0) {
         return JSON.stringify({
           encontrado: false,
           aviso: `Nenhum crédito com cessionário casando "${nome}".`,
         })
       }
+      // UM INVESTIDOR SÓ (12/11/2026): o trecho "Silva" casava três investidores
+      // e a carteira saía com a soma dos três, apresentada como de um. Mais de um
+      // nome distinto (pela chave normalizada) e nenhum igual ao pedido = devolve
+      // os candidatos para a pessoa escolher.
+      const distintos = investidoresDistintos(lidos.linhas)
+      const escolhido = escolherInvestidor(nome, distintos)
+      if (!escolhido) {
+        return JSON.stringify({
+          encontrado: false,
+          aviso:
+            `"${nome}" casou com ${distintos.length} investidores diferentes. Pergunte à ` +
+            'pessoa qual deles, ou chame de novo com o nome completo.',
+          candidatos: distintos.map((d) => ({ nome: d.nome, creditos: d.creditos })),
+        })
+      }
+      const creditos = lidos.linhas.filter((c) => normalizarNome(String(c.cessionario ?? '')) === escolhido)
       const num = (v: unknown) => Number(v ?? 0)
       interface TotaisCarteira {
         creditos: number
@@ -1676,12 +1934,29 @@ async function executar(
           liquidados: 0,
         },
       )
-      const { data: resumos } = await svc
-        .from('carteira_resumos')
-        .select('processo_id, estagio_processual, providencias')
-        .in('processo_id', creditos.map((c) => String(c.id)))
+      // A LISTA TEM TETO, OS TOTAIS NÃO (12/11/2026): carteira de centenas de
+      // créditos, cada um com o texto do estágio, estourava o contexto do
+      // modelo. Os totais acima contam todos; a lista traz os 60 adquiridos mais
+      // recentemente, com aviso.
+      const TETO_DA_CARTEIRA = 60
+      const listados = [...creditos]
+        .sort((a, b) => String(b.data_aquisicao ?? '').localeCompare(String(a.data_aquisicao ?? '')))
+        .slice(0, TETO_DA_CARTEIRA)
+      // Em fatias (`lerPorIds`): a lista de ids vai na URL, e passadas algumas
+      // centenas a consulta falha. E o erro é DITO: sem olhar, o estágio de
+      // todos saía null, como se nunca tivesse sido gerado.
+      const resumos = await lerPorIds(
+        listados.map((c) => String(c.id)),
+        (fatia, de, ate) =>
+          svc
+            .from('carteira_resumos')
+            .select('processo_id, estagio_processual, providencias')
+            .in('processo_id', fatia)
+            .order('processo_id', { ascending: true })
+            .range(de, ate),
+      )
       const porId = new Map(
-        ((resumos ?? []) as Record<string, unknown>[]).map((r) => [
+        (resumos.linhas as Record<string, unknown>[]).map((r) => [
           String(r.processo_id),
           { estagio_processual: r.estagio_processual, providencias: r.providencias },
         ]),
@@ -1690,9 +1965,23 @@ async function executar(
         encontrado: true,
         moeda: 'BRL',
         fonte: 'campo cessionário dos créditos — a mesma da tela de Carteiras',
+        investidor: distintos.find((d) => d.chave === escolhido)?.nome,
+        outros_investidores_com_nome_parecido:
+          distintos.length > 1
+            ? distintos.filter((d) => d.chave !== escolhido).map((d) => d.nome)
+            : undefined,
         nomes_casados: [...new Set(creditos.map((c) => c.cessionario))],
         totais,
-        creditos: creditos.map(({ id, ...resto }) => ({
+        quantidade_retornada: listados.length,
+        aviso_limite:
+          creditos.length > listados.length
+            ? `A carteira tem ${creditos.length} créditos (os totais contam todos); a lista traz ` +
+              `os ${listados.length} adquiridos mais recentemente.`
+            : undefined,
+        erro_situacao_atual: resumos.erro
+          ? `Não consegui ler o estágio dos créditos (${resumos.erro}) — situacao_atual veio vazia por isso, não por falta de resumo.`
+          : undefined,
+        creditos: listados.map(({ id, ...resto }) => ({
           ...resto,
           situacao_atual: porId.get(String(id)) ?? null,
         })),
@@ -1704,6 +1993,12 @@ async function executar(
       // ANTES do filtro `ficha_incompleta`, feito em memória — "quem está com
       // ficha incompleta" olhava só 50 fichas em ordem qualquer e dizia "todas
       // completas" sobre as outras. O teto vale agora só no que volta ao modelo.
+      //
+      // A MESMA LISTA DA TELA (12/11/2026): pessoas das fichas E de todo
+      // cessionário/originador que aparece nos créditos (`listarPessoas`, em
+      // src/lib/pessoas.ts) — quem está nos créditos sem ficha nenhuma é o caso
+      // mais incompleto de todos, e não aparecia. Créditos contados pela chave
+      // normalizada, a mesma das fichas (`normalizarNome === nome_chave`).
       const fichas = await lerTudo(() => {
         let q = svc
           .from('investidor_dados')
@@ -1712,11 +2007,10 @@ async function executar(
           // dado bancário sem necessidade. O que vai é se estão PREENCHIDOS.
           .select('tipo, nome_exibicao, nome_chave, cpf, rg, banco, agencia, conta, pix, cidade, uf, representante')
         if (args.papel) q = q.eq('tipo', args.papel)
-        if (args.nome) q = q.ilike('nome_exibicao', `%${args.nome}%`)
         return q
       }, ['tipo', 'nome_chave'])
       if (fichas.erro) return JSON.stringify({ erro: fichas.erro })
-      const data = fichas.linhas
+      if (fichas.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
 
       // Quantos créditos cada pessoa tem, no papel dela — da carteira INTEIRA,
       // paginada: o select cru parava em 1000 créditos e contava a menos.
@@ -1725,11 +2019,12 @@ async function executar(
         ['id'],
       )
       if (creditos.erro) return JSON.stringify({ erro: creditos.erro })
+      if (creditos.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
       const procs = creditos.linhas
       const conta = (campo: 'cessionario' | 'originador') => {
         const m = new Map<string, number>()
         for (const p of procs) {
-          const n = String(p[campo] ?? '').trim().toLowerCase()
+          const n = normalizarNome(String(p[campo] ?? ''))
           if (n) m.set(n, (m.get(n) ?? 0) + 1)
         }
         return m
@@ -1737,37 +2032,57 @@ async function executar(
       const porCessionario = conta('cessionario')
       const porOriginador = conta('originador')
 
+      const papeis: PapelDaPessoa[] =
+        args.papel === 'investidor' || args.papel === 'originador'
+          ? [args.papel]
+          : ['investidor', 'originador']
+      const fichasLidas = fichas.linhas as unknown as FichaDaPessoa[]
+      const alvo = args.nome ? normalizarNome(String(args.nome)) : ''
+
       const cheio = (v: unknown) => !!String(v ?? '').trim()
-      let pessoas = ((data ?? []) as Record<string, unknown>[]).map((d) => {
-        const nome = String(d.nome_exibicao ?? d.nome_chave ?? '')
-        const chave = nome.trim().toLowerCase()
-        const faltando = [
-          cheio(d.cpf) ? null : 'documento',
-          cheio(d.banco) ? null : 'banco',
-          cheio(d.conta) ? null : 'conta',
-          cheio(d.pix) ? null : 'pix',
-          cheio(d.cidade) ? null : 'endereço',
-        ].filter(Boolean)
-        return {
-          nome,
-          papel: d.tipo,
-          cidade_uf: [d.cidade, d.uf].filter(Boolean).join('/') || null,
-          // Documento com mais de 11 dígitos é CNPJ — mesma régua da plataforma.
-          pessoa_juridica: String(d.cpf ?? '').replace(/\D/g, '').length > 11,
-          representante_legal: d.representante ?? null,
-          creditos_como_cessionario: porCessionario.get(chave) ?? 0,
-          creditos_como_originador: porOriginador.get(chave) ?? 0,
-          ficha_completa: faltando.length === 0,
-          campos_em_branco: faltando.length ? faltando : undefined,
-        }
-      })
+      let pessoas = papeis
+        .flatMap((papel) => pessoasDoAssistente(papel, procs, fichasLidas))
+        .filter((p) => !alvo || p.chave.includes(alvo))
+        .map((p) => {
+          const d = (p.ficha ?? {}) as Record<string, unknown>
+          const faltando = p.ficha
+            ? [
+                cheio(d.cpf) ? null : 'documento',
+                cheio(d.banco) ? null : 'banco',
+                cheio(d.conta) ? null : 'conta',
+                cheio(d.pix) ? null : 'pix',
+                cheio(d.cidade) ? null : 'endereço',
+              ].filter(Boolean)
+            : ['ficha inteira (não cadastrada)']
+          return {
+            nome: p.nome,
+            papel: p.papel,
+            ficha_cadastrada: !!p.ficha,
+            cidade_uf: [d.cidade, d.uf].filter(Boolean).join('/') || null,
+            // Documento com mais de 11 dígitos é CNPJ — mesma régua da plataforma.
+            pessoa_juridica: String(d.cpf ?? '').replace(/\D/g, '').length > 11,
+            representante_legal: d.representante ?? null,
+            creditos_como_cessionario: porCessionario.get(p.chave) ?? 0,
+            creditos_como_originador: porOriginador.get(p.chave) ?? 0,
+            ficha_completa: faltando.length === 0,
+            campos_em_branco: faltando.length ? faltando : undefined,
+          }
+        })
       if (args.ficha_incompleta === true)
         pessoas = pessoas.filter((p) => !p.ficha_completa)
+      const teto = limite(args.limite)
       return JSON.stringify({
         aviso:
           'CPF/CNPJ, RG, agência, conta e Pix NÃO são expostos ao assistente — ' +
           'só se estão preenchidos. Para ver os valores, use a tela Dados cadastrais.',
-        quantidade_retornada: pessoas.length,
+        // O TOTAL É O DA LISTA INTEIRA; `quantidade_retornada`, o que veio. Antes
+        // o segundo levava o valor do primeiro, e a lista cortada passava por toda.
+        total: pessoas.length,
+        quantidade_retornada: Math.min(pessoas.length, teto),
+        aviso_limite:
+          pessoas.length > teto
+            ? `Há ${pessoas.length} pessoas com estes filtros; a lista traz as ${teto} primeiras em ordem alfabética.`
+            : undefined,
         pessoas: pessoas.slice(0, limite(args.limite)),
       })
     }
@@ -1821,14 +2136,19 @@ async function executar(
       // filtro é do lado do crédito.
       // O TETO VAI NA CONSULTA (23/10/2026): lia-se a carteira inteira (até as
       // 1000 do PostgREST) para usar só as `limite` primeiras.
+      // ORDEM ESTÁVEL E TOTAL EXATO (12/11/2026): sem ordem, duas chamadas com o
+      // mesmo filtro traziam créditos diferentes; sem total, "resuma os créditos
+      // ativos" falava dos 20 que vieram como se fossem todos.
       const { query: alvo, avisos } = aplicarFiltrosGenericos(
         svc
           .from('processos')
-          .select('id, numero_cnj, cedente, cessionario, status')
+          .select('id, numero_cnj, cedente, cessionario, status', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true })
           .limit(limite(args.limite)),
         args.filtros,
       )
-      const { data: procs, error } = await alvo
+      const { data: procs, error, count: totalDoFiltro } = await alvo
       if (error) return JSON.stringify({ erro: error.message })
       const lista = ((procs ?? []) as Record<string, unknown>[]).slice(
         0,
@@ -1840,10 +2160,12 @@ async function executar(
           creditos: [],
           avisos: avisos.length ? avisos : undefined,
         })
-      const { data: resumos } = await svc
+      const { data: resumos, error: erroDosResumos } = await svc
         .from('carteira_resumos')
         .select('processo_id, estagio_processual, providencias, erro, gerado_em')
         .in('processo_id', lista.map((p) => String(p.id)))
+      // Consulta dos textos que caiu não é "ainda não foi gerado" para todos.
+      if (erroDosResumos) return JSON.stringify({ erro: erroDosResumos.message })
       const porId = new Map(
         ((resumos ?? []) as Record<string, unknown>[]).map((r) => [String(r.processo_id), r]),
       )
@@ -1851,7 +2173,12 @@ async function executar(
         aviso:
           'Textos mantidos pela plataforma para a carteira do investidor, escritos ' +
           'sem datas de propósito. Para a cronologia de um caso use ficha_do_credito.',
+        total: totalDoFiltro ?? null,
         quantidade_retornada: lista.length,
+        aviso_limite:
+          totalDoFiltro !== null && totalDoFiltro > lista.length
+            ? `Há ${totalDoFiltro} créditos com estes filtros; vieram os ${lista.length} cadastrados mais recentemente.`
+            : undefined,
         avisos: avisos.length ? avisos : undefined,
         creditos: lista.map(({ id, ...resto }) => {
           const r = porId.get(String(id))
@@ -1932,29 +2259,45 @@ async function executar(
     }
 
     case 'funil_comercial': {
+      // PARADOS NA COLUNA (12/11/2026): "quais cards estão parados" era
+      // respondido pela data de ATUALIZAÇÃO, que muda com qualquer edição
+      // (etiqueta, nota, responsável). A data de entrada na coluna (`etapa_em`,
+      // migração 0066) é a que diz há quanto tempo o card não anda — do mais
+      // parado ao menos. Colunas de fechamento (ganho/perdido) não contam como
+      // parado: o card terminou.
+      const paradosHaDias = inteiroPositivoOuNulo(args.parados_ha_dias)
       let q = svc
         .from('kommo_leads')
         .select(
-          'nome, processo_cnj, pipeline_id, status_id, responsavel_nome, atualizado_em',
+          'nome, processo_cnj, pipeline_id, status_id, responsavel_nome, atualizado_em, etapa_em, etapa_status_id',
+          { count: 'exact' },
         )
-        .order('atualizado_em', { ascending: false })
-        .limit(limite(args.limite))
+      if (paradosHaDias) {
+        q = q
+          .lte('etapa_em', desde(paradosHaDias))
+          .not('status_id', 'in', '(142,143)')
+          .order('etapa_em', { ascending: true })
+      } else {
+        q = q.order('atualizado_em', { ascending: false })
+      }
+      q = q.order('kommo_lead_id', { ascending: true }).limit(limite(args.limite))
       const busca = String(args.busca ?? '')
       if (busca) {
-        const digitos = busca.replace(/\D/g, '')
+        const digitos = soDigitos(busca)
+        // Pelos DÍGITOS, com ou sem máscara (os 7 primeiros achavam outro card).
         q = digitos.length >= 6
-          ? q.ilike('processo_cnj', `%${digitos.slice(0, 7)}%`)
+          ? q.filter('processo_cnj', 'imatch', regexDosDigitos(digitos, { inteiro: digitos.length >= 20 }))
           : q.ilike('nome', `%${busca}%`)
       }
-      const { data, error } = await q
+      const { data, error, count } = await q
       if (error) return JSON.stringify({ erro: error.message })
       const cards = (data ?? []) as Record<string, unknown>[]
-      if (cards.length === 0) return JSON.stringify({ quantidade_retornada: 0, cards: [] })
+      if (cards.length === 0) return JSON.stringify({ total: count ?? 0, quantidade_retornada: 0, cards: [] })
 
       // Sem FK entre kommo_leads e kommo_etapa (mesma composta pipeline_id +
       // status_id) — segunda consulta e Map em memória, mesmo estilo de
       // listar_investidores logo acima.
-      const { data: etapas } = await svc
+      const { data: etapas, error: erroEtapas } = await svc
         .from('kommo_etapa')
         .select('pipeline_id, status_id, pipeline_nome, nome')
         .in('pipeline_id', [...new Set(cards.map((c) => c.pipeline_id as number))])
@@ -1964,18 +2307,40 @@ async function executar(
           { funil: e.pipeline_nome, etapa: e.nome },
         ]),
       )
+      const nomeDoFunil = new Map(
+        ((etapas ?? []) as Record<string, unknown>[]).map((e) => [Number(e.pipeline_id), e.pipeline_nome]),
+      )
+      const voltaram = cards.length
       return JSON.stringify({
-        quantidade_retornada: cards.length,
-        cards: cards.map((c) => ({
-          nome: c.nome,
-          processo_cnj: c.processo_cnj,
-          responsavel: c.responsavel_nome,
-          atualizado_em: c.atualizado_em,
-          ...(porChave.get(`${c.pipeline_id}:${c.status_id}`) ?? {
-            funil: null,
-            etapa: null,
-          }),
-        })),
+        total: count ?? null,
+        quantidade_retornada: voltaram,
+        aviso_limite:
+          count !== null && count > voltaram
+            ? `Há ${count} cards com estes filtros; a lista traz ${voltaram}.`
+            : undefined,
+        // As colunas sem nome por FALHA, e não porque não existem.
+        erro_colunas: erroEtapas
+          ? `Não consegui ler os nomes das colunas (${erroEtapas.message}) — funil/etapa vêm null por isso.`
+          : undefined,
+        cards: cards.map((c) => {
+          const daTabela = porChave.get(`${c.pipeline_id}:${c.status_id}`)
+          // 142 e 143 são as colunas que o Kommo tem em todo funil (ganho e
+          // perdido) e não vêm em kommo_etapa: sem isto, saíam com etapa null.
+          const doSistema = COLUNAS_DO_SISTEMA[Number(c.status_id)]
+          const dataValeParaAColuna = c.etapa_status_id == null || Number(c.etapa_status_id) === Number(c.status_id)
+          return {
+            nome: c.nome,
+            processo_cnj: c.processo_cnj,
+            responsavel: c.responsavel_nome,
+            atualizado_em: c.atualizado_em,
+            funil: daTabela?.funil ?? nomeDoFunil.get(Number(c.pipeline_id)) ?? null,
+            etapa: daTabela?.etapa ?? doSistema ?? null,
+            na_etapa_desde: dataValeParaAColuna ? (c.etapa_em ?? null) : null,
+            // O card mudou de coluna depois da última apuração da data: a que
+            // está guardada é da coluna anterior.
+            data_da_etapa_incerta: dataValeParaAColuna ? undefined : true,
+          }
+        }),
       })
     }
 
@@ -2090,55 +2455,84 @@ async function executar(
       const hoje = desde(0)
       const fimSemana = daqui(7)
       const fimMes = daqui(30)
-      const { data, error } = await svc
-        .from('processos')
-        .select('numero_cnj, cedente, cessionario, status, expectativa_liquidacao, valor_face')
-        .in('status', ['ativo', 'complementar'])
-        .is('data_liquidacao', null)
-        .not('expectativa_liquidacao', 'is', null)
-        .lte('expectativa_liquidacao', fimMes)
-        .order('expectativa_liquidacao', { ascending: true })
-        .limit(LIMITE_MAX)
-      if (error) return JSON.stringify({ erro: error.message })
-      const linhas = (data ?? []) as Record<string, unknown>[]
-      const hoje_ou_atrasado: Record<string, unknown>[] = []
-      const esta_semana: Record<string, unknown>[] = []
-      const este_mes: Record<string, unknown>[] = []
-      // Um só corte por data, e não três consultas: os limiares (hoje, fim da
-      // semana, fim do mês) são os mesmos pontos que já vieram no filtro —
-      // reaproveitar evita três idas ao banco pra separar o que já está em mãos.
-      for (const l of linhas) {
-        const exp = String(l.expectativa_liquidacao)
-        if (exp <= hoje) hoje_ou_atrasado.push(l)
-        else if (exp <= fimSemana) esta_semana.push(l)
-        else este_mes.push(l)
+      // UMA CONSULTA POR GRUPO, CADA UMA COM O SEU TOTAL (12/11/2026). Era uma
+      // consulta só, em ordem crescente e com teto de 50: as previsões VENCIDAS
+      // (as mais antigas, e numa carteira real são dezenas) enchiam o teto e
+      // "esta semana" e "este mês" saíam vazios — afirmação de que nada vence,
+      // com coisa vencendo. E os nomes diziam "esta semana" e "este mês" para
+      // "os próximos 7 dias" e "os próximos 30": agora dizem o que são.
+      const grupo = (aplicar: <Q>(q: Q) => Q) =>
+        aplicar(
+          svc
+            .from('processos')
+            .select('numero_cnj, cedente, cessionario, status, expectativa_liquidacao, valor_face', {
+              count: 'exact',
+            })
+            .in('status', ['ativo', 'complementar'])
+            .is('data_liquidacao', null)
+            .not('expectativa_liquidacao', 'is', null),
+        )
+          .order('expectativa_liquidacao', { ascending: true })
+          .order('id', { ascending: true })
+          .limit(LIMITE_MAX)
+      const [atrasados, semana, mes] = await Promise.all([
+        grupo((q) => (q as unknown as Filtravel).lt('expectativa_liquidacao', hoje) as typeof q),
+        grupo(
+          (q) =>
+            ((q as unknown as Filtravel).gte('expectativa_liquidacao', hoje) as Filtravel).lte(
+              'expectativa_liquidacao',
+              fimSemana,
+            ) as typeof q,
+        ),
+        grupo(
+          (q) =>
+            ((q as unknown as Filtravel).gt('expectativa_liquidacao', fimSemana) as Filtravel).lte(
+              'expectativa_liquidacao',
+              fimMes,
+            ) as typeof q,
+        ),
+      ])
+      const erro = atrasados.error ?? semana.error ?? mes.error
+      if (erro) return JSON.stringify({ erro: erro.message })
+      const comTotal = (r: { data: unknown[] | null; count: number | null }) => {
+        const linhas = r.data ?? []
+        return {
+          total: r.count ?? null,
+          aviso_limite:
+            r.count !== null && r.count > linhas.length
+              ? `São ${r.count}; a lista traz ${linhas.length} (as previsões mais antigas primeiro).`
+              : undefined,
+          creditos: linhas,
+        }
       }
       return JSON.stringify({
         moeda: 'BRL',
         hoje,
-        fim_da_semana: fimSemana,
-        fim_do_mes: fimMes,
-        aviso:
-          linhas.length >= LIMITE_MAX
-            ? `Bateu no teto de ${LIMITE_MAX} linhas — pode haver mais além do que veio.`
-            : undefined,
-        // "hoje_ou_atrasado" e não só "hoje": expectativa já vencida sem
-        // liquidação é a informação mais urgente das três, e escondê-la aqui
-        // seria pior do que juntar com o dia de hoje.
-        hoje_ou_atrasado,
-        esta_semana,
-        este_mes,
+        legenda: {
+          atrasados: `expectativa de liquidação ANTES de hoje (${hoje}) e ainda não liquidado`,
+          proximos_7_dias: `expectativa de hoje (${hoje}) até ${fimSemana}`,
+          de_8_a_30_dias: `expectativa depois de ${fimSemana} até ${fimMes}`,
+        },
+        atrasados: comTotal(atrasados),
+        proximos_7_dias: comTotal(semana),
+        de_8_a_30_dias: comTotal(mes),
       })
     }
 
     case 'processos_parados': {
-      const diasCorte = typeof args.dias === 'number' ? args.dias : 20
+      // INTEIRO POSITIVO (12/11/2026): `dias: 7.5` dava data inválida.
+      const diasCorte = inteiroEntre(args.dias, { min: 1, max: 3650, padrao: 20 })
       const corte = desde(diasCorte)
 
       // PAGINADO (23/10/2026): o `.limit(5000)` não valia — o PostgREST para em
       // 1000 de qualquer jeito, e o processo que ficasse fora do corte não
       // aparecia como parado, com `total_parados` dado como exato.
-      const [statusRows, processosAtivos] = await Promise.all([
+      //
+      // O CRITÉRIO DA TELA, POR INTEIRO (12/11/2026) — ver `paradosDaCarteira`:
+      // dígitos inteiros (não os 7 primeiros), apenso herdando o crédito pai, e
+      // andamento dentro da janela em `advbox_movimentacoes` tirando o processo
+      // da lista mesmo com a linha de status atrasada.
+      const [statusRows, processosAtivos, apensos, recentes] = await Promise.all([
         lerTudo(
           () => svc.from('advbox_processo_status').select('numero_processo, ultima_movimentacao'),
           ['numero_processo'],
@@ -2147,8 +2541,13 @@ async function executar(
           () =>
             svc
               .from('processos')
-              .select('numero_cnj, cedente, cessionario, status')
+              .select('id, numero_cnj, cedente, cessionario, status')
               .in('status', ['ativo', 'complementar']),
+          ['id'],
+        ),
+        lerTudo(() => svc.from('apensos').select('numero, processo_id'), ['id']),
+        lerTudo(
+          () => svc.from('advbox_movimentacoes').select('numero_digits').gte('data', corte),
           ['id'],
         ),
       ])
@@ -2157,56 +2556,44 @@ async function executar(
       if (statusRows.cortada || processosAtivos.cortada) {
         return JSON.stringify({ erro: LEITURA_CORTADA })
       }
+      // Apensos e andamentos recentes REFINAM a lista; se não deu para lê-los,
+      // ela sai pelo status só, e isso é dito.
+      const semApensos = !!apensos.erro || apensos.cortada
+      const semConferencia = !!recentes.erro || recentes.cortada
 
-      // Prefixo de 7 dígitos do CNJ, mesmo padrão de casamento usado no resto
-      // deste arquivo (advbox_movimentacoes guarda o número em formato solto).
-      const porDigitos = new Map(
-        processosAtivos.linhas.map((p) => [
-          String(p.numero_cnj).replace(/\D/g, '').slice(0, 7),
-          p,
-        ]),
-      )
-
-      interface Parado {
-        numero_processo: string
-        cedente: unknown
-        cessionario: unknown
-        ultima_movimentacao: string | null
-      }
-      const parados: Parado[] = []
-      for (const s of statusRows.linhas as unknown as {
-        numero_processo: string
-        ultima_movimentacao: string | null
-      }[]) {
-        const chave = String(s.numero_processo ?? '').replace(/\D/g, '').slice(0, 7)
-        const proc = porDigitos.get(chave)
-        // Sem cadastro casando = não é um crédito ativo/complementar nosso —
-        // fora do escopo desta ferramenta (mesmo filtro da tela: encerrados
-        // não entram em Paralisados).
-        if (!proc) continue
-        if (s.ultima_movimentacao && s.ultima_movimentacao >= corte) continue
-        parados.push({
-          numero_processo: s.numero_processo,
-          cedente: (proc as Record<string, unknown>).cedente,
-          cessionario: (proc as Record<string, unknown>).cessionario,
-          ultima_movimentacao: s.ultima_movimentacao,
-        })
-      }
-      // Do menos parado ao mais parado; nunca-movimentou (null) por último —
-      // mesma ordenação da aba Paralisados.
-      parados.sort((a, b) => {
-        if (!a.ultima_movimentacao && !b.ultima_movimentacao) return 0
-        if (!a.ultima_movimentacao) return 1
-        if (!b.ultima_movimentacao) return -1
-        return b.ultima_movimentacao.localeCompare(a.ultima_movimentacao)
+      const parados = paradosDaCarteira({
+        status: statusRows.linhas as unknown as { numero_processo: unknown; ultima_movimentacao: string | null }[],
+        creditos: processosAtivos.linhas as unknown as Parameters<typeof paradosDaCarteira>[0]['creditos'],
+        apensos: semApensos ? [] : (apensos.linhas as { numero: unknown; processo_id: unknown }[]),
+        comMovimentoNaJanela: semConferencia
+          ? new Set()
+          : new Set(recentes.linhas.map((r) => String(r.numero_digits ?? '')).filter(Boolean)),
+        corte,
+        hoje: desde(0),
       })
 
+      const teto = limite(args.limite)
       return JSON.stringify({
-        aviso: 'Mesmo critério da aba Publicações e Movimentações → Paralisados.',
+        aviso:
+          'Mesmo critério da aba Publicações e Movimentações → Paralisados (só créditos ' +
+          'ativos e complementares). Do MAIS parado ao menos parado; quem nunca teve ' +
+          'andamento vem no fim.',
         corte_dias: diasCorte,
         total_parados: parados.length,
-        quantidade_retornada: Math.min(parados.length, limite(args.limite)),
-        processos: parados.slice(0, limite(args.limite)),
+        quantidade_retornada: Math.min(parados.length, teto),
+        aviso_limite:
+          parados.length > teto
+            ? `São ${parados.length} parados; a lista traz os ${teto} mais parados.`
+            : undefined,
+        conferencia_limitada:
+          semApensos || semConferencia
+            ? 'Não consegui ' +
+              [semApensos ? 'ler os apensos' : null, semConferencia ? 'conferir os andamentos recentes' : null]
+                .filter(Boolean)
+                .join(' nem ') +
+              ' — a lista pode ter diferenças pequenas em relação à tela.'
+            : undefined,
+        processos: parados.slice(0, teto),
       })
     }
 
@@ -2466,6 +2853,12 @@ async function extrairArquivosGerados(
   apiKey: string,
   userId: string,
   sinal?: AbortSignal,
+  /**
+   * Onde anotar os arquivos JÁ COPIADOS para o Storage (12/11/2026): a cópia
+   * da Anthropic não serve mais a ninguém, e ficava para sempre no workspace —
+   * quem chama os apaga depois da resposta (`apagarArquivosDaAnthropic`).
+   */
+  paraApagar?: string[],
 ): Promise<{ nome: string; url: string; caminho: string }[]> {
   // SEM REPETIR o mesmo arquivo: a varredura agora cobre todas as rodadas da
   // pergunta, e o mesmo file_id pode aparecer em mais de uma.
@@ -2517,6 +2910,7 @@ async function extrairArquivosGerados(
         console.error('[assistente] arquivo gerado não subiu ao Storage:', error.message)
         continue
       }
+      paraApagar?.push(fileId)
 
       const { data: assinado } = await svc.storage
         .from('assistente-arquivos')
@@ -2566,32 +2960,64 @@ No topo do arquivo: \`gerado_em\`, \`sincronizado_desde\` (o dado mais antigo da
 async function anexarBaseDoKommo(
   svc: SupabaseClient,
   apiKey: string,
-  sinal?: AbortSignal,
-): Promise<{ bloco: Record<string, unknown>; cards: number } | { erro: string }> {
-  const leitura = await lerTodasAsLinhas<Record<string, unknown>>(
-    (de, ate) =>
-      svc
-        .from('kommo_leads')
-        .select('kommo_lead_id, pipeline_id, status_id, nome, responsavel_nome, processo_cnj, tags, tags_em, criado_em, atualizado_em, etapa_em, sincronizado_em, notas, campos:raw->custom_fields_values, preco:raw->price, fechado:raw->closed_at')
-        .order('kommo_lead_id')
-        .range(de, ate),
-    { porPagina: 500, maxPaginas: 40 },
-  )
-  if (leitura.erro) return { erro: `Não consegui ler o espelho do Kommo: ${leitura.erro}` }
-  if (leitura.cortada) return { erro: 'O espelho do Kommo passou do teto de leitura (20 mil cards).' }
+  inicio: number,
+  /** Onde anotar o arquivo enviado, para ser apagado depois da resposta. */
+  paraApagar: string[],
+): Promise<{ bloco: Record<string, unknown>; cards: number } | { erro: string; status: number }> {
+  const sinal = sinalAteOTeto(inicio)
+  // As colunas primeiro: a base é montada página a página, e cada página já
+  // precisa delas para dar nome à coluna de cada card.
   const { data: etapas, error: erroEtapas } = await svc
     .from('kommo_etapa')
     .select('pipeline_id, status_id, pipeline_nome, nome, ordem')
-  if (erroEtapas) return { erro: `Não consegui ler as colunas do Kommo: ${erroEtapas.message}` }
+    .abortSignal(sinal)
+  if (erroEtapas) return { erro: `Não consegui ler as colunas do Kommo: ${erroEtapas.message}`, status: 502 }
+  const base = baseDoKommoEmPedacos((etapas ?? []) as EtapaDoEspelho[])
 
-  const linhas: LinhaDoEspelho[] = leitura.linhas.map((l) => ({
-    ...(l as unknown as LinhaDoEspelho),
-    raw: { custom_fields_values: l.campos, price: l.preco, closed_at: l.fechado },
-  }))
-  const base = montarBaseDoKommo(linhas, (etapas ?? []) as EtapaDoEspelho[], new Date())
+  // PÁGINA A PÁGINA, COM O RELÓGIO (12/11/2026). A leitura juntava o espelho
+  // inteiro antes de montar qualquer coisa, sem olhar o tempo: num espelho
+  // grande, a função morria aos 150 s no meio da leitura, calada, e a pessoa via
+  // um erro de rede. Agora cada página vira texto assim que chega (as linhas são
+  // soltas), o sinal do teto corta a consulta, e entre uma página e outra o
+  // relógio é conferido: sem tempo para o modelo trabalhar depois, para aqui e
+  // diz por quê.
+  const POR_PAGINA = 500
+  const MAX_PAGINAS = 40
+  const TEMPO_MINIMO_PARA_O_MODELO_MS = 40_000
+  let pagina = 0
+  for (; pagina < MAX_PAGINAS; pagina++) {
+    if (tempoAteOTeto(inicio, Date.now(), { minimoMs: 0 }) < TEMPO_MINIMO_PARA_O_MODELO_MS) {
+      return {
+        erro:
+          `Montar a Base do Kommo levou tempo demais (${base.total} cards lidos até aqui) e ` +
+          'não sobraria tempo para a análise. Tente de novo em instantes; se persistir, ' +
+          'peça o relatório sem a base ou avise o suporte.',
+        status: 504,
+      }
+    }
+    const de = pagina * POR_PAGINA
+    const { data, error } = await svc
+      .from('kommo_leads')
+      .select('kommo_lead_id, pipeline_id, status_id, nome, responsavel_nome, processo_cnj, tags, tags_em, criado_em, atualizado_em, etapa_em, sincronizado_em, notas, campos:raw->custom_fields_values, preco:raw->price, fechado:raw->closed_at')
+      .order('kommo_lead_id')
+      .range(de, de + POR_PAGINA - 1)
+      .abortSignal(sinal)
+    if (error) return { erro: `Não consegui ler o espelho do Kommo: ${error.message}`, status: 502 }
+    const lote = (data ?? []) as Record<string, unknown>[]
+    base.adicionar(
+      lote.map((l) => ({
+        ...(l as unknown as LinhaDoEspelho),
+        raw: { custom_fields_values: l.campos, price: l.preco, closed_at: l.fechado },
+      })),
+    )
+    if (lote.length < POR_PAGINA) break
+  }
+  if (pagina >= MAX_PAGINAS) {
+    return { erro: 'O espelho do Kommo passou do teto de leitura (20 mil cards).', status: 502 }
+  }
 
   const form = new FormData()
-  form.append('file', new Blob([JSON.stringify(base)], { type: 'application/json' }), 'base_kommo.json')
+  form.append('file', new Blob(base.pedacos(new Date()), { type: 'application/json' }), 'base_kommo.json')
   const resp = await fetch('https://api.anthropic.com/v1/files', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
@@ -2600,9 +3026,13 @@ async function anexarBaseDoKommo(
   })
   const corpo = await resp.json().catch(() => null)
   if (!resp.ok || !corpo?.id) {
-    return { erro: corpo?.error?.message ?? `Falha ao enviar a base do Kommo à IA (HTTP ${resp.status}).` }
+    return {
+      erro: `Falha ao enviar a Base do Kommo à IA: ${traduzirErroDaAnthropic(resp.status, String(corpo?.error?.message ?? ''))}`,
+      status: 502,
+    }
   }
-  return { bloco: { type: 'container_upload', file_id: String(corpo.id) }, cards: base.total_de_cards }
+  paraApagar.push(String(corpo.id))
+  return { bloco: { type: 'container_upload', file_id: String(corpo.id) }, cards: base.total }
 }
 
 /** MIME → tipo de bloco de conteúdo, conforme a Files API da Anthropic. */
@@ -2628,6 +3058,13 @@ async function anexarArquivosDeEntrada(
   arquivos: File[],
   apiKey: string,
   temSkillAtiva: boolean,
+  /**
+   * Onde anotar cada arquivo ASSIM QUE SOBE (12/11/2026): eles ficavam para
+   * sempre no workspace da Anthropic. Anotado na hora, e não no fim, para que,
+   * se o segundo falhar, o primeiro — já enviado — também seja apagado.
+   */
+  paraApagar: string[],
+  sinal?: AbortSignal,
 ): Promise<{ blocos: Record<string, unknown>[]; erro?: string }> {
   const cabecalhos = { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
   const blocos: Record<string, unknown>[] = []
@@ -2650,14 +3087,17 @@ async function anexarArquivosDeEntrada(
       method: 'POST',
       headers: cabecalhos,
       body: form,
+      signal: sinal,
     })
     if (!resp.ok) {
       const corpo = await resp.json().catch(() => null)
+      // EM PORTUGUÊS (12/11/2026): a mensagem crua da Anthropic ("File too
+      // large", em inglês) ia direto para a tela.
       return {
         blocos: [],
         erro:
-          corpo?.error?.message ??
-          `Falha ao enviar "${arquivo.name}" (HTTP ${resp.status}).`,
+          `Falha ao enviar "${arquivo.name}": ` +
+          traduzirErroDaAnthropic(resp.status, String(corpo?.error?.message ?? '')),
       }
     }
     const enviado = await resp.json()
@@ -2665,6 +3105,7 @@ async function anexarArquivosDeEntrada(
     if (!fileId) {
       return { blocos: [], erro: `A Anthropic não devolveu o id de "${arquivo.name}".` }
     }
+    paraApagar.push(fileId)
 
     if (tipo === 'container_upload') {
       blocos.push({ type: 'container_upload', file_id: fileId })
@@ -2681,6 +3122,38 @@ async function anexarArquivosDeEntrada(
   return { blocos }
 }
 
+/**
+ * APAGA DA ANTHROPIC OS ARQUIVOS DESTA PERGUNTA (12/11/2026): os anexos, a Base
+ * do Kommo e os gerados já copiados para o Storage. Ficavam no workspace para
+ * sempre — a base do Kommo inteira, com as notas dos cards, a cada pergunta.
+ * Melhor esforço: falha de um não impede os outros nem chega à pessoa.
+ */
+async function apagarArquivosDaAnthropic(ids: readonly string[], apiKey: string): Promise<void> {
+  await Promise.allSettled(
+    [...new Set(ids)].map(async (id) => {
+      const r = await fetch(`https://api.anthropic.com/v1/files/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      await r.body?.cancel()
+      if (!r.ok && r.status !== 404) console.error('[assistente] arquivo não foi apagado da Anthropic:', id, r.status)
+    }),
+  )
+}
+
+/**
+ * Trabalho que segue DEPOIS da resposta, sem atrasá-la: o runtime das Edge
+ * Functions o espera (`EdgeRuntime.waitUntil`); fora dele, segue solto.
+ */
+function emSegundoPlano(p: Promise<unknown>): void {
+  const seguro = p.catch(() => {})
+  const rt = (globalThis as unknown as {
+    EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void }
+  }).EdgeRuntime
+  if (rt?.waitUntil) rt.waitUntil(seguro)
+}
+
 // ------------------------------------------------------------------- handler
 
 Deno.serve(async (req: Request) => {
@@ -2692,12 +3165,17 @@ Deno.serve(async (req: Request) => {
   // tela recebia um erro de rede genérico, sem dizer que a pergunta era grande
   // demais. Contado daqui, e não de cada chamada.
   const inicio = Date.now()
+  // OS ARQUIVOS DESTA PERGUNTA NA ANTHROPIC (anexos, Base do Kommo, gerados já
+  // copiados), apagados no `finally` — em qualquer saída, erro e 504 inclusive.
+  const arquivosParaApagar: string[] = []
+  let chaveParaApagar: string | null = null
 
   try {
     const caller = await getCallerAtivo(req, serviceClient())
     if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
 
     const apiKey = await chaveAnthropic()
+    chaveParaApagar = apiKey || null
     if (!apiKey) {
       return jsonResponse(
         {
@@ -2749,7 +3227,10 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Pergunta inválida.' }, 400)
     }
     const modeloResolvido = resolverModeloDoAssistente(modelo)
-    const ehHaiku = modeloResolvido.startsWith('claude-haiku')
+    // LISTA DE QUEM ACEITA, e não "tudo que não começa com claude-haiku"
+    // (12/11/2026): o Haiku 5.5 tem raciocínio adaptativo e esforço, e o prefixo
+    // os tirava dele.
+    const comRaciocinio = aceitaRaciocinioAdaptativo(modeloResolvido)
 
     const svc = callerClient(req)
     const anthropic = new Anthropic({ apiKey })
@@ -2778,8 +3259,15 @@ Deno.serve(async (req: Request) => {
     const ferramentas = comCodigo ? [...FERRAMENTAS, FERRAMENTA_CODE_EXECUTION] : FERRAMENTAS
 
     // O histórico chega da interface como pares simples de texto. Truncamos em
-    // 20 turnos: conversa de assistente não precisa de memória infinita, e o
-    // histórico inteiro é reenviado a cada pergunta.
+    // 30 MENSAGENS — umas 15 trocas de pergunta e resposta: conversa de
+    // assistente não precisa de memória infinita, e o histórico inteiro é
+    // reenviado (e cobrado) a cada pergunta e a cada rodada de ferramenta.
+    // (12/11/2026: o comentário dizia "20 turnos" e o corte era de 20
+    // MENSAGENS, 10 trocas; 30 é o meio-termo entre memória e custo.)
+    //
+    // O conteúdo de cada mensagem passa INTEIRO, como texto: o que a tela
+    // acrescenta a ele (a lista dos anexos daquele turno, uma nota) chega ao
+    // modelo como parte da conversa — da pessoa ou do assistente.
     //
     // Turno com ANEXO no histórico é descartado aqui (o filtro só aceita
     // `content` string): o file_id já pode ter perdido validade, e replicar o
@@ -2790,12 +3278,13 @@ Deno.serve(async (req: Request) => {
     // TEXTO VAZIO SAI, E A CONVERSA COMEÇA PELA PESSOA (23/10/2026). Um turno
     // de texto vazio é recusado pela API (400, "text content blocks must be
     // non-empty") e derrubava a pergunta nova por causa de uma velha. E uma
-    // pergunta que falhou fica na tela sem resposta: o corte de 20 deixa de
+    // pergunta que falhou fica na tela sem resposta: o corte deixa de
     // cair num par e pode começar por uma resposta do assistente — que sai
     // aqui, para o histórico abrir sempre com a pessoa.
+    const MENSAGENS_DO_HISTORICO = 30
     const mensagens: Anthropic.MessageParam[] = Array.isArray(historico)
       ? historico
-          .slice(-20)
+          .slice(-MENSAGENS_DO_HISTORICO)
           .filter(
             (m: unknown): m is { role: 'user' | 'assistant'; content: string } =>
               !!m &&
@@ -2811,13 +3300,19 @@ Deno.serve(async (req: Request) => {
     // A BASE DO KOMMO VAI JUNTO COM A PERGUNTA, como um anexo do container.
     const blocosDaBase: Record<string, unknown>[] = []
     if (comBaseDoKommo) {
-      const base = await anexarBaseDoKommo(svc, apiKey, sinalAteOTeto(inicio))
-      if ('erro' in base) return jsonResponse({ error: base.erro }, 502)
+      const base = await anexarBaseDoKommo(svc, apiKey, inicio, arquivosParaApagar)
+      if ('erro' in base) return jsonResponse({ error: base.erro }, base.status)
       blocosDaBase.push(base.bloco)
     }
     if (arquivosAnexados.length > 0 || blocosDaBase.length > 0) {
       const { blocos, erro } = arquivosAnexados.length > 0
-        ? await anexarArquivosDeEntrada(arquivosAnexados, apiKey, comCodigo)
+        ? await anexarArquivosDeEntrada(
+            arquivosAnexados,
+            apiKey,
+            comCodigo,
+            arquivosParaApagar,
+            sinalAteOTeto(inicio),
+          )
         : { blocos: [] as Record<string, unknown>[], erro: undefined }
       if (erro) return jsonResponse({ error: erro }, 400)
       mensagens.push({
@@ -2856,12 +3351,71 @@ Deno.serve(async (req: Request) => {
       container?: { id?: string; skills: { type: string; skill_id: string; version: string }[] }
     }
 
-    // O container da execução de código PAUSADA: a retomada tem de voltar a ele.
-    let containerPausado: string | undefined
+    // Os arquivos que a execução de código gerou EM TODAS AS RODADAS DESTA
+    // PERGUNTA, e não só na última (23/10/2026): o arquivo nasce na rodada em
+    // que o código roda — muitas vezes uma pausada (`pause_turn`) ou uma que
+    // ainda chamou ferramenta nossa —, e a rodada final só traz o texto.
+    // Olhando só ela, o "segue a planilha" chegava sem a planilha.
+    const arquivosDestaPergunta = async () => {
+      // Arquivo gerado: só existe com a execução de código ligada, então a
+      // varredura não custa nada nas conversas sem ela.
+      if (!comCodigo) return []
+      const blocosDestaPergunta = mensagens
+        .slice(inicioDestaPergunta)
+        .filter((m) => m.role === 'assistant' && Array.isArray(m.content))
+        .flatMap((m) => m.content as unknown[])
+      return await extrairArquivosGerados(
+        blocosDestaPergunta,
+        apiKey,
+        caller.id,
+        sinalAteOTeto(inicio, { folgaMs: 5_000, minimoMs: 1_000 }),
+        arquivosParaApagar,
+      )
+    }
+
+    /**
+     * O QUE JÁ EXISTE, MARCADO COMO INCOMPLETO (12/11/2026). Rodadas esgotadas
+     * com o modelo ainda chamando ferramenta — ou tempo acabando entre uma rodada
+     * e outra — davam um 504 genérico, e jogavam fora a petição já proposta, o
+     * contato já montado, os arquivos já gerados e o texto já escrito. Agora a
+     * pessoa recebe tudo isso, com `truncada: true` (a tela avisa que a resposta
+     * está incompleta).
+     */
+    const entregarParcial = async () => {
+      const texto = mensagens
+        .slice(inicioDestaPergunta)
+        .filter((m) => m.role === 'assistant' && Array.isArray(m.content))
+        .flatMap((m) => m.content as Anthropic.ContentBlock[])
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim()
+      const arquivos = await arquivosDestaPergunta()
+      return jsonResponse({
+        resposta:
+          (texto ? `${texto}\n\n` : '') +
+          'A consulta ficou longa demais e foi interrompida antes do fim — o que está ' +
+          'acima pode estar incompleto. Tente uma pergunta mais específica.',
+        truncada: true,
+        ferramentas: ferramentasUsadas,
+        acao_proposta: acaoProposta,
+        contato_sugerido: contatoProposto,
+        arquivos: arquivos.length > 0 ? arquivos : undefined,
+      })
+    }
+
+    // O CONTAINER DA EXECUÇÃO DE CÓDIGO, guardado a CADA resposta (12/11/2026).
+    // Era guardado só na pausa (`pause_turn`): depois de uma rodada que chamou
+    // ferramenta nossa, a seguinte abria um container NOVO — e as variáveis do
+    // Python, a base do Kommo já aberta e os arquivos gerados até ali sumiam no
+    // meio da pergunta.
+    let containerId: string | undefined
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
       // NÃO COMEÇA UMA RODADA QUE NÃO CABE: com menos de 25 s até o teto, a
-      // chamada seria cortada no meio de qualquer jeito.
+      // chamada seria cortada no meio de qualquer jeito. Da segunda rodada em
+      // diante, há o que entregar.
       if (tempoAteOTeto(inicio, Date.now(), { minimoMs: 0 }) < 25_000) {
+        if (rodada > 0) return await entregarParcial()
         return jsonResponse({ error: PERGUNTA_LONGA_DEMAIS }, 504)
       }
       const params: ParametrosMensagem = {
@@ -2883,28 +3437,28 @@ Deno.serve(async (req: Request) => {
         // ligado até no caminho barato porque, com ele desligado, o Sonnet
         // aciona ferramentas com menos disposição — e aqui TODA resposta
         // depende de uma consulta. O esforço é que muda entre os caminhos.
-        // O HAIKU 4.5 NÃO TEM raciocínio adaptativo nem nível de esforço:
-        // mandar os dois a ele dava erro (defeito antigo, achado em 05/10/2026).
-        ...(ehHaiku
-          ? {}
-          : {
+        // Modelo fora da lista dos que aceitam (o Haiku 4.5 era um) vai sem os
+        // dois: mandá-los dava erro (defeito antigo, achado em 05/10/2026).
+        ...(comRaciocinio
+          ? {
               thinking: { type: 'adaptive' as const },
               output_config: { effort: interpretandoTexto ? ('high' as const) : ('low' as const) },
-            }),
+            }
+          : {}),
       }
       if (skills.length > 0) {
         params.container = {
-          ...(containerPausado ? { id: containerPausado } : {}),
+          ...(containerId ? { id: containerId } : {}),
           skills: skills.map((s) => ({
             type: 'custom',
             skill_id: s.skill_id,
             version: 'latest',
           })),
         }
-      } else if (containerPausado) {
-        // SÓ A BASE DO KOMMO, sem skill: a retomada de um turno pausado volta
-        // ao mesmo container (onde o arquivo e as contas estão), pelo id.
-        ;(params as unknown as { container?: string }).container = containerPausado
+      } else if (containerId) {
+        // SÓ A BASE DO KOMMO, sem skill: as rodadas seguintes voltam ao mesmo
+        // container (onde o arquivo e as contas estão), pelo id.
+        ;(params as unknown as { container?: string }).container = containerId
       }
       // O método em si reexige o tipo estrito do SDK (container: string) no
       // ponto de chamada — o `Omit` acima não basta ali. Cast duplo só aqui,
@@ -2928,6 +3482,8 @@ Deno.serve(async (req: Request) => {
       }
 
       mensagens.push({ role: 'assistant', content: resposta.content })
+      // Depois de TODA resposta, e não só da pausada: ver `containerId`.
+      containerId = resposta.container?.id ?? containerId
 
       // TURNO PAUSADO (auditoria de bugs, 09/10/2026): a execução de código das
       // Skills roda no servidor e, num trabalho longo (gerar planilha, docx),
@@ -2936,7 +3492,6 @@ Deno.serve(async (req: Request) => {
       // retomada é reenviar a conversa como está (a resposta pausada já entrou
       // acima), no mesmo container. Na última rodada, sai marcada como truncada.
       if (resposta.stop_reason === 'pause_turn' && rodada < MAX_RODADAS - 1) {
-        containerPausado = resposta.container?.id ?? containerPausado
         continue
       }
 
@@ -2954,27 +3509,7 @@ Deno.serve(async (req: Request) => {
         const motivo: string = resposta.stop_reason ?? ''
         const truncada =
           motivo === 'max_tokens' || motivo === 'pause_turn' || motivo === 'model_context_window_exceeded'
-        // Arquivo gerado por Skill: só existe quando há skills ativas, então
-        // a varredura do content não custa nada nas conversas sem nenhuma.
-        //
-        // EM TODAS AS RODADAS DESTA PERGUNTA, e não só na última (23/10/2026):
-        // o arquivo nasce na rodada em que o código roda — muitas vezes uma
-        // pausada (`pause_turn`) ou uma que ainda chamou ferramenta nossa —, e a
-        // rodada final só traz o texto. Olhando só ela, o "segue a planilha"
-        // chegava sem a planilha.
-        const blocosDestaPergunta = mensagens
-          .slice(inicioDestaPergunta)
-          .filter((m) => m.role === 'assistant' && Array.isArray(m.content))
-          .flatMap((m) => m.content as unknown[])
-        const arquivos =
-          comCodigo
-            ? await extrairArquivosGerados(
-                blocosDestaPergunta,
-                apiKey,
-                caller.id,
-                sinalAteOTeto(inicio, { folgaMs: 5_000, minimoMs: 1_000 }),
-              )
-            : []
+        const arquivos = await arquivosDestaPergunta()
         return jsonResponse({
           resposta:
             texto ||
@@ -3052,7 +3587,9 @@ Deno.serve(async (req: Request) => {
       mensagens.push({ role: 'user', content: resultados })
     }
 
-    return jsonResponse({ error: PERGUNTA_LONGA_DEMAIS }, 504)
+    // AS RODADAS ACABARAM COM O MODELO AINDA CHAMANDO FERRAMENTA: entrega o que
+    // já existe, marcado como incompleto (ver `entregarParcial`).
+    return await entregarParcial()
   } catch (err) {
     // O TETO DE TEMPO DISPAROU (o sinal da chamada ao modelo): é a mesma
     // situação das rodadas esgotadas, e merece a mesma frase — não o "Request
@@ -3060,7 +3597,16 @@ Deno.serve(async (req: Request) => {
     if (err instanceof Anthropic.APIUserAbortError || estourouOTempo(err)) {
       return jsonResponse({ error: PERGUNTA_LONGA_DEMAIS }, 504)
     }
+    // O original vai para o log (é o que o suporte procura); a tela recebe a
+    // frase em português.
+    console.error('[assistente] falha:', (err as { status?: number })?.status, (err as Error)?.message ?? err)
     return jsonResponse({ error: mensagemDeErro(err) }, 500)
+  } finally {
+    // Em QUALQUER saída — resposta, erro, 504 —, os arquivos desta pergunta saem
+    // da Anthropic. Depois da resposta, sem atrasá-la.
+    if (arquivosParaApagar.length > 0 && chaveParaApagar) {
+      emSegundoPlano(apagarArquivosDaAnthropic(arquivosParaApagar, chaveParaApagar))
+    }
   }
 })
 
@@ -3072,32 +3618,13 @@ const PERGUNTA_LONGA_DEMAIS =
  * Traduz a falha para algo acionável. O erro cru da Anthropic chega como
  * `401 {"type":"error","error":{"type":"authentication_error",...}}` — que na
  * tela do usuário não diz nem onde corrigir.
+ *
+ * A REGRA MORA EM `_shared/regrasDoAssistente.ts` (12/11/2026), testada: o que
+ * não casava com nenhum caso saía cru, em inglês ("prompt is too long…"). Agora
+ * sempre em português, com o código HTTP quando não há frase própria.
  */
 function mensagemDeErro(err: unknown): string {
   const bruto = (err as Error)?.message ?? String(err)
   const status = (err as { status?: number })?.status
-
-  if (status === 401 || /invalid x-api-key|authentication_error/i.test(bruto)) {
-    return (
-      'A Anthropic recusou a chave de API. Confira em Configurações → ' +
-      'Integração Anthropic; se a chave foi colada incompleta, gere uma nova ' +
-      'em console.anthropic.com → API Keys.'
-    )
-  }
-  if (status === 429 || /rate_limit/i.test(bruto)) {
-    return 'Limite de uso da Anthropic atingido. Tente de novo em instantes.'
-  }
-  if (status === 400 && /credit balance|billing/i.test(bruto)) {
-    return (
-      'A conta da Anthropic está sem crédito. Verifique o saldo e o método de ' +
-      'pagamento em console.anthropic.com.'
-    )
-  }
-  if (status === 403 || /permission_error/i.test(bruto)) {
-    return 'A chave da Anthropic não tem permissão para esta operação.'
-  }
-  if (status && status >= 500) {
-    return 'A Anthropic está indisponível no momento. Tente de novo em instantes.'
-  }
-  return bruto
+  return traduzirErroDaAnthropic(typeof status === 'number' ? status : undefined, bruto)
 }

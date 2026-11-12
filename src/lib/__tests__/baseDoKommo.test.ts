@@ -84,8 +84,11 @@ describe('o assistente', () => {
   const raiz = join(__dirname, '..', '..', '..')
   it('lê o espelho em páginas, com a sessão de quem pergunta, e manda a base no container', () => {
     const f = readFileSync(join(raiz, 'supabase/functions/assistente/index.ts'), 'utf8')
-    expect(f).toContain("{ porPagina: 500, maxPaginas: 40 },")
-    expect(f).toContain("const base = await anexarBaseDoKommo(svc, apiKey, sinalAteOTeto(inicio))")
+    // PÁGINA A PÁGINA, COM O RELÓGIO (12/11/2026): 500 por página, até 40, e o
+    // tempo conferido entre uma e outra.
+    expect(f).toContain('const POR_PAGINA = 500')
+    expect(f).toContain('const MAX_PAGINAS = 40')
+    expect(f).toContain('const base = await anexarBaseDoKommo(svc, apiKey, inicio, arquivosParaApagar)')
     expect(f).toContain('const comCodigo = skills.length > 0 || comBaseDoKommo')
     expect(f).toContain("...(comBaseDoKommo ? [{ type: 'text' as const, text: SISTEMA_BASE_KOMMO }] : []),")
   })
