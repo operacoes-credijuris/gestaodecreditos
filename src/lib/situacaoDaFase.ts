@@ -66,3 +66,21 @@ export function localizarPorDigitos<T extends { numero_cnj: string | null }>(
   if (contem.length === 1) return { tipo: 'um', processo: contem[0] }
   return { tipo: 'varios', quantos: contem.length }
 }
+
+/**
+ * A linha de fase VALE PARA A TRILHA do crédito? (auditoria C, 12/11/2026)
+ *
+ * A FASE GRAVADA É DA TRILHA EM QUE O CRÉDITO ESTAVA NA ÚLTIMA CLASSIFICAÇÃO. Um
+ * crédito que passa de Ativo para Complementar continua com o código ATV-xx até
+ * a próxima rodada da classificação (o cron diário ou "Atualizar fases"). Nesse
+ * meio-tempo ele SUMIA da tela: contado sob um código que a trilha nova não
+ * desenha, não aparecia em cartão nenhum nem em "ainda sem fase" — e na ficha o
+ * seletor ficava com um valor que não está entre as opções. Fora da trilha, a
+ * linha conta como "sem fase": é o que ela é até ser reclassificada.
+ */
+export function faseDaTrilha<T extends { fase_codigo: string }>(
+  linha: T | null | undefined,
+  ordemDaTrilha: readonly string[],
+): T | undefined {
+  return linha && ordemDaTrilha.includes(linha.fase_codigo) ? linha : undefined
+}

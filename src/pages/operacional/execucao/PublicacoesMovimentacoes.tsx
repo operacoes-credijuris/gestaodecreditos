@@ -32,6 +32,7 @@ import {
   faixaParalisado,
   LEGENDA_PARALISADO,
   ordenarParalisados,
+  paradoNaJanela,
   textoParalisado,
   type FaixaParalisado,
 } from '@/lib/paralisados'
@@ -433,6 +434,12 @@ function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: 
 
   // Marca/desmarca "tratada" (move entre Novas e Tratadas).
   const toggleTratada = useMutation({
+    // EM FILA (auditoria C, 12/11/2026): cada clique grava o CONTRÁRIO do que o
+    // cartão mostrava, e dois cliques seguidos (ou o clique e o "Desfazer") iam
+    // ao servidor em paralelo — o que chegasse por último ganhava, e podia ser o
+    // primeiro. A tela mostrava "tratada" e o banco ficava com "nova". O
+    // `onMutate` continua imediato; só a gravação espera a anterior.
+    scope: { id: 'djen_tratada' },
     mutationFn: async (row: DjenRow) => {
       const { error } = await supabase
         .from('djen_publicacoes')
@@ -767,7 +774,9 @@ function PublicacaoCard({
             checked={p.tratada}
             onChange={onToggle}
           />
-          <span className="sr-only">Tratada</span>
+          {/* DE QUAL PUBLICAÇÃO (auditoria C, 12/11/2026): o leitor de tela lia
+              "Tratada" em toda caixa da lista, sem dizer qual era. */}
+          <span className="sr-only">Publicação {formatCNJ(p.numero_processo ?? '')} tratada</span>
         </label>
         <span className="font-semibold tabular-nums text-texto">
           {formatCNJ(p.numero_processo ?? '')}
@@ -1065,6 +1074,10 @@ function Movimentacoes({ busca }: { busca: string }) {
   const paralisados = useMemo(() => {
     let l = (status.data ?? [])
       .filter((s) => !numerosNovas.has(dig(s.numero_processo)))
+      // MOVIMENTOU DENTRO DA JANELA, NÃO ESTÁ PARADO (lib/paralisados.ts,
+      // 12/11/2026): o número do andamento e o do lawsuit divergem no apenso, e o
+      // processo aparecia nas duas listas — em Paralisados com "há 2 dias".
+      .filter((s) => paradoNaJanela(s.ultima_movimentacao, ini20))
       // Processos encerrados não entram em Paralisados.
       .filter((s) => resolve(s.numero_processo).status !== 'encerrado')
     if (q) {
@@ -1080,7 +1093,7 @@ function Movimentacoes({ busca }: { busca: string }) {
       })
     }
     return ordenarParalisados(l, (s) => s.ultima_movimentacao)
-  }, [status.data, numerosNovas, q, resolve])
+  }, [status.data, numerosNovas, q, resolve, ini20])
 
   if (lista.isLoading) return <Loading label="Carregando movimentações…" />
   if (lista.isError) return (
@@ -1110,8 +1123,8 @@ function Movimentacoes({ busca }: { busca: string }) {
       {total.data != null && (lista.data?.length ?? 0) < total.data && (
         <Aviso tom="aviso">
           Mostrando as {lista.data?.length} movimentações mais recentes de{' '}
-          {total.data} na janela de 20 dias. Com o corte, um processo pode
-          aparecer em Paralisados sem estar.
+          {total.data} na janela de 20 dias. Os andamentos mais antigos do
+          período ficaram de fora, e a busca só procura nos que estão na tela.
         </Aviso>
       )}
 

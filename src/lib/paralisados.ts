@@ -55,3 +55,19 @@ export function ordenarParalisados<T>(
     return ua.localeCompare(ub)
   })
 }
+
+/**
+ * O processo está PARADO NA JANELA? (auditoria C, 12/11/2026)
+ *
+ * Paralisado é quem NÃO MOVIMENTOU desde `inicioDaJanela` (AAAA-MM-DD). A lista
+ * era "todo processo com status que não está em Novas", e as duas tabelas do
+ * ADVBOX gravam o número de fontes diferentes (o do andamento e o do lawsuit —
+ * o caso do apenso): o andamento de anteontem caía em Novas sob um número e o
+ * processo seguia em Paralisados sob o outro, com o selo "há 2 dias" na faixa
+ * de "20–45 dias". A data do próprio status desempata: movimentou dentro da
+ * janela, não está parado. Sem movimentação nenhuma (null) continua parado.
+ */
+export function paradoNaJanela(ultima: string | null | undefined, inicioDaJanela: string): boolean {
+  if (!ultima) return true
+  return ultima.slice(0, 10) < inicioDaJanela
+}

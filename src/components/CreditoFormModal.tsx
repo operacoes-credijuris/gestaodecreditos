@@ -404,8 +404,11 @@ export function CreditoFormModal({
                   value={editing.numero_cnj ?? ''}
                   onChange={(e) => {
                     setEditing({ ...editing, numero_cnj: e.target.value })
-                    // Digitar no campo limpa o erro de validação dele.
-                    if (erros.numero_cnj) setErros({})
+                    // Digitar no campo limpa o erro de validação DELE, e só dele
+                    // (auditoria C, 12/11/2026): o `setErros({})` de antes apagava
+                    // também o da data de liquidação e o da expectativa, que
+                    // continuavam valendo — o Salvar barrava sem erro à vista.
+                    if (erros.numero_cnj) setErros((v) => ({ ...v, numero_cnj: '' }))
                   }}
                   placeholder="0000000-00.0000.0.00.0000"
                 />
