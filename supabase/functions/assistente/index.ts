@@ -20,6 +20,7 @@ import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_sh
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { resolverModeloDoAssistente } from '../_shared/modeloDoAssistente.ts'
+import { type EtapaDoEspelho, type LinhaDoEspelho, montarBaseDoKommo } from '../_shared/baseDoKommo.ts'
 import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 // A CHAVE DA ANTHROPIC VEM DO MÓDULO DE SEGREDOS (varredura de 23/10/2026): havia
 // aqui uma cópia idêntica da função, que é o tipo de cópia que diverge no dia em
@@ -2532,6 +2533,78 @@ async function extrairArquivosGerados(
   return arquivos
 }
 
+// ------------------------------------------------------------ base do Kommo
+
+/**
+ * O QUE O MODELO PRECISA SABER DA BASE DO KOMMO (12/11/2026, pedido do dono):
+ * o arquivo, os campos e as regras para um relatório da análise de crédito que
+ * a chefia possa usar. Entra no sistema só quando a base vai junto.
+ */
+const SISTEMA_BASE_KOMMO = `# A base do Kommo (anexada a esta pergunta)
+No container de execução de código há o arquivo \`base_kommo.json\`: o espelho dos cards da análise de crédito, como a plataforma o sincroniza do Kommo (a cada 15 minutos). Campos de cada item de \`cards\`:
+- \`id\`, \`titulo\` (o título do card: "originador - cedente - nº do processo - parcelas - % de honorários"), \`funil\`, \`coluna\` (onde o card está AGORA), \`responsavel\`, \`processo_cnj\`;
+- \`criado_em\`, \`atualizado_em\`, \`na_coluna_desde\` (desde quando está na coluna atual), \`fechado_em\`, \`valor_do_card\` (o "Venda" do Kommo, quando preenchido);
+- \`etiquetas\`: [{nome, desde}] — os desfechos dos fundos ("Enviado PJus", "Cotado BTG", "Reprovado Domus", "Erro PJus", "Sem proposta"…);
+- \`campos\`: os campos do card — entre eles as cotações de cada fundo (PJus, BTG, PX Ativos, Domus, K & WC Ativos, Precatur, Carbon), em texto como "R$ 850.000,00 / R$ 40.000,00";
+- \`notas\`: [{quando, autor, tipo, do_sistema, texto}] — as anotações do card. \`do_sistema\` = escrita pela plataforma ou pela automação (movimentações, registros de etiqueta, desfechos da análise); as demais são de pessoas. O MOTIVO de uma reprovação ou de um não fechamento está no texto delas.
+No topo do arquivo: \`gerado_em\`, \`sincronizado_desde\` (o dado mais antigo da base), \`total_de_cards\` e \`colunas_por_funil\` (a ordem das colunas de cada funil, como no kanban).
+
+# Como responder com a base
+1. **SEMPRE pelo código**: abra o arquivo em Python e conte, some e cruze ali. Nunca estime número de cabeça, nem a partir de uma amostra.
+2. **Diga o recorte**: funil(is), período (pela data de qual campo) e o que conta como cada desfecho. Use as COLUNAS do Kommo para os desfechos (ex.: Reprovados, Sem resposta, Não fechados, Fechados, Pagamento finalizado) e as etiquetas para o que os fundos responderam. Se a pergunta for ambígua, escolha a leitura mais natural e diga qual escolheu.
+3. **O PORQUÊ vem das notas**: para motivos, leia os textos das notas dos cards do recorte (no código), agrupe em categorias claras e mostre a contagem de cada uma, com um ou dois exemplos curtos. Card sem motivo escrito entra como "sem motivo registrado" — não invente.
+4. **Limites da base**: ela mostra onde o card está AGORA e as datas das etiquetas, não o caminho completo de colunas por onde ele passou. "Quantos passaram pela negociação" só é exato para os que ainda estão lá ou em colunas que só se alcançam depois dela (pela ordem de \`colunas_por_funil\`) — diga isso quando pesar.
+5. **Apresentação**: comece pelo resumo em 2 a 4 linhas com os números principais; depois tabelas (quantidade e percentual, com o total); valores em R$ no formato brasileiro. Quando ajudar a leitura, gere um gráfico (PNG) e, se pedirem, uma planilha (xlsx) — os arquivos gerados no container chegam à pessoa como anexo.
+6. Termine com a data da base (\`sincronizado_desde\`), para quem ler saber de quando é o retrato.`
+
+/**
+ * MONTA E SOBE A BASE DO KOMMO como arquivo do container (12/11/2026): todos os
+ * cards do espelho, com as notas. LÊ COM A SESSÃO DE QUEM PERGUNTA (as RLS
+ * valem) e em páginas — o PostgREST para em 1000 linhas sem avisar. Do `raw`
+ * vêm só os três campos usados, e não o lead inteiro: é o que mais pesava.
+ */
+async function anexarBaseDoKommo(
+  svc: SupabaseClient,
+  apiKey: string,
+  sinal?: AbortSignal,
+): Promise<{ bloco: Record<string, unknown>; cards: number } | { erro: string }> {
+  const leitura = await lerTodasAsLinhas<Record<string, unknown>>(
+    (de, ate) =>
+      svc
+        .from('kommo_leads')
+        .select('kommo_lead_id, pipeline_id, status_id, nome, responsavel_nome, processo_cnj, tags, tags_em, criado_em, atualizado_em, etapa_em, sincronizado_em, notas, campos:raw->custom_fields_values, preco:raw->price, fechado:raw->closed_at')
+        .order('kommo_lead_id')
+        .range(de, ate),
+    { porPagina: 500, maxPaginas: 40 },
+  )
+  if (leitura.erro) return { erro: `Não consegui ler o espelho do Kommo: ${leitura.erro}` }
+  if (leitura.cortada) return { erro: 'O espelho do Kommo passou do teto de leitura (20 mil cards).' }
+  const { data: etapas, error: erroEtapas } = await svc
+    .from('kommo_etapa')
+    .select('pipeline_id, status_id, pipeline_nome, nome, ordem')
+  if (erroEtapas) return { erro: `Não consegui ler as colunas do Kommo: ${erroEtapas.message}` }
+
+  const linhas: LinhaDoEspelho[] = leitura.linhas.map((l) => ({
+    ...(l as unknown as LinhaDoEspelho),
+    raw: { custom_fields_values: l.campos, price: l.preco, closed_at: l.fechado },
+  }))
+  const base = montarBaseDoKommo(linhas, (etapas ?? []) as EtapaDoEspelho[], new Date())
+
+  const form = new FormData()
+  form.append('file', new Blob([JSON.stringify(base)], { type: 'application/json' }), 'base_kommo.json')
+  const resp = await fetch('https://api.anthropic.com/v1/files', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: form,
+    signal: sinal,
+  })
+  const corpo = await resp.json().catch(() => null)
+  if (!resp.ok || !corpo?.id) {
+    return { erro: corpo?.error?.message ?? `Falha ao enviar a base do Kommo à IA (HTTP ${resp.status}).` }
+  }
+  return { bloco: { type: 'container_upload', file_id: String(corpo.id) }, cards: base.total_de_cards }
+}
+
 /** MIME → tipo de bloco de conteúdo, conforme a Files API da Anthropic. */
 function tipoDeBloco(mime: string): 'image' | 'document' | 'container_upload' {
   if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mime)) return 'image'
@@ -2644,6 +2717,8 @@ Deno.serve(async (req: Request) => {
     let modelo: unknown
     let skillsPedidas: unknown
     let arquivosAnexados: File[] = []
+    // A BASE DO KOMMO (12/11/2026): o botão "Base do Kommo" do assistente.
+    let comBaseDoKommo = false
 
     if (contentType.includes('multipart/form-data')) {
       const form = await req.formData()
@@ -2660,12 +2735,14 @@ Deno.serve(async (req: Request) => {
         skillsPedidas = null
       }
       arquivosAnexados = form.getAll('arquivo').filter((f): f is File => f instanceof File)
+      comBaseDoKommo = form.get('base_kommo') === 'true'
     } else {
       const body = await req.json()
       pergunta = body.pergunta
       historico = body.historico
       modelo = body.modelo
       skillsPedidas = body.skills ?? null
+      comBaseDoKommo = body.base_kommo === true
     }
 
     if (!pergunta || typeof pergunta !== 'string') {
@@ -2696,7 +2773,9 @@ Deno.serve(async (req: Request) => {
     const skills = Array.isArray(skillsPedidas)
       ? todasSkillsAtivas.filter((s) => skillsPedidas.includes(s.skill_id))
       : todasSkillsAtivas
-    const ferramentas = skills.length > 0 ? [...FERRAMENTAS, FERRAMENTA_CODE_EXECUTION] : FERRAMENTAS
+    // A EXECUÇÃO DE CÓDIGO também com a base do Kommo: é nela que as contas se fazem.
+    const comCodigo = skills.length > 0 || comBaseDoKommo
+    const ferramentas = comCodigo ? [...FERRAMENTAS, FERRAMENTA_CODE_EXECUTION] : FERRAMENTAS
 
     // O histórico chega da interface como pares simples de texto. Truncamos em
     // 20 turnos: conversa de assistente não precisa de memória infinita, e o
@@ -2729,16 +2808,21 @@ Deno.serve(async (req: Request) => {
       : []
     while (mensagens.length > 0 && mensagens[0].role === 'assistant') mensagens.shift()
 
-    if (arquivosAnexados.length > 0) {
-      const { blocos, erro } = await anexarArquivosDeEntrada(
-        arquivosAnexados,
-        apiKey,
-        skills.length > 0,
-      )
+    // A BASE DO KOMMO VAI JUNTO COM A PERGUNTA, como um anexo do container.
+    const blocosDaBase: Record<string, unknown>[] = []
+    if (comBaseDoKommo) {
+      const base = await anexarBaseDoKommo(svc, apiKey, sinalAteOTeto(inicio))
+      if ('erro' in base) return jsonResponse({ error: base.erro }, 502)
+      blocosDaBase.push(base.bloco)
+    }
+    if (arquivosAnexados.length > 0 || blocosDaBase.length > 0) {
+      const { blocos, erro } = arquivosAnexados.length > 0
+        ? await anexarArquivosDeEntrada(arquivosAnexados, apiKey, comCodigo)
+        : { blocos: [] as Record<string, unknown>[], erro: undefined }
       if (erro) return jsonResponse({ error: erro }, 400)
       mensagens.push({
         role: 'user',
-        content: [{ type: 'text', text: pergunta }, ...blocos] as unknown as Anthropic.MessageParam['content'],
+        content: [{ type: 'text', text: pergunta }, ...blocos, ...blocosDaBase] as unknown as Anthropic.MessageParam['content'],
       })
     } else {
       mensagens.push({ role: 'user', content: pergunta })
@@ -2791,6 +2875,7 @@ Deno.serve(async (req: Request) => {
         // reenviado em toda pergunta e em toda rodada de ferramenta.
         system: [
           { type: 'text', text: SISTEMA, cache_control: { type: 'ephemeral' } },
+          ...(comBaseDoKommo ? [{ type: 'text' as const, text: SISTEMA_BASE_KOMMO }] : []),
         ],
         tools: ferramentas,
         messages: mensagens,
@@ -2816,6 +2901,10 @@ Deno.serve(async (req: Request) => {
             version: 'latest',
           })),
         }
+      } else if (containerPausado) {
+        // SÓ A BASE DO KOMMO, sem skill: a retomada de um turno pausado volta
+        // ao mesmo container (onde o arquivo e as contas estão), pelo id.
+        ;(params as unknown as { container?: string }).container = containerPausado
       }
       // O método em si reexige o tipo estrito do SDK (container: string) no
       // ponto de chamada — o `Omit` acima não basta ali. Cast duplo só aqui,
@@ -2878,7 +2967,7 @@ Deno.serve(async (req: Request) => {
           .filter((m) => m.role === 'assistant' && Array.isArray(m.content))
           .flatMap((m) => m.content as unknown[])
         const arquivos =
-          skills.length > 0
+          comCodigo
             ? await extrairArquivosGerados(
                 blocosDestaPergunta,
                 apiKey,

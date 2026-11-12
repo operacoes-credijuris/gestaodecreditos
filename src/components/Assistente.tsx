@@ -14,6 +14,7 @@ import {
   MessageCircle,
   RefreshCw,
   Copy,
+  Database,
 } from 'lucide-react'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
@@ -238,6 +239,11 @@ export function Assistente({
   const [skillsAberto, setSkillsAberto] = useState(false)
   const [skillsSelecionadas, setSkillsSelecionadas] = useState<Set<string>>(new Set())
   const skillsRef = useRef<HTMLDivElement>(null)
+  // A BASE DO KOMMO (12/11/2026, pedido do dono): ligada, cada pergunta leva o
+  // espelho inteiro dos cards da análise de crédito ao assistente, que faz as
+  // contas em código — os relatórios que a chefia pede (reprovados e por quê,
+  // não fechados, pagos e valores). Fica ligada até a pessoa desligar.
+  const [comBaseDoKommo, setComBaseDoKommo] = useState(false)
 
   // Arquivos anexados à próxima pergunta — limpos depois do envio.
   const [arquivos, setArquivos] = useState<File[]>([])
@@ -544,6 +550,7 @@ export function Assistente({
         form.append('historico', JSON.stringify(historico))
         form.append('modelo', modelo)
         form.append('skills', JSON.stringify(skillsArray))
+        if (comBaseDoKommo) form.append('base_kommo', 'true')
         anexos.forEach((f) => form.append('arquivo', f))
         respostaFn = await invokeFunctionForm<RespostaAssistente>('assistente', form)
       } else {
@@ -552,6 +559,7 @@ export function Assistente({
           historico,
           modelo,
           skills: skillsArray,
+          ...(comBaseDoKommo ? { base_kommo: true } : {}),
         })
       }
       const { resposta, truncada, acao_proposta, contato_sugerido, arquivos: arquivosGerados } =
@@ -1165,6 +1173,25 @@ export function Assistente({
                   )}
                 </div>
               )}
+
+              {/* A BASE DO KOMMO: um interruptor, e não um item das Skills — vale
+                  para todos os perfis e não depende de skill cadastrada. */}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setComBaseDoKommo((v) => !v)}
+                aria-pressed={comBaseDoKommo}
+                title={
+                  comBaseDoKommo
+                    ? 'Base do Kommo ligada: cada pergunta leva todos os cards da análise de crédito (clique para desligar)'
+                    : 'Ligar a Base do Kommo: para relatórios sobre os cards da análise de crédito — reprovados, não fechados, pagos, propostas'
+                }
+                className={cn('px-s2', comBaseDoKommo && 'bg-marca-leve text-marca-texto hover:bg-marca-leve')}
+              >
+                <Database className="h-[16px] w-[16px]" />
+                <span className="max-sm:sr-only">Base do Kommo</span>
+                {comBaseDoKommo && <Check className="h-[14px] w-[14px]" />}
+              </Button>
 
               <input
                 ref={inputArquivos}
