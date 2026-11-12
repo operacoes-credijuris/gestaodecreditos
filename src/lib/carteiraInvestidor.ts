@@ -188,3 +188,67 @@ export function montarCarteiraDoInvestidor(d: DadosCarteira): CarteiraCalculada 
     liquidadas: linhas.filter((l) => l.pago).length,
   }
 }
+
+/** A resposta da Edge Function `carteira-resumo`. */
+export interface RespostaDosResumos {
+  ok?: boolean
+  erro?: string
+  gerados: number
+  pulados: number
+  falhas: number
+  restantes: number
+}
+
+/**
+ * O QUE A TELA DIZ DEPOIS DE GERAR RESUMOS, e se acompanha a varredura.
+ *
+ * O `ok: false` VEM COM HTTP 200 (12/11/2026): a carteira-resumo responde 200
+ * com `ok: false` e `erro` quando não leu os créditos ou não gravou o texto. A
+ * tela só olhava `falhas` e anunciava "Resumo gerado." — ou "Nenhum crédito teve
+ * novidade" — com a carteira intacta. E com todo crédito do último lote
+ * falhando (`falhas` > 0, `gerados` 0), também dizia "nenhuma novidade".
+ *
+ * `individual`: o "Gerar novamente" de um crédito (vs. a varredura inteira).
+ */
+export function avisoDosResumos(
+  r: RespostaDosResumos,
+  individual: boolean,
+): { avisos: { tipo: 'sucesso' | 'erro'; texto: string }[]; acompanhar: boolean } {
+  const falhou = r.ok === false || !!r.erro
+  if (individual) {
+    if (falhou || r.falhas > 0) {
+      return {
+        avisos: [{
+          tipo: 'erro',
+          texto: r.erro
+            ? `Não foi possível gerar o resumo deste crédito: ${r.erro}`
+            : 'Não foi possível gerar o resumo deste crédito.',
+        }],
+        acompanhar: false,
+      }
+    }
+    return { avisos: [{ tipo: 'sucesso', texto: 'Resumo gerado.' }], acompanhar: false }
+  }
+  const avisos: { tipo: 'sucesso' | 'erro'; texto: string }[] = []
+  if (falhou) avisos.push({ tipo: 'erro', texto: `Parte dos resumos não foi gerada: ${r.erro ?? 'falha no servidor'}.` })
+  // Varredura: a resposta volta antes do fim (o servidor segue em lotes, mesmo
+  // quando um lote falhou), e a tela acompanha os textos chegando.
+  if (r.restantes > 0) {
+    if (!falhou) avisos.push({ tipo: 'sucesso', texto: 'Gerando os resumos — os textos vão aparecendo aqui.' })
+    return { avisos, acompanhar: true }
+  }
+  if (falhou) return { avisos, acompanhar: false }
+  const falhas = r.falhas > 0 ? ` ${r.falhas === 1 ? '1 crédito falhou' : `${r.falhas} créditos falharam`}.` : ''
+  if (r.gerados === 0 && r.falhas > 0) {
+    avisos.push({ tipo: 'erro', texto: `Nenhum resumo gerado.${falhas}` })
+  } else {
+    avisos.push({
+      tipo: 'sucesso',
+      texto:
+        r.gerados > 0
+          ? `${r.gerados === 1 ? '1 resumo gerado' : `${r.gerados} resumos gerados`}.${falhas}`
+          : 'Nenhum crédito teve novidade desde a última geração.',
+    })
+  }
+  return { avisos, acompanhar: false }
+}

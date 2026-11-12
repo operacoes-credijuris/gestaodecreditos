@@ -36,6 +36,13 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   /** Devolve mensagem quando o servidor não confirmou a saída (ver signOut). */
   signOut: () => Promise<{ error: string | null }>
+  /**
+   * Relê o perfil de quem está logado. O PERFIL NÃO MORA NO CACHE DO REACT
+   * QUERY (12/11/2026): o administrador que corrigia o próprio nome em
+   * Configurações › Usuários seguia com o nome velho no topo e nas Tarefas
+   * ("Perfil não encontrado no ADVBOX") até recarregar a página.
+   */
+  recarregarPerfil: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -74,6 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) console.error('Falha ao ler o perfil; mantendo o anterior.', error)
     if (usuarioCorrente.current !== userId) return
     if (!error) setProfile((data as Profile) ?? null)
+    // O ANTERIOR SÓ FICA SE FOR DESTE USUÁRIO (12/11/2026): "mantendo o
+    // anterior" é para o soluço de rede de quem já estava aqui. Com a sessão
+    // trocada de A para B sem SIGNED_OUT no meio (outra aba entrou com outra
+    // conta), a falha da leitura de B deixava o perfil de A — o papel de
+    // administrador e o "ativo" de outra pessoa.
+    else setProfile((p) => (p && p.id !== userId ? null : p))
     // LEITURA CONCLUÍDA, mesmo falhando: os guardas param de esperar e decidem
     // com o que há (falha preserva o perfil anterior, como acima).
     setPerfilLidoDe(userId)
@@ -182,6 +195,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const user = session?.user ?? null
+  const recarregarPerfil = async () => {
+    const id = usuarioCorrente.current
+    if (id) await loadProfile(id)
+  }
   const isAdmin = useMemo(
     () => user?.email === ADMIN_EMAIL || profile?.role === 'admin',
     [user?.email, profile?.role],
@@ -201,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     perfilCarregando,
     signIn,
     signOut,
+    recarregarPerfil,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

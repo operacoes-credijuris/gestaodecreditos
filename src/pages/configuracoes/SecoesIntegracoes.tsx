@@ -301,6 +301,17 @@ export function SecaoAdvbox({
                         {u.name}
                       </option>
                     ))}
+                    {/* O SALVO QUE SAIU DA ADVBOX APARECE (12/11/2026): sem opção
+                        com o id gravado, a caixa mostrava "Escolha…" e o Salvar
+                        regravava o id morto calado — o cadastro automático falhava
+                        a cada crédito, longe daqui. */}
+                    {cp.users_id != null &&
+                      String(cp.users_id) !== '' &&
+                      !opcoes.users.some((u) => String(u.id) === String(cp.users_id)) && (
+                        <option value={String(cp.users_id)}>
+                          {cp.user_nome || `Usuário ${cp.users_id}`} (não está mais na ADVBOX)
+                        </option>
+                      )}
                   </Select>
                 ) : (
                   // Lista ainda não veio: a caixa mostra o que está salvo e fica
@@ -687,7 +698,21 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
                   {ilegiveis.length === 1
                     ? 'Ela continua gravada como está, e o DJEN a ignora'
                     : 'Elas continuam gravadas como estão, e o DJEN as ignora'}
-                  : inclua de novo abaixo, com UF e número.
+                  : inclua de novo abaixo, com UF e número.{' '}
+                  {/* DÁ PARA TIRAR (12/11/2026): o Salvar sempre a regravava, e a
+                      ilegível — e este aviso — ficavam para sempre, mesmo depois
+                      de incluída a OAB certa. Tirar só marca a pendência; vale no
+                      Salvar, como as outras mudanças da lista. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIlegiveis([])
+                      pendencia(true)
+                    }}
+                    className="font-semibold text-marca-texto underline underline-offset-2 hover:text-marca-viva"
+                  >
+                    {ilegiveis.length === 1 ? 'Tirar da lista' : 'Tirar todas da lista'}
+                  </button>
                 </p>
               )}
               {itens.map((o, i) => (
