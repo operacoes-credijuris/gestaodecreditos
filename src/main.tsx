@@ -7,19 +7,20 @@ import { AuthProvider } from './contexts/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
 import { JanelaDeDescarte } from './components/layout/JanelaDeDescarte'
 import { TituloDaAba } from './components/layout/TituloDaAba'
-// TIPOGRAFIA DA CASA — duas fontes, cada uma no que faz melhor:
+// TIPOGRAFIA DA CASA (design system v3, repaginação de 12/11/2026) — duas
+// fontes, cada uma no que faz melhor, declaradas à mão em ./fontes.css (só o
+// subconjunto latino; o porquê está lá):
 //
-//   Plus Jakarta Sans (display) — títulos, números grandes, marca. Geométrica
-//     e de contraste alto: é a que ecoa o desenho do wordmark "credijuris".
-//   Figtree (corpo) — tabelas, formulários, texto. Geométrica também, para
-//     casar com a de display, mas com altura-x generosa, que é o que mantém
-//     legibilidade nos 13px das listagens densas.
+//   Inter — toda a interface: tabelas, formulários, rótulos e os números. Tem
+//     algarismos tabulares de verdade (dinheiro alinhado na coluna) e tamanho
+//     óptico, que fecha o número grande e abre o texto pequeno, sozinho.
+//   Source Serif 4 — só os títulos de página e de janela (`font-titulo`): a
+//     assinatura de relatório institucional. Nunca em texto corrido.
 //
-// VARIÁVEIS e EMBUTIDAS no bundle: um arquivo por família cobre todos os pesos,
-// e nada depende de fonts.googleapis.com — o @import externo que havia aqui
-// falhava em silêncio (rede lenta ou bloqueada) e derrubava o app no Segoe UI.
-import '@fontsource-variable/plus-jakarta-sans'
-import '@fontsource-variable/figtree'
+// EMBUTIDAS no bundle: nada depende de fonts.googleapis.com — o @import externo
+// de outrora falhava em silêncio (rede lenta ou bloqueada) e derrubava o app no
+// Segoe UI.
+import './fontes.css'
 import './index.css'
 import { iniciarTema } from './lib/tema'
 

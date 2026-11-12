@@ -71,7 +71,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
         aria-controls={id}
         aria-label="Como funciona esta tela"
         title="Como funciona esta tela"
-        className="font-display relative grid h-8 w-8 place-items-center rounded-full border-[1.5px] border-borda-forte bg-superficie text-sm font-extrabold text-texto-2 transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-marca-viva hover:text-marca-texto"
+        className="relative grid h-8 w-8 place-items-center rounded-full border border-borda-forte bg-superficie text-sm font-semibold text-texto-2 shadow-nivel-1 transition-colors duration-rapida after:absolute after:-inset-[6px] after:content-[''] hover:border-ouro-forte hover:text-ouro-texto"
       >
         ?
       </button>
@@ -84,7 +84,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
           aria-modal="false"
           aria-label="Como funciona esta tela"
           tabIndex={-1}
-          className="absolute left-0 top-full z-40 mt-s1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-flutuante border border-borda bg-superficie px-s3 pb-s1.5 pt-s3 text-corpo shadow-nivel-2 outline-none dark:ring-1 dark:ring-white/[0.06]"
+          className="absolute left-0 top-full z-40 mt-s1.5 w-[340px] max-w-[calc(100vw-24px)] animate-menu-in cj-vidro-elevado rounded-flutuante border border-borda px-s3 pb-s1.5 pt-s3 text-corpo shadow-nivel-2 outline-none dark:border-white/[0.08]"
         >
           <p className="font-display font-bold text-texto">Como funciona esta tela</p>
           <ol className="mb-s3 mt-s2 grid list-decimal gap-s1.5 pl-s5 text-texto-2">

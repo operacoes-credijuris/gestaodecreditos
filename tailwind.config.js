@@ -23,26 +23,39 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Identidade visual REAL da Credijuris, extraída dos materiais da marca
-        // (logomarca, contrato timbrado e apresentações comerciais):
-        //   - o azul da logomarca é EXATAMENTE #0B81C5 (amostrado pixel a pixel);
-        //   - #0A6296 e #075278 são os azuis de título e cabeçalho do contrato;
-        //   - os demais degraus interpolam esses três âncoras no mesmo matiz.
-        // O antigo dourado NÃO existe em nenhum material da marca — o acento
-        // real é o verde (ver `verde` abaixo). Os valores estão em index.css.
+        // DESIGN SYSTEM V3 (repaginação, 12/11/2026): marinho profundo +
+        // champanhe, decisão do dono ("estética de mercado financeiro"). A
+        // escala `brand` virou o MARINHO (o 600 é o primário do claro, o 900 o
+        // menu); o acento é o champanhe (`ouro`, abaixo). Os valores estão em
+        // index.css; o guia, em docs/DESIGN-SYSTEM-V3.md.
         brand: {
           50: cor('brand-50'),
           100: cor('brand-100'),
           200: cor('brand-200'),
           300: cor('brand-300'),
           400: cor('brand-400'),
-          500: cor('brand-500'), // ← o azul da logomarca
-          600: cor('brand-600'), // ← azul de títulos do contrato
-          700: cor('brand-700'), // ← azul de cabeçalho do contrato
+          500: cor('brand-500'),
+          600: cor('brand-600'), // ← o primário do claro
+          700: cor('brand-700'),
           800: cor('brand-800'),
-          900: cor('brand-900'), // ← navy da apresentação de Oferta (literal)
+          900: cor('brand-900'), // ← o menu
           950: cor('brand-950'),
         },
+        // O CHAMPANHE (#C8A96A), o acento da v3. `DEFAULT` é o ornamento (barra,
+        // brilho, régua) e não serve como letra no claro; `forte` é a linha de
+        // 3:1 (anel, sublinhado); `texto` é o champanhe que se lê (4,5:1);
+        // `suave` e `borda` são o fundo pálido e o contorno dele.
+        ouro: {
+          DEFAULT: cor('ouro'),
+          forte: cor('ouro-forte'),
+          texto: cor('ouro-texto'),
+          suave: cor('ouro-suave'),
+          borda: cor('ouro-borda'),
+        },
+        // A superfície ELEVADA (janela, menu suspenso, painel): no escuro, um
+        // degrau acima do cartão. E a tinta do VIDRO, sempre com opacidade.
+        elevada: cor('elevada'),
+        vidro: cor('vidro'),
         // Fundo da aplicação: papel quente, o fundo de TODAS as apresentações
         // comerciais da marca (#FAF7F0, #F5F2EC, #F1EFE8…). Um cinza-azulado
         // aqui parecia genérico; o papel é o que faz "parecer Credijuris".
@@ -78,8 +91,11 @@ export default {
         },
         veu: cor('veu'), // fundo escurecido atrás de janela e painel
         marca: {
-          DEFAULT: cor('marca'), // botão primário
+          DEFAULT: cor('marca'), // botão primário (marinho no claro, champanhe no escuro)
           hover: cor('marca-hover'),
+          // A LETRA SOBRE O PRIMÁRIO (v3): branco no claro, marinho no escuro.
+          // `bg-marca` anda sempre com `text-marca-contraste`, nunca `text-white`.
+          contraste: cor('marca-contraste'),
           viva: cor('marca-viva'), // sublinhado da aba, barras
           suave: cor('marca-suave'), // contagem acesa, avatar
           leve: cor('marca-leve'), // hover de link, caixa de ajuda
@@ -97,7 +113,7 @@ export default {
           // dois temas.
           foco: cor('nav-foco'),
         },
-        acento: cor('acento'), // barra verde do item aceso no menu
+        acento: cor('acento'), // a barra champanhe do item aceso no menu
         sucesso: {
           DEFAULT: cor('sucesso'),
           fundo: cor('sucesso-fundo'),
@@ -227,19 +243,29 @@ export default {
         'nivel-2': 'var(--sombra-2)', // menu, aviso flutuante
         'nivel-3': 'var(--sombra-3)', // janela, painel lateral
       },
+      // O MOVIMENTO (v3): três durações e duas curvas, os tokens de index.css.
+      transitionDuration: {
+        rapida: 'var(--dur-rapida)', // 150ms: cor, hover
+        media: 'var(--dur-media)', // 200ms: painel, menu
+        lenta: 'var(--dur-lenta)', // 250ms: página, janela
+      },
+      transitionTimingFunction: {
+        saida: 'var(--curva-saida)', // o que chega desacelera no fim
+        padrao: 'var(--curva-padrao)', // o que vai e volta
+      },
       fontFamily: {
-        // Corpo, tabelas e formulários. Geométrica com altura-x generosa —
-        // aguenta os 13px das listagens densas sem fechar os contraformas.
-        sans: ['"Figtree Variable"', 'Figtree', 'system-ui', 'sans-serif'],
-        // Títulos, números grandes e a marca. É a que ecoa o desenho
-        // geométrico do wordmark "credijuris"; usar em texto corrido a
-        // desvaloriza (e cansa a leitura), então fica só no display.
-        display: [
-          '"Plus Jakarta Sans Variable"',
-          '"Plus Jakarta Sans"',
-          'system-ui',
-          'sans-serif',
-        ],
+        // A INTER (v3, 12/11/2026): a interface inteira. Algarismos tabulares
+        // de verdade e tamanho óptico (o número grande sai no desenho Display
+        // sozinho). Declarada em src/fontes.css.
+        sans: ['"Inter Variable"', 'Inter', 'system-ui', 'sans-serif'],
+        // `font-display` é a MESMA Inter: o nome fica porque 70 lugares o usam
+        // em título de cartão e rótulo de seção, e em rótulo pequeno uma serifa
+        // seria ilegível. O peso e o tamanho fazem a hierarquia.
+        display: ['"Inter Variable"', 'Inter', 'system-ui', 'sans-serif'],
+        // A SERIFA DOS TÍTULOS (novo): o h1 da página e o título da janela —
+        // a assinatura de relatório institucional. Nunca em texto corrido,
+        // tabela, botão ou rótulo pequeno.
+        titulo: ['"Source Serif 4 Variable"', '"Source Serif 4"', 'Georgia', 'serif'],
       },
       // Escala tipográfica com px explícitos, desacoplada do font-size do
       // <html> (que fica em 12px só para manter a densidade dos espaçamentos
@@ -262,6 +288,9 @@ export default {
         xl: ['18px', { lineHeight: '26px' }],
         '2xl': ['22px', { lineHeight: '28px' }],
         '3xl': ['26px', { lineHeight: '32px' }],
+        // v3: o h1 na serifa (PageHeader, no computador) e o número-herói do
+        // painel. Acima disto, nada: a tela não grita.
+        '4xl': ['30px', { lineHeight: '36px' }],
       },
     },
   },

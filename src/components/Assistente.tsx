@@ -934,8 +934,11 @@ export function Assistente({
           // NA CAMADA DO TOPO (z-assistente, abaixo de janela e gaveta). No
           // celular, 48px a 16px do canto; no computador, 56px a 20px.
           'fixed bottom-s4 right-s4 z-assistente flex h-[48px] w-[48px] items-center justify-center sm:bottom-[20px] sm:right-[20px] sm:h-[56px] sm:w-[56px]',
-          // No escuro, o anel claro do nível 2 (§0.4): a sombra sozinha some no fundo.
-          'rounded-full bg-gradient-to-br from-marca-viva to-marca-hover text-white shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]',
+          // O BOTÃO DA V3 (12/11/2026): o disco do primário com o brilho da casa
+          // — marinho com a faísca champanhe no claro, champanhe com a faísca
+          // marinho no escuro. O degradê de antes (do azul vivo ao escuro)
+          // virava um marrom turvo com o champanhe.
+          'cj-brilho rounded-full bg-marca text-ouro shadow-nivel-2 ring-1 ring-ouro/40 dark:text-marca-contraste dark:ring-white/10',
           'transition-[transform,opacity] duration-150 hover:scale-105 active:scale-95',
           // Com uma caixa do card aberta (anotação, etiquetas, proposta), o botão
           // sai da frente — ver useFecharFora na Análise de crédito.
@@ -1173,7 +1176,7 @@ export function Assistente({
                     key={i}
                     className={cn(
                       'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca px-s3 py-[8px]',
-                      'text-corpo text-white [overflow-wrap:anywhere]',
+                      'text-corpo text-marca-contraste [overflow-wrap:anywhere]',
                     )}
                   >
                     <p className="whitespace-pre-wrap">{m.content}</p>
@@ -1184,7 +1187,7 @@ export function Assistente({
                         {m.anexos.map((nome, j) => (
                           <li
                             key={`${nome}-${j}`}
-                            className="inline-flex h-[22px] max-w-full items-center gap-[4px] rounded-full bg-white/15 px-[8px] text-xs text-white"
+                            className="inline-flex h-[22px] max-w-full items-center gap-[4px] rounded-full bg-marca-contraste/15 px-[8px] text-xs text-marca-contraste"
                           >
                             <Paperclip className="h-[12px] w-[12px] shrink-0" aria-hidden />
                             <span className="max-w-[160px] truncate">{nome}</span>
@@ -1558,7 +1561,7 @@ export function Assistente({
                           <span
                             className={cn(
                               'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
-                              comBaseDoKommo ? 'border-marca bg-marca text-white' : 'border-borda-forte bg-superficie',
+                              comBaseDoKommo ? 'border-marca bg-marca text-marca-contraste' : 'border-borda-forte bg-superficie',
                             )}
                           >
                             {comBaseDoKommo && <Check className="h-[12px] w-[12px]" />}
@@ -1581,7 +1584,7 @@ export function Assistente({
                                 className={cn(
                                   'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
                                   marcada
-                                    ? 'border-marca bg-marca text-white'
+                                    ? 'border-marca bg-marca text-marca-contraste'
                                     : 'border-borda-forte bg-superficie',
                                 )}
                               >
@@ -1617,7 +1620,7 @@ export function Assistente({
                 className={cn(
                   // NA ALTURA DE CONTROLE (36px, §0.2), a mesma dos botões ao lado.
                   'ml-auto flex h-controle w-controle shrink-0 items-center justify-center rounded-controle',
-                  'bg-marca text-white shadow-nivel-1 transition-colors hover:bg-marca-hover active:scale-95',
+                  'bg-marca text-marca-contraste shadow-nivel-1 transition-colors hover:bg-marca-hover active:scale-95',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
                   'disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:bg-marca disabled:active:scale-100',
                   // NO ESCURO, DESLIGADO É CINZA (§5, E6): o azul a 50% virava um

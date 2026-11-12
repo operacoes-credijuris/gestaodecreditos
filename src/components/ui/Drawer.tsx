@@ -103,7 +103,8 @@ export function Drawer({
     <div className="fixed inset-0 z-janela">
       <div
         className={cn(
-          'absolute inset-0 bg-veu/40 backdrop-blur-[2px] transition-opacity duration-200',
+          // O véu de vidro fosco da v3 (o mesmo da janela, ui/Modal).
+          'absolute inset-0 bg-veu/40 backdrop-blur-[6px] transition-opacity duration-media ease-saida',
           visible ? 'opacity-100' : 'opacity-0',
         )}
         // CLIQUE FORA NÃO FECHA (07/10/2026): só o X, o Fechar ou o Esc — ver ui/Modal.
@@ -122,7 +123,8 @@ export function Drawer({
           // 520px, o painel lateral da amostra: a ficha usa grid de 2 colunas
           // (DrawerSection) e estreito os valores longos quebravam demais. Em px
           // porque a escala em rem (max-w-2xl) encolhe com o <html> de 12px.
-          'absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col border-l border-borda bg-superficie shadow-nivel-3 outline-none transition-transform duration-200 dark:ring-1 dark:ring-white/[0.06]',
+          // v3: a superfície ELEVADA e a curva de saída (o painel chega macio).
+          'absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col border-l border-borda bg-elevada shadow-nivel-3 outline-none transition-transform duration-media ease-saida dark:border-white/[0.07]',
           visible ? 'translate-x-0' : 'translate-x-full',
         )}
       >
@@ -144,7 +146,7 @@ export function Drawer({
           {children}
         </div>
         {(footer || rodapeInicio) && (
-          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-s4 py-s3 sm:px-s5 sm:py-s4">
+          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda bg-superficie-2 px-s4 py-s3 sm:px-s5 sm:py-s4">
             {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
             {footer}
           </div>
@@ -171,10 +173,10 @@ export function DrawerField({
           plataforma, e justamente o que diz ao usuário qual campo ele está
           lendo. O texto-3 é o cinza mais claro que os tokens permitem para
           texto, e continua secundário diante do valor, que é `texto`. */}
-      <dt className="text-xs font-semibold uppercase tracking-wide text-texto-3">
-        {label}
-      </dt>
-      <dd className="mt-0.5 text-corpo text-texto">{children ?? '—'}</dd>
+      {/* v3: o rótulo é o SOBRETÍTULO da casa (`cj-sobretitulo`: caixa alta
+          pequena, espaçada, no cinza de metadado). */}
+      <dt className="cj-sobretitulo">{label}</dt>
+      <dd className="mt-s0.5 text-corpo text-texto">{children ?? '—'}</dd>
     </div>
   )
 }
@@ -191,7 +193,9 @@ export function DrawerSection({
     <section className="border-b border-borda py-4 first:pt-0 last:border-b-0">
       {/* O `.dsec` da amostra: título de seção na fonte de display, em caixa
           alta e no cinza de metadado — quem chama a atenção é o valor. */}
-      <h3 className="font-display mb-3 text-xs font-bold uppercase tracking-wider text-texto-3">
+      {/* v3: o sobretítulo com um fio champanhe curto antes — a marca de
+          seção dos relatórios da casa. */}
+      <h3 className="cj-sobretitulo mb-s3 flex items-center gap-s2 before:h-px before:w-[12px] before:bg-ouro-forte">
         {title}
       </h3>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3">{children}</dl>

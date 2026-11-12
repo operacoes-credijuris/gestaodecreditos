@@ -1530,7 +1530,7 @@ function marcaDoAto(ato: string): { classe: string; icone: ReactNode } {
       classe: 'border-aviso-cheio bg-aviso-fundo text-aviso',
       icone: <AlertTriangle className="h-[13px] w-[13px]" strokeWidth={2.5} aria-hidden />,
     }
-  return { classe: 'border-marca bg-marca text-white', icone: check }
+  return { classe: 'border-marca bg-marca text-marca-contraste', icone: check }
 }
 
 function SeletorDeEtiquetas({
@@ -6711,7 +6711,7 @@ export default function AnaliseCredito() {
                       aria-hidden
                       className={cn(
                         'font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full text-xs font-bold',
-                        atual ? 'bg-marca text-white' : 'bg-superficie-3 text-texto-2',
+                        atual ? 'bg-marca text-marca-contraste' : 'bg-superficie-3 text-texto-2',
                       )}
                     >
                       {f.discreta ? <X className="h-[12px] w-[12px]" aria-hidden /> : i + 1}

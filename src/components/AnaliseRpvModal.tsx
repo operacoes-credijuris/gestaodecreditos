@@ -2765,7 +2765,7 @@ export function AnaliseRpvModal({
                       // cor da marca, à direita; a resposta na superfície, à
                       // esquerda — a quina reta aponta quem falou.
                       m.papel === 'usuario'
-                        ? 'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca py-2 text-white'
+                        ? 'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca py-2 text-marca-contraste'
                         : 'max-w-[80%] self-start rounded-[14px_14px_14px_4px] bg-superficie-3 py-2.5 text-texto',
                     )}
                   >

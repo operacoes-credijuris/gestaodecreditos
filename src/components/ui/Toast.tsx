@@ -176,7 +176,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               const ms = duracaoDepoisDoMouse(t.type)
               if (ms !== null) scheduleRemove(t.id, ms)
             }}
-            className="animate-toast-in flex items-start gap-s3 rounded-flutuante bg-texto px-s4 py-s3 text-superficie shadow-nivel-2"
+            // v3: a tinta marinho (no claro) com um fio claro por dentro e a
+            // sombra funda — um bilhete escuro e nítido sobre a porcelana.
+            className="animate-toast-in flex items-start gap-s3 rounded-flutuante bg-texto px-s4 py-s3 text-superficie shadow-nivel-3 ring-1 ring-inset ring-superficie/10"
           >
             {icons[t.type]}
             <p className="flex-1 text-corpo">{t.message}</p>

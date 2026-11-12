@@ -122,7 +122,10 @@ export function Modal({
       // antes de descartar quando há alteração).
       // NO CELULAR, 8PX DE MARGEM (eram 12px; no computador, 24px): a janela
       // usa quase a tela toda.
-      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-s2 backdrop-blur-[2px] scrollbar-thin sm:p-s6"
+      // O VÉU DA V3 (12/11/2026): o fundo escurece um pouco menos e DESFOCA
+      // mais (6px) — a página fica atrás, como vidro fosco, em vez de sumir
+      // num cinza chapado.
+      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/45 p-s2 backdrop-blur-[6px] scrollbar-thin sm:p-s6"
     >
       <div
         ref={panelRef}
@@ -137,7 +140,9 @@ export function Modal({
           // rola, e o rodapé — com o botão principal — fica sempre à vista. Antes,
           // no celular, uma janela comprida empurrava o rodapé para baixo da
           // dobra e era preciso rolar o fundo para achar o "Salvar".
-          'animate-modal-in my-auto flex max-h-full w-full flex-col rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]',
+          // v3: a superfície ELEVADA (no escuro, um degrau acima do cartão),
+          // com a linha fina por fora e a sombra funda do nível 3.
+          'animate-modal-in my-auto flex max-h-full w-full flex-col rounded-janela border border-borda bg-elevada shadow-nivel-3 outline-none dark:border-white/[0.07]',
           sizes[size],
         )}
         role="dialog"
@@ -148,14 +153,16 @@ export function Modal({
             porque é ele que fica parado enquanto o corpo rola. */}
         <div className="flex shrink-0 items-start justify-between gap-s3 px-s4 pt-s4 sm:px-s5 sm:pt-s5">
           <div className="min-w-0">
+            {/* O título da janela na SERIFA (v3), como o h1 da página: 22px em
+                seminegrito. */}
             <h2
               id={titleId}
-              className="font-display text-xl font-extrabold tracking-tight text-texto"
+              className="font-titulo text-2xl font-semibold tracking-[-0.01em] text-texto"
             >
               {title}
             </h2>
             {description && (
-              <p className="mt-1 text-corpo text-texto-2">{description}</p>
+              <p className="mt-s1 text-corpo text-texto-2">{description}</p>
             )}
           </div>
           {/* O X COM ALVO DE 32PX e ícone de 18px (era 24px de alvo); 40px no
@@ -178,7 +185,9 @@ export function Modal({
           {children}
         </div>
         {(footer || rodapeInicio) && (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-s2 border-t border-borda px-s4 pb-s4 pt-s3 sm:px-s5 sm:pb-s5">
+          // O rodapé da janela num degrau de superfície (v3): a faixa das ações
+          // se lê como uma barra, separada do conteúdo que rola.
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-s2 rounded-b-janela border-t border-borda bg-superficie-2 px-s4 pb-s4 pt-s3 sm:px-s5 sm:pb-s4">
             {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
             {/* CANCELAR E A AÇÃO PRINCIPAL ANDAM JUNTOS: sem o grupo, no celular
                 cada botão quebrava a linha sozinho e o par se separava (revisão

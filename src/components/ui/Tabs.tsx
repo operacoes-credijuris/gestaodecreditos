@@ -145,11 +145,16 @@ export function Tabs({
                 // O `.tabs button` da amostra: 14px na fonte do corpo, cinza
                 // secundário, e a aberta em azul com o sublinhado no azul da
                 // logomarca. A desabilitada fica no cinza de metadado, apagada.
-                'flex shrink-0 items-center gap-s1.5 whitespace-nowrap border-b-2 px-s3 py-s2 text-corpo font-semibold transition-colors',
+                // v3 (12/11/2026): a aberta na TINTA, com o sublinhado
+                // champanhe (`marca-viva`) — o par marinho × ouro da casa; as
+                // outras no cinza secundário; 2px a mais embaixo, para o
+                // sublinhado respirar. A letra da aberta é a tinta, e não a cor da marca:
+                // no escuro, champanhe sobre champanhe ficava enfeitado demais.
+                'flex shrink-0 items-center gap-s1.5 whitespace-nowrap border-b-2 px-s3 pb-[10px] pt-s2 text-corpo font-semibold transition-colors duration-rapida ease-saida',
                 item.disabled
                   ? 'cursor-not-allowed border-transparent text-texto-3 opacity-60'
                   : active
-                    ? 'border-marca-viva text-marca-texto'
+                    ? 'border-marca-viva text-texto'
                     : 'border-transparent text-texto-2 hover:border-borda-forte hover:text-texto',
               )}
             >
@@ -159,7 +164,7 @@ export function Tabs({
                 <span
                   className={cn(
                     'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
-                    active ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
+                    active ? 'bg-ouro-suave text-ouro-texto' : 'bg-superficie-3 text-texto-2',
                   )}
                 >
                   {item.count}

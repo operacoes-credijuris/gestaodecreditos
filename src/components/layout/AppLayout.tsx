@@ -72,6 +72,11 @@ export function AppLayout() {
           <FaixaBeta />
           <Topbar onOpenMenu={() => setMobileOpen(true)} />
           <main className="relative flex-1 overflow-y-auto scrollbar-thin">
+            {/* A AURORA (v3, 12/11/2026): uma luz champanhe muito fraca no alto
+                da página, atrás do título — a "área de herói" de toda tela,
+                sem cartão nem faixa. Rola junto com o conteúdo (fica só no
+                topo) e não recebe clique. */}
+            <div aria-hidden className="cj-aurora pointer-events-none absolute inset-x-0 top-0 h-[360px]" />
             {/* max-width evita tabelas esticadas de ponta a ponta em monitores
                 largos (a 1920px, centraliza); a chave re-anima a entrada a cada
                 troca de tela. NA GRADE DE 4PX (auditoria visual, M3): 24px de
@@ -80,7 +85,10 @@ export function AppLayout() {
                 botão do assistente, que mora no canto. */}
             <div
               key={chave}
-              className="animate-page mx-auto w-full max-w-[1360px] px-s4 pb-[96px] pt-s6 lg:px-s6"
+              // `relative`: por cima da aurora, também depois que a animação de
+              // entrada acaba (sem o transform, o conteúdo deixaria de ser camada
+              // própria e a luz pintaria por cima dele).
+              className="animate-page relative mx-auto w-full max-w-[1360px] px-s4 pb-[96px] pt-s6 lg:px-s6 lg:pt-s8"
             >
               <AcessorioDoTitulo.Provider value={frases ? <AjudaDaTela frases={frases} /> : null}>
                 {/* A TELA CHEGA SOB DEMANDA (App.tsx): enquanto o pedaço dela

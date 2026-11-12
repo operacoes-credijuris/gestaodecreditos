@@ -100,7 +100,7 @@ function Lista({
       <div
         id={id}
         role="status"
-        className="absolute z-20 mt-1 w-full rounded-campo border border-borda bg-superficie px-4 py-2 text-xs text-texto-2 shadow-nivel-2"
+        className="absolute z-20 mt-1 w-full animate-menu-in cj-vidro-elevado rounded-campo border border-borda px-4 py-2 text-xs text-texto-2 shadow-nivel-2 dark:border-white/[0.08]"
       >
         {vazio}
       </div>
@@ -115,7 +115,7 @@ function Lista({
       // focável pelo teclado no Chrome, e era nela que o Tab caía antes de ela
       // sumir — o mesmo foco perdido das opções, logo abaixo.
       tabIndex={-1}
-      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-campo border border-borda bg-superficie py-1 shadow-nivel-2 scrollbar-thin"
+      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto animate-menu-in cj-vidro-elevado rounded-campo border border-borda py-1 shadow-nivel-2 scrollbar-thin dark:border-white/[0.08]"
     >
       {opcoes.map((o, i) => (
         <li key={o.id} role="presentation">

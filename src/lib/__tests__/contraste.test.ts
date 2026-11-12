@@ -86,7 +86,8 @@ function contraste(a: Rgb, b: Rgb): number {
 /** [frente, fundo, onde aparece] */
 type Par = [string, string, string]
 
-const SUPERFICIES = ['superficie', 'superficie-2', 'superficie-3', 'papel']
+// `elevada` (v3, 12/11/2026): a janela e o menu suspenso, um degrau acima do cartão no escuro.
+const SUPERFICIES = ['superficie', 'superficie-2', 'superficie-3', 'papel', 'elevada']
 
 const TEXTO: Par[] = [
   // Os três cinzas de texto em toda superfície (cartão, cabeçalho de tabela,
@@ -105,9 +106,11 @@ const TEXTO: Par[] = [
     [e, 'superficie', `texto de ${e} no cartão`],
     ['texto', `${e}-fundo`, `texto comum na caixa de ${e}`],
   ]),
-  // Texto branco sobre os preenchidos: botões e item aceso do menu.
-  ['branco', 'marca', 'botão primário'],
-  ['branco', 'marca-hover', 'botão primário sob o mouse'],
+  // A LETRA DO PRIMÁRIO (v3, 12/11/2026): `marca-contraste`, e não branco fixo —
+  // no escuro o primário é o champanhe, e a letra é o marinho da noite.
+  ['marca-contraste', 'marca', 'botão primário'],
+  ['marca-contraste', 'marca-hover', 'botão primário sob o mouse'],
+  // Texto branco sobre os preenchidos: botões de estado e item aceso do menu.
   ['branco', 'perigo-cheio', 'botão de perigo'],
   ['branco', 'sucesso-cheio', 'botão de sucesso'],
   ['branco', 'nav-ativo', 'item aceso do menu'],
@@ -116,8 +119,14 @@ const TEXTO: Par[] = [
   ['nav-texto', 'nav-fundo', 'itens do menu'],
   ['nav-apagado', 'nav-fundo', 'títulos das seções do menu'],
   ['acento', 'nav-fundo', 'título da seção acesa do menu'],
-  // O número do contador no canto do ícone, no menu recolhido (o azul da marca).
-  ['branco', 'marca', 'contador do menu recolhido'],
+  // O número do contador no canto do ícone, no menu recolhido: o marinho do
+  // menu sobre a pílula champanhe (v3).
+  ['nav-fundo', 'acento', 'contador do menu recolhido'],
+  // O CHAMPANHE COMO LETRA (v3): o `ouro-texto` no cartão, no papel e no fundo
+  // pálido dele.
+  ['ouro-texto', 'superficie', 'champanhe como texto no cartão'],
+  ['ouro-texto', 'papel', 'champanhe como texto no fundo da página'],
+  ['ouro-texto', 'ouro-suave', 'selo champanhe'],
   // O aviso flutuante (toast): a superfície sobre o texto (escuro no claro,
   // claro no escuro). A dica do menu recolhido (ui/Dica.tsx) é o mesmo par.
   ['superficie', 'texto', 'aviso flutuante e dica do menu'],
@@ -162,6 +171,8 @@ const NAO_TEXTO: Par[] = [
   ['anel', 'superficie', 'anel de foco no cartão'],
   ['anel', 'papel', 'anel de foco no fundo da página'],
   ['anel', 'nav-fundo', 'anel de foco no menu'],
+  ['anel', 'elevada', 'anel de foco na janela'],
+  ['ouro-forte', 'superficie', 'linha champanhe (régua, sublinhado)'],
   // O anel PRÓPRIO do menu (auditoria visual, 03/10/2026): o `anel` dava 3,2:1
   // no navy; o `nav-foco`, por dentro do item, no fundo e no item aceso.
   ['nav-foco', 'nav-fundo', 'anel de foco do menu (nav-foco)'],
@@ -207,12 +218,12 @@ describe.each(TEMAS)('contraste dos tokens no $nome (index.css)', ({ vars, texto
 describe('a régua e a leitura dos blocos', () => {
   it('lê os tokens de verdade (senão o teste não está testando nada)', () => {
     expect(CLARO.size).toBeGreaterThan(40)
-    expect(rgb('texto')).toEqual([23, 32, 43])
+    expect(rgb('texto')).toEqual([14, 26, 43])
     // Os papéis da marca apontam para a escala, e a referência é seguida.
     expect(rgb('marca')).toEqual(rgb('brand-600'))
     // O escuro foi lido, e é outro.
     expect(SO_ESCURO.size).toBeGreaterThan(40)
-    expect(rgbEm(ESCURO, 'texto')).toEqual([232, 238, 245])
+    expect(rgbEm(ESCURO, 'texto')).toEqual([232, 236, 242])
     expect(rgbEm(ESCURO, 'papel')).not.toEqual(rgb('papel'))
   })
 
@@ -222,8 +233,8 @@ describe('a régua e a leitura dos blocos', () => {
     // A conta que a amostra anota ao lado dos tokens (estilo.css).
     expect(contraste(rgb('texto'), BRANCO)).toBeGreaterThan(16)
     expect(contraste(rgb('texto-3'), BRANCO)).toBeGreaterThan(5.2)
-    // "4,8:1 com texto branco", anotado ao lado do --brand escuro da amostra.
-    expect(contraste(rgbEm(ESCURO, 'marca'), BRANCO)).toBeCloseTo(4.8, 1)
+    // "8,3:1", anotado ao lado do primário champanhe do escuro (v3).
+    expect(contraste(rgbEm(ESCURO, 'marca'), rgbEm(ESCURO, 'marca-contraste'))).toBeCloseTo(8.3, 1)
   })
 })
 
@@ -313,10 +324,11 @@ describe('os tokens chegam inteiros às classes', () => {
   })
 
   it('o menu no escuro se separa do papel (auditoria visual, E1)', () => {
-    // O navy da amostra (#0a1622) era quase o papel (#0d141d): 1,01:1. Agora,
-    // 1,1:1 — com a borda à direita do menu, é o que basta para separar.
+    // O navy da amostra (#0a1622) era quase o papel (#0d141d): 1,01:1. Na v3,
+    // o menu é um degrau mais azul e mais claro que a noite do papel — com a
+    // linha fina à direita, é o que basta para separar.
     expect(contraste(rgbEm(ESCURO, 'nav-fundo'), rgbEm(ESCURO, 'papel'))).toBeGreaterThan(1.08)
-    expect(rgbEm(ESCURO, 'nav-fundo')).toEqual([15, 30, 46])
+    expect(rgbEm(ESCURO, 'nav-fundo')).toEqual([15, 26, 45])
     // O anel do menu é o mesmo nos dois temas.
     expect(rgbEm(ESCURO, 'nav-foco')).toEqual(rgb('nav-foco'))
   })

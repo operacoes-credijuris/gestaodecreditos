@@ -213,7 +213,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-s4 backdrop-blur-[2px] scrollbar-thin"
+      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/45 p-s4 backdrop-blur-[6px] scrollbar-thin"
       onClick={(e) => {
         if (e.target === e.currentTarget) onFechar()
       }}
@@ -226,7 +226,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
         aria-label="Buscar em toda a plataforma"
         // NO CELULAR, COLADA NO ALTO: com o teclado aberto, os 10% de cima
         // tiravam da vista justamente os primeiros resultados.
-        className="animate-modal-in mt-0 w-full max-w-[620px] overflow-hidden sm:mt-[10vh] rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]"
+        className="animate-modal-in mt-0 w-full max-w-[620px] overflow-hidden sm:mt-[10vh] rounded-janela border border-borda bg-elevada shadow-nivel-3 outline-none dark:border-white/[0.07]"
       >
         <div className="flex h-[56px] items-center gap-s3 border-b border-borda pl-s4 pr-s1 text-texto-3 sm:px-s5">
           <Search className="h-[18px] w-[18px] shrink-0" aria-hidden />
@@ -337,7 +337,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
         </p>
 
         {/* As teclas só valem com teclado: no celular, o rodapé some. */}
-        <div className="hidden flex-wrap items-center gap-x-s4 gap-y-s2 border-t border-borda px-s5 py-s3 text-xs text-texto-3 sm:flex">
+        <div className="hidden flex-wrap items-center gap-x-s4 gap-y-s2 border-t border-borda bg-superficie-2 px-s5 py-s3 text-xs text-texto-3 sm:flex">
           {/* AS TECLAS DESENHADAS, como o "Ctrl K" do topo e o "Esc" acima (ui/Tecla):
               soltas no texto, "Ctrl Enter aba nova" se lia como uma frase só. */}
           <span className="inline-flex items-center gap-s1">

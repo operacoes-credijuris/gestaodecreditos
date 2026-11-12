@@ -42,10 +42,16 @@ export function PageHeader({
           // "Publicações e movimentações" e "Requerimentos administrativos"
           // ocupavam duas linhas e meia da tela de 375px antes de qualquer dado.
           const titulo = (
+            // O H1 NA SERIFA (design system v3, 12/11/2026): a Source Serif 4
+            // em seminegrito, 30px no computador — a assinatura de relatório
+            // institucional, a única serifa da tela. O h2 da aba fica na Inter:
+            // duas serifas competindo na mesma vista desfariam a hierarquia.
             <Titulo
               className={cn(
-                'font-display font-extrabold tracking-tight text-texto',
-                nivel === 1 ? 'text-2xl sm:text-3xl' : 'text-xl',
+                'text-texto',
+                nivel === 1
+                  ? 'font-titulo text-2xl font-semibold tracking-[-0.01em] sm:text-4xl'
+                  : 'font-display text-xl font-semibold tracking-[-0.01em]',
               )}
             >
               {title}
@@ -59,14 +65,14 @@ export function PageHeader({
           return comAcessorio ? (
             <div className="flex items-start gap-s2">
               {titulo}
-              <span className="mt-[2px] shrink-0 sm:mt-[4px]">{acessorio}</span>
+              <span className="mt-[2px] shrink-0 sm:mt-[3px]">{acessorio}</span>
             </div>
           ) : (
             titulo
           )
         })()}
         {description && (
-          <p className="mt-s1 text-corpo text-texto-2">{description}</p>
+          <p className="mt-s1.5 max-w-[72ch] text-corpo text-texto-2">{description}</p>
         )}
       </div>
       {actions && <div className="flex flex-wrap gap-s2">{actions}</div>}

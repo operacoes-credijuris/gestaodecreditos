@@ -107,7 +107,7 @@ export function Dica({
             role="tooltip"
             style={{ left: pos.x, top: pos.y }}
             className={cn(
-              'animate-fade-in pointer-events-none fixed z-aviso w-max max-w-[280px] rounded-controle bg-texto px-s2 py-s1 text-sm text-superficie shadow-nivel-2',
+              'animate-fade-in pointer-events-none fixed z-aviso w-max max-w-[280px] rounded-controle bg-texto px-s2 py-s1 text-sm text-superficie shadow-nivel-2 ring-1 ring-inset ring-superficie/10',
               lado === 'direita' ? '-translate-y-1/2' : '-translate-x-1/2',
             )}
           >

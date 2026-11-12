@@ -43,19 +43,22 @@ interface ContadorDoItem {
  */
 const classeDoItem = (opcoes: { ativo?: boolean; forte?: boolean; recolhido: boolean; celular: boolean }) =>
   cn(
-    'relative flex items-center gap-s3 rounded-controle px-s3 my-s0.5 text-corpo transition-colors',
+    'relative flex items-center gap-s3 rounded-controle px-s3 my-s0.5 text-corpo transition-colors duration-rapida ease-saida',
     'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-nav-foco',
     opcoes.celular ? 'h-[44px]' : 'h-[36px]',
-    opcoes.forte ? 'font-bold text-white' : opcoes.ativo ? 'font-semibold' : 'font-medium',
+    opcoes.forte ? 'font-semibold text-white' : opcoes.ativo ? 'font-semibold' : 'font-medium',
     opcoes.ativo
-      ? // A BARRA VERDE fica 12px para fora do item, encostada na lateral do
-        // menu (o `px-s3` do <nav>; 8px no recolhido). Desenhada por cima: o
-        // rótulo não "pula" quando ela aparece.
+      ? // A BARRA CHAMPANHE (v3) fica 12px para fora do item, encostada na
+        // lateral do menu (o `px-s3` do <nav>; 8px no recolhido). Desenhada por
+        // cima: o rótulo não "pula" quando ela aparece. O item aceso ganha um
+        // fio claro por dentro e o ÍCONE CHAMPANHE — o aceso se vê de longe,
+        // e não só pela cor do fundo.
         cn(
-          'bg-nav-ativo text-white before:absolute before:inset-y-s2 before:w-[3px] before:rounded-r before:bg-acento',
+          'bg-nav-ativo text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.05)] [&>svg]:text-acento',
+          'before:absolute before:inset-y-s2 before:w-[2px] before:rounded-r before:bg-acento before:shadow-[0_0_10px_rgb(var(--ouro)/0.55)]',
           opcoes.recolhido ? 'before:-left-s2' : 'before:-left-s3',
         )
-      : 'text-nav-texto hover:bg-white/[0.08] hover:text-white',
+      : 'text-nav-texto hover:bg-white/[0.06] hover:text-white',
     opcoes.recolhido && 'mx-auto w-[48px] justify-center px-0',
   )
 
@@ -116,8 +119,8 @@ function LeafLink({
         <b
           title={contador.texto}
           className={cn(
-            'ml-auto grid h-[20px] min-w-[22px] shrink-0 place-items-center rounded-full px-[7px] text-xs font-bold tabular-nums text-white',
-            contador.alerta ? 'bg-perigo-cheio' : 'bg-white/[0.12]',
+            'ml-auto grid h-[20px] min-w-[22px] shrink-0 place-items-center rounded-full px-[7px] text-xs font-semibold tabular-nums text-white',
+            contador.alerta ? 'bg-perigo-cheio' : 'bg-white/[0.10] ring-1 ring-inset ring-white/[0.08]',
           )}
         >
           <span aria-hidden>{contador.numero}</span>
@@ -131,8 +134,10 @@ function LeafLink({
         <b
           aria-hidden
           className={cn(
-            'absolute right-[4px] top-[3px] grid h-[16px] min-w-[16px] place-items-center rounded-full px-[4px] text-xs font-bold leading-none tabular-nums text-white ring-2',
-            contador.alerta ? 'bg-perigo-cheio' : 'bg-marca',
+            // v3: o contador comum é a pílula CHAMPANHE com o número no marinho
+            // do menu (7,6:1); o de alerta segue no vermelho com letra branca.
+            'absolute right-[4px] top-[3px] grid h-[16px] min-w-[16px] place-items-center rounded-full px-[4px] text-xs font-bold leading-none tabular-nums ring-2',
+            contador.alerta ? 'bg-perigo-cheio text-white' : 'bg-acento text-nav',
             ativo ? 'ring-nav-ativo' : 'ring-nav',
           )}
         >
@@ -255,13 +260,17 @@ export function Sidebar({
       : undefined
 
   const conteudo = (recolhido: boolean, celular: boolean) => (
-    // O navy chapado da amostra (--nav-bg), e não o degradê de antes. A BORDA À
-    // DIREITA, nos dois temas, separa o menu do conteúdo no escuro, onde o navy
-    // ficava quase igual ao papel (auditoria visual, E1).
-    <div className="flex h-full flex-col border-r border-white/[0.06] bg-nav text-white">
+    // O MARINHO DA V3 (12/11/2026): `cj-menu` (index.css) é o marinho com um
+    // degradê vertical discreto e um halo champanhe muito fraco atrás da marca.
+    // A BORDA À DIREITA, nos dois temas, separa o menu do conteúdo no escuro
+    // (auditoria visual, E1).
+    <div className="cj-menu flex h-full flex-col border-r border-white/[0.06] text-white">
       <div
         className={cn(
-          'flex h-[64px] shrink-0 items-center gap-s3 border-b border-white/[0.07]',
+          // A linha de baixo do cabeçalho é um FIO CHAMPANHE que esmaece nas
+          // pontas (o `after`), e não uma borda cinza: a marca assina o menu.
+          'relative flex h-[64px] shrink-0 items-center gap-s3',
+          'after:absolute after:inset-x-s3 after:bottom-0 after:h-px after:bg-[linear-gradient(90deg,transparent,rgb(var(--ouro)/0.35),transparent)]',
           recolhido ? 'justify-center px-0' : 'px-s4',
         )}
       >
@@ -275,11 +284,15 @@ export function Sidebar({
           <img src={marca} alt={recolhido ? 'Credijuris' : ''} className="h-full w-full object-contain" />
         </div>
         {!recolhido && (
+          // O NOME NA SERIFA DOS TÍTULOS (v3), como uma assinatura; o setor
+          // embaixo, em caixa alta pequena e espaçada.
           <div className="min-w-0">
-            <p className="font-display text-xl font-extrabold leading-[22px] tracking-tight text-white">
+            <p className="font-titulo text-xl font-semibold leading-[22px] tracking-[-0.005em] text-white">
               Credijuris
             </p>
-            <p className="text-xs text-nav-apagado">Gestão de créditos</p>
+            <p className="mt-[2px] text-xs font-medium uppercase leading-[14px] tracking-[0.1em] text-nav-apagado">
+              Gestão de créditos
+            </p>
           </div>
         )}
         {celular && (
@@ -306,18 +319,18 @@ export function Sidebar({
                 className={cn(
                   // A seção sem título (a Análise de crédito, no topo) fica
                   // separada das outras por uma linha, com o item em negrito.
-                  !section.title ? 'mb-s2 border-b border-white/10 pb-s3' : 'mt-s5',
+                  !section.title ? 'mb-s2 border-b border-white/[0.07] pb-s3' : 'mt-s5',
                 )}
               >
                 {/* O título do setor; recolhido, um traço no lugar dele. A caixa
                     alta é só estilo de rótulo (AP4: mantida). */}
                 {section.title &&
                   (recolhido ? (
-                    <div className="mx-s2 mb-s3 h-px bg-white/10" aria-hidden />
+                    <div className="mx-s2 mb-s3 h-px bg-white/[0.07]" aria-hidden />
                   ) : (
                     <p
                       className={cn(
-                        'font-display px-s3 pb-s2 text-xs font-bold uppercase tracking-[0.06em]',
+                        'px-s3 pb-s2 text-xs font-semibold uppercase tracking-[0.1em]',
                         sectionActive ? 'text-acento' : 'text-nav-apagado',
                       )}
                     >
@@ -425,7 +438,7 @@ export function Sidebar({
         >
           <div
             className={cn(
-              'absolute inset-0 bg-veu/50 transition-opacity duration-200',
+              'absolute inset-0 bg-veu/45 backdrop-blur-[6px] transition-opacity duration-media ease-saida',
               visible ? 'opacity-100' : 'opacity-0',
             )}
             onClick={onClose}
@@ -434,7 +447,7 @@ export function Sidebar({
             ref={painelRef}
             tabIndex={-1}
             className={cn(
-              'absolute inset-y-0 left-0 w-[280px] max-w-[85vw] shadow-nivel-3 outline-none transition-transform duration-200',
+              'absolute inset-y-0 left-0 w-[280px] max-w-[85vw] shadow-nivel-3 outline-none transition-transform duration-media ease-saida',
               visible ? 'translate-x-0' : '-translate-x-full',
             )}
           >

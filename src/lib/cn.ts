@@ -20,7 +20,7 @@ import { extendTailwindMerge } from 'tailwind-merge'
 const twMerge = extendTailwindMerge({
   extend: {
     theme: {
-      text: ['corpo'],
+      text: ['corpo', '4xl'],
       radius: ['controle', 'campo', 'cartao', 'janela', 'flutuante'],
       shadow: ['nivel-1', 'nivel-2', 'nivel-3'],
       spacing: [
@@ -30,6 +30,10 @@ const twMerge = extendTailwindMerge({
     },
     classGroups: {
       z: [{ z: ['cabecalho', 'topo', 'assistente', 'assistente-painel', 'janela', 'aviso-versao', 'aviso'] }],
+      // OS TEMPOS DO MOVIMENTO (design system v3, 12/11/2026): sem eles,
+      // `cn('duration-rapida', 'duration-300')` deixava as duas.
+      duration: [{ duration: ['rapida', 'media', 'lenta'] }],
+      ease: [{ ease: ['saida', 'padrao'] }],
     },
   },
 })

@@ -174,7 +174,9 @@ export function MenuDeAcoes({
             // O CLIQUE NÃO SOBE PARA A LINHA (ver o comentário do componente).
             onClick={(e) => e.stopPropagation()}
             style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: LARGURA }}
-            className="animate-fade-in fixed z-aviso rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]"
+            // v3: o menu suspenso é VIDRO ELEVADO (`cj-vidro-elevado`: a
+            // superfície elevada quase opaca com desfoque) e cai do botão.
+            className="animate-menu-in cj-vidro-elevado fixed z-aviso rounded-flutuante border border-borda p-s1.5 shadow-nivel-2 dark:border-white/[0.08]"
           >
             {comuns.map(item)}
             {comuns.length > 0 && perigosas.length > 0 && <div className="mx-s1 my-s1 border-t border-borda" role="separator" />}

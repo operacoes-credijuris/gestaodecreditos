@@ -35,13 +35,16 @@ export function Chip({
       type={type}
       aria-pressed={ativo}
       className={cn(
-        'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-full px-s3 text-sm font-semibold ring-1 ring-inset transition-colors',
+        'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-full px-s3 text-sm font-semibold ring-1 ring-inset transition-colors duration-rapida ease-saida',
         '[&_svg]:h-[16px] [&_svg]:w-[16px] [&_svg]:shrink-0',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
         'disabled:cursor-not-allowed disabled:opacity-50',
+        // v3: ACESO, o fundo suave da marca com o contorno champanhe (o
+        // "selecionado" da casa); apagado, a superfície com a linha fina, que
+        // escurece sob o mouse.
         ativo
-          ? 'bg-marca-suave text-marca-texto ring-marca-viva/30'
-          : 'bg-superficie text-texto-2 ring-borda hover:bg-superficie-3 hover:text-texto',
+          ? 'bg-marca-suave text-marca-texto ring-marca-viva/45'
+          : 'bg-superficie text-texto-2 ring-borda hover:bg-superficie-2 hover:text-texto hover:ring-borda-forte',
         className,
       )}
       {...rest}

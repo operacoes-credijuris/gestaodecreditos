@@ -70,15 +70,17 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
     .toUpperCase()
 
   return (
-    // O `.topbar` da amostra: 64px, a superfície quase opaca com desfoque (o
-    // conteúdo passa por baixo sem sumir de vez).
+    // O TOPO EM VIDRO (v3, 12/11/2026): 64px, a tinta do tema a 78% (`cj-vidro`)
+    // com desfoque e saturação — o desfoque fica escrito aqui, nas classes do
+    // Tailwind, e não só dentro do `cj-vidro`: é ele que obriga o menu do
+    // usuário a fechar pelo clique fora (ver abaixo).
     //
     // TRÊS COLUNAS NO COMPUTADOR (auditoria visual, M1): o caminho à esquerda,
     // a BUSCA SEMPRE NO MEIO e as ações à direita. Antes a busca era `flex-1`
     // com `mx-auto`, e o lugar dela dependia do comprimento do caminho: começava
     // em x≈538 em Configurações e em x≈645 em Publicações — um alvo usado toda
     // hora não pode andar. No celular, a fila de sempre.
-    <header className="sticky top-0 z-topo flex h-[64px] shrink-0 items-center gap-s2 border-b border-borda bg-superficie/[0.86] px-s3 backdrop-blur-[10px] md:grid md:grid-cols-[minmax(0,1fr)_minmax(240px,460px)_minmax(0,1fr)] md:gap-s4 md:px-s6">
+    <header className="sticky top-0 z-topo flex h-[64px] shrink-0 items-center gap-s2 cj-vidro border-b border-borda px-s3 backdrop-blur-[16px] backdrop-saturate-150 md:grid md:grid-cols-[minmax(0,1fr)_minmax(240px,460px)_minmax(0,1fr)] md:gap-s4 md:px-s6">
       <div className="flex min-w-0 flex-1 items-center gap-s2">
         <button
           onClick={onOpenMenu}
@@ -148,7 +150,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         aria-label="Buscar em toda a plataforma"
         title="Buscar em toda a plataforma (Ctrl + K)"
         aria-keyshortcuts="Control+K"
-        className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto md:flex md:h-controle md:w-full md:items-center md:justify-start md:gap-s2 md:rounded-campo md:border md:border-borda md:bg-superficie-2 md:px-s3 md:text-corpo md:text-texto-3 md:hover:border-borda-forte md:hover:bg-superficie"
+        className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto md:flex md:h-controle md:w-full md:items-center md:justify-start md:gap-s2 md:rounded-campo md:border md:border-borda md:bg-superficie-2/80 md:px-s3 md:text-corpo md:text-texto-3 md:shadow-[inset_0_1px_1px_rgb(14_26_43/0.04)] md:transition-[border-color,background-color] md:duration-rapida md:hover:border-borda-forte md:hover:bg-superficie"
       >
         <Search className="h-[16px] w-[16px] shrink-0" aria-hidden />
         <span className="hidden flex-1 truncate text-left md:block">
@@ -193,7 +195,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
             className="flex items-center gap-s2 rounded-full border border-transparent py-s0.5 pl-s0.5 pr-s2 transition-colors hover:border-borda hover:bg-superficie-3"
           >
             <div
-              className="font-display flex h-[32px] w-[32px] items-center justify-center rounded-full bg-marca-suave text-xs font-bold text-marca-texto"
+              className="flex h-[32px] w-[32px] items-center justify-center rounded-full bg-marca-suave text-xs font-semibold tracking-[0.02em] text-marca-texto ring-1 ring-inset ring-ouro-borda"
               aria-hidden
             >
               {iniciais}
@@ -209,12 +211,12 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
             // elemento flutuante; no escuro, o anel claro que o separa da
             // página (auditoria visual, E3). Itens com 36px de altura. 264PX (eram
             // 240): "Do sistema", a terceira escolha do tema, vazava do trilho.
-            <div className="absolute right-0 z-20 mt-s2 w-[264px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]">
+            <div className="animate-menu-in cj-vidro-elevado absolute right-0 z-20 mt-s2 w-[264px] rounded-flutuante border border-borda p-s1.5 shadow-nivel-2 dark:border-white/[0.08]">
               {/* O `.user-card` da amostra: o avatar ao lado do nome e do
                   e-mail, e o papel logo abaixo. */}
               <div className="flex items-center gap-s2 px-s2 py-s2">
                 <div
-                  className="font-display flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-full bg-marca-suave text-xs font-bold text-marca-texto"
+                  className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-full bg-marca-suave text-xs font-semibold tracking-[0.02em] text-marca-texto ring-1 ring-inset ring-ouro-borda"
                   aria-hidden
                 >
                   {iniciais}
@@ -278,7 +280,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                       className={cn(
                         'h-[30px] flex-auto whitespace-nowrap rounded-controle px-s2 text-sm font-semibold transition-colors [@media(pointer:coarse)]:h-[36px]',
                         preferencia === o.chave
-                          ? 'bg-superficie text-marca-texto shadow-nivel-1'
+                          ? 'bg-elevada text-texto shadow-nivel-1 ring-1 ring-borda dark:bg-superficie-3 dark:ring-white/[0.06]'
                           : 'text-texto-2 hover:text-texto',
                       )}
                     >

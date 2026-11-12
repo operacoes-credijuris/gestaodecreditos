@@ -50,7 +50,11 @@ export function THead({ children }: { children: ReactNode }) {
     // FIXO NO TOPO AO ROLAR (auditoria visual, C4): em listas de 49 a 80
     // linhas, o cabeçalho sumia. A linha de baixo é sombra, e não borda: com
     // `border-collapse`, a borda de um `sticky` não acompanha.
-    <thead className="sticky top-0 z-cabecalho bg-superficie-2 font-display text-left text-xs font-bold uppercase tracking-[0.06em] text-texto-3 shadow-[inset_0_-1px_0_rgb(var(--borda))]">
+    // v3 (12/11/2026): o rótulo é o SOBRETÍTULO da casa (11,5px, seminegrito,
+    // caixa alta espaçada) — o cabeçalho de grade de relatório financeiro. A
+    // linha de baixo é a borda FORTE: a única linha mais marcada da tabela, a
+    // que separa o título dos números.
+    <thead className="cj-sobretitulo sticky top-0 z-cabecalho bg-superficie-2 text-left shadow-[inset_0_-1px_0_rgb(var(--borda-forte))]">
       {children}
     </thead>
   )
@@ -70,14 +74,17 @@ export function TH({
   numero?: boolean
 }) {
   return (
-    <th colSpan={colSpan} className={cn('px-s4 py-[10px] font-bold', numero && 'text-right', className)}>
+    <th colSpan={colSpan} className={cn('px-s4 py-[10px] font-semibold', numero && 'text-right', className)}>
       {children}
     </th>
   )
 }
 
 export function TBody({ children }: { children: ReactNode }) {
-  return <tbody className="divide-y divide-borda">{children}</tbody>
+  // A GRADE FINANCEIRA (v3): linhas finas entre as linhas e a ZEBRA SUTIL
+  // (`cj-zebra`, em index.css) — sem especificidade nenhuma, para que a cor que
+  // a tela dá a uma linha (selecionada, vencida) sempre vença a listra.
+  return <tbody className="cj-zebra divide-y divide-borda">{children}</tbody>
 }
 
 export function TR({
@@ -96,7 +103,7 @@ export function TR({
         // A linha "acende" sob o mouse, com transição. NA SUPERFÍCIE 3 A 60%
         // (auditoria visual, C4): a superfície 2 de antes (#fcfbf8 sobre o
         // branco) não se via.
-        'transition-colors duration-100 hover:bg-superficie-3/60',
+        'transition-colors duration-rapida ease-saida hover:bg-superficie-3/70',
         onClick && 'cursor-pointer',
         className,
       )}
@@ -233,13 +240,14 @@ export function EmptyState({
       )}
     >
       <div
-        className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto [&_svg]:h-7 [&_svg]:w-7"
+        // v3: a placa champanhe com contorno fino, o mesmo selo do indicador.
+        className="grid h-16 w-16 place-items-center rounded-cartao bg-ouro-suave text-ouro-texto ring-1 ring-inset ring-ouro-borda [&_svg]:h-7 [&_svg]:w-7"
         aria-hidden
       >
         {icon ?? <Inbox />}
       </div>
       <div className="max-w-md">
-        <p className="font-display text-lg font-bold text-texto">{title}</p>
+        <p className="font-display text-lg font-semibold tracking-[-0.01em] text-texto">{title}</p>
         {description && (
           <p className="mt-1 text-corpo text-texto-2">{description}</p>
         )}
@@ -309,10 +317,10 @@ export function ErrorState({
     // amostra). O título fica em vermelho; o motivo, no cinza de leitura — em
     // vermelho, uma mensagem longa de erro cansava mais do que informava.
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
-      <div className="mb-1 grid h-16 w-16 place-items-center rounded-cartao bg-perigo-fundo text-perigo">
+      <div className="mb-1 grid h-16 w-16 place-items-center rounded-cartao bg-perigo-fundo text-perigo ring-1 ring-inset ring-perigo-borda">
         <AlertTriangle className="h-7 w-7" aria-hidden />
       </div>
-      <p className="font-display text-lg font-bold text-perigo">Não foi possível carregar os dados.</p>
+      <p className="font-display text-lg font-semibold text-perigo">Não foi possível carregar os dados.</p>
       {message && <p className="max-w-md text-corpo text-texto-2">{message}</p>}
       {onRetry && (
         <Button

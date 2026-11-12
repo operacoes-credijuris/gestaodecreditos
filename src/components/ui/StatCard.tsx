@@ -42,13 +42,15 @@ export function StatCard({
    */
   sub?: ReactNode
 }) {
-  // A placa do ícone do `.kpi-ic` da amostra: fundo pálido e ícone no tom forte.
+  // A placa do ícone: fundo pálido, ícone no tom forte e um contorno fino do
+  // mesmo tom (v3) — a placa vira um "selo" pequeno e não uma mancha. A da
+  // marca é champanhe: é o indicador da casa.
   const tones = {
-    brand: 'bg-marca-leve text-marca-texto',
-    green: 'bg-sucesso-fundo text-sucesso',
-    amber: 'bg-aviso-fundo text-aviso',
-    red: 'bg-perigo-fundo text-perigo',
-    slate: 'bg-superficie-3 text-texto-2',
+    brand: 'bg-ouro-suave text-ouro-texto ring-1 ring-inset ring-ouro-borda',
+    green: 'bg-sucesso-fundo text-sucesso ring-1 ring-inset ring-sucesso-borda',
+    amber: 'bg-aviso-fundo text-aviso ring-1 ring-inset ring-aviso-borda',
+    red: 'bg-perigo-fundo text-perigo ring-1 ring-inset ring-perigo-borda',
+    slate: 'bg-superficie-3 text-texto-2 ring-1 ring-inset ring-borda',
   }
   const clicavel = !!to || !!onClick
   const iconeAEsquerda = !!icon && iconPosition === 'left'
@@ -56,7 +58,7 @@ export function StatCard({
   // "…" ele escondia o que o número conta ("Créditos na sele…" no celular), e
   // solto quebrava em três ("A / receber / estimado", em Carteiras a 1280px).
   const rotulo = (
-    <p className="flex min-w-0 items-start gap-s1 text-corpo font-medium text-texto-2">
+    <p className="flex min-w-0 items-start gap-s1 text-sm font-medium text-texto-2">
       <span className="line-clamp-2 min-w-0">{label}</span>
       {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
           informação a um hover de distância. */}
@@ -70,11 +72,13 @@ export function StatCard({
   const card = (
     <Card
       className={cn(
-        'h-full p-s4',
-        clicavel && 'transition hover:border-borda-forte hover:shadow-nivel-2',
-        // Selecionado: contorno no azul da logomarca e um halo largo e claro
-        // (o `.kpi.click.sel` da amostra).
-        active && 'border-marca-viva ring-[3px] ring-marca-viva/15',
+        // O INDICADOR DA V3 (12/11/2026): 20px de respiro e, quando clicável,
+        // ele SOBE 1PX sob o mouse com a sombra crescendo (`cj-ergue`; parado
+        // com movimento reduzido).
+        'h-full p-s5 max-sm:p-s4',
+        clicavel && 'cj-ergue hover:border-borda-forte',
+        // Selecionado: contorno champanhe e um halo largo e fraco.
+        active && 'border-marca-viva ring-[3px] ring-marca-viva/20',
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -94,10 +98,14 @@ export function StatCard({
           ) : (
             rotulo
           )}
-          <p className="font-display mt-1 text-2xl font-bold tabular-nums tracking-tight text-texto [word-spacing:0.18em]">
+          {/* O NÚMERO-HERÓI (v3): 26px em seminegrito na Inter, que nesse
+              tamanho sai no desenho Display (tamanho óptico); algarismos
+              tabulares e de altura de maiúscula (`cj-numero`). Chega subindo
+              4px na primeira vez (`animate-numero`, o "count-up" barato). */}
+          <p className="cj-numero animate-numero mt-s3 font-display text-3xl font-semibold text-texto [word-spacing:0.12em] max-sm:text-2xl">
             {value}
           </p>
-          {sub && <p className="mt-1 text-xs text-texto-3">{sub}</p>}
+          {sub && <p className="mt-s1.5 text-xs text-texto-3">{sub}</p>}
         </div>
         {icon && !iconeAEsquerda && (
           <div className={cn('rounded-controle p-2.5', tones[tone])}>{icon}</div>

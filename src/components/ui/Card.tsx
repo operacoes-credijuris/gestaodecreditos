@@ -8,7 +8,9 @@ const FAIXAS: Record<FaixaDoCartao, string> = {
   perigo: 'before:bg-perigo-cheio',
   aviso: 'before:bg-aviso-cheio',
   sucesso: 'before:bg-sucesso-cheio',
-  info: 'before:bg-marca-viva',
+  // v3: a faixa de INFORMAÇÃO é o azul de info; a da MARCA, o champanhe. Antes
+  // as duas eram o azul da logomarca, e agora o champanhe não diz "informação".
+  info: 'before:bg-info',
   marca: 'before:bg-marca-viva',
 }
 
@@ -30,11 +32,12 @@ export function Card({
   return (
     <div
       className={cn(
-        // O `.panel` da amostra: borda quente, sombra de um nível só e o raio de
-        // cartão (14px). UM RAIO SÓ NO APP INTEIRO: os cartões feitos à mão
-        // (Tarefas, Entrar) usam o mesmo `rounded-cartao`. NO ESCURO, SEM
-        // SOMBRA (§0.4): quem separa é a borda.
-        'rounded-cartao border border-borda bg-superficie shadow-nivel-1 dark:shadow-none',
+        // O CARTÃO DA V3 (12/11/2026): linha fina, o raio de cartão (12px) e a
+        // sombra macia em camadas do tema — no claro ele assenta na porcelana;
+        // no escuro a "sombra" é o fio de luz por dentro, no alto (index.css,
+        // --sombra-1). UM RAIO SÓ NO APP INTEIRO: os cartões feitos à mão
+        // (Tarefas, Entrar) usam o mesmo `rounded-cartao`.
+        'rounded-cartao border border-borda bg-superficie shadow-nivel-1',
         faixa &&
           cn(
             'relative overflow-hidden before:absolute before:inset-y-0 before:left-0 before:w-[3px]',
@@ -65,7 +68,9 @@ export function CardHeader({
       <div>
         {/* 16px em negrito, como o título de painel da amostra. Sem tamanho, o
             título herdava os 12px da raiz e ficava menor que o próprio texto. */}
-        <h3 className="font-display text-lg font-bold tracking-tight text-texto">
+        {/* v3: 16px em SEMINEGRITO (era negrito) e um respiro a menos entre
+            as letras — o título do cartão informa, quem chama é o número. */}
+        <h3 className="font-display text-lg font-semibold tracking-[-0.01em] text-texto">
           {title}
         </h3>
         {description && (

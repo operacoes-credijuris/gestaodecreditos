@@ -34,7 +34,7 @@ export function SortableTH({
         // só a seta: é o rótulo que o olho procura. A seta das outras colunas
         // fica esmaecida, presente só para dizer que dá para ordenar.
         className={cn(
-          '-my-1.5 inline-flex items-center gap-1 py-1.5 font-bold uppercase tracking-[0.06em] hover:text-texto',
+          '-my-1.5 inline-flex items-center gap-1 py-1.5 font-semibold uppercase tracking-[0.08em] transition-colors duration-rapida hover:text-texto',
           active && 'text-marca-texto hover:text-marca-texto',
         )}
       >

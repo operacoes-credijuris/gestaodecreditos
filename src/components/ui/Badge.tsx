@@ -31,11 +31,9 @@ type Tone =
 
 type Size = 'md' | 'sm'
 
-// OS TONS QUE DIZEM ESTADO são tokens (os `.pill-*` da amostra: neutro, ok, aviso,
-// ruim). Os de etiqueta livre — azul, violeta, laranja, verde-água, rosa, anil —
-// são os TONS CATEGÓRICOS (`tom-*`): só distinguem um nome de outro. No claro
-// valem exatamente as cores de antes (`.pill-tom-*`, estilo5.css); no escuro, a
-// versão própria que a amostra traz. Ver index.css.
+// OS TONS QUE DIZEM ESTADO são tokens (neutro, ok, aviso, ruim). Os de etiqueta
+// livre — azul, violeta, laranja, verde-água, rosa, anil — são os TONS
+// CATEGÓRICOS (`tom-*`): só distinguem um nome de outro. Ver index.css.
 const tones: Record<Tone, string> = {
   gray: 'bg-superficie-3 text-texto-2 ring-borda',
   green: 'bg-sucesso-fundo text-sucesso ring-sucesso-borda',
@@ -58,8 +56,7 @@ const tones: Record<Tone, string> = {
 }
 
 // `md` COM 20PX DE ALTURA FIXA, 8px de lado e SEM QUEBRAR LINHA (auditoria
-// visual, §0.8): o `px-2.5 py-1` de antes (7,5/3px) ficava fora da grade, e o
-// selo quebrava em duas linhas nas tabelas a 1280px.
+// visual, §0.8): o selo não quebra em duas linhas nas tabelas a 1280px.
 const sizes: Record<Size, string> = {
   md: 'h-[20px] px-s2 text-xs',
   sm: 'px-s1.5 py-s0.5 text-xs leading-none',
@@ -79,9 +76,12 @@ export function Badge({
   return (
     <span
       className={cn(
-        // O CONTORNO A MEIA FORÇA NO ESCURO (E2): as bordas `tom-*-borda`
-        // saturadas transformavam cada selo num bloco pesado.
-        'inline-flex items-center whitespace-nowrap rounded-full font-semibold ring-1 ring-inset dark:ring-opacity-50',
+        // O SELO DA V3 (12/11/2026) É UMA ETIQUETA, NÃO UMA PÍLULA: o canto de
+        // controle (6px) em vez do redondo inteiro — mais "relatório", menos
+        // "app de celular" —, o contorno fino a meia força e a letra de
+        // seminegrito com um respiro de 0,01em. O CONTORNO A MEIA FORÇA NO
+        // ESCURO (E2): as bordas `tom-*-borda` saturadas pesavam.
+        'inline-flex items-center whitespace-nowrap rounded-controle font-semibold tracking-[0.01em] ring-1 ring-inset dark:ring-opacity-50',
         sizes[size],
         tones[tone],
         className,

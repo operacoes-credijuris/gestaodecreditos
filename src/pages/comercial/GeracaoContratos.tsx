@@ -102,7 +102,7 @@ function Passo({
       <div className="mb-s4 flex gap-s3">
         <span
           aria-hidden
-          className="grid h-[28px] w-[28px] flex-none place-items-center rounded-full bg-marca font-display text-sm font-bold text-white"
+          className="grid h-[28px] w-[28px] flex-none place-items-center rounded-full bg-marca font-display text-sm font-bold text-marca-contraste"
         >
           {numero}
         </span>

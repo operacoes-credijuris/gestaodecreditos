@@ -65,7 +65,7 @@ export function Segmented({
         // 07/10/2026): no celular, as quatro opções de Créditos quebravam em
         // duas linhas dentro do trilho cinza, que virava um bloco. A opção cortada
         // na borda já mostra que há mais para o lado.
-        'relative inline-flex max-w-full items-center gap-s0.5 overflow-x-auto rounded-campo border border-borda bg-superficie-3 p-[3px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        'relative inline-flex max-w-full items-center gap-s0.5 overflow-x-auto rounded-campo border border-borda bg-superficie-3 p-[3px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:bg-superficie-2',
         pista.classe,
         className,
       )}
@@ -80,11 +80,15 @@ export function Segmented({
             disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
-              'flex h-controle-sm shrink-0 items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-all duration-150',
+              // v3: a opção escolhida "levanta" na superfície ELEVADA, com a
+              // sombra de contato e a linha fina — no escuro, um degrau mais
+              // clara que o trilho; a letra fica na tinta (e não na cor da
+              // marca): quem diz "escolhida" é o relevo.
+              'flex h-controle-sm shrink-0 items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-[background-color,color,box-shadow] duration-rapida ease-saida',
               item.disabled
                 ? 'cursor-not-allowed text-texto-3 opacity-60'
                 : active
-                  ? 'bg-superficie text-marca-texto shadow-nivel-1'
+                  ? 'bg-elevada text-texto shadow-nivel-1 ring-1 ring-borda dark:bg-superficie-3 dark:ring-white/[0.06]'
                   : 'text-texto-2 hover:text-texto',
             )}
           >
@@ -93,7 +97,7 @@ export function Segmented({
               <span
                 className={cn(
                   'rounded-full px-s1.5 py-s0.5 text-xs font-semibold tabular-nums leading-none',
-                  active ? 'bg-marca-suave text-marca-texto' : 'bg-borda/70 text-texto-2',
+                  active ? 'bg-ouro-suave text-ouro-texto' : 'bg-borda/70 text-texto-2',
                 )}
               >
                 {item.count}

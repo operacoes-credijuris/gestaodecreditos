@@ -22,10 +22,16 @@ import { cn } from '@/lib/cn'
  * Texto em 14px (`corpo`), o mesmo do texto corrido. O erro (aria-invalid, que o
  * Field põe) pinta a borda de vermelho além da mensagem embaixo.
  */
+// v3 (12/11/2026): o foco é o ANEL CHAMPANHE — a borda acende no champanhe forte
+// e um halo largo e fraco em volta —, com transição de 150ms. Uma sombra
+// interna de 1px no alto dá ao campo a sensação de "rebaixado" no claro (no
+// escuro ela some no fundo). O erro (aria-invalid) pinta a borda e o halo de
+// vermelho.
 const baseControl =
   'w-full rounded-campo border border-borda-controle bg-superficie px-4 py-2 text-corpo text-texto ' +
+  'shadow-[inset_0_1px_1px_rgb(14_26_43/0.04)] transition-[border-color,box-shadow] duration-rapida ease-saida ' +
   'placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] ' +
-  'focus:ring-anel/20 aria-[invalid=true]:border-perigo ' +
+  'focus:ring-anel/25 aria-[invalid=true]:border-perigo aria-[invalid=true]:focus:ring-perigo/20 ' +
   'disabled:cursor-not-allowed disabled:bg-superficie-3 disabled:text-texto-2 disabled:opacity-100'
 
 /**
@@ -76,7 +82,7 @@ export function Field({
     // `.field` da amostra.
     <div className={cn('space-y-2', className)}>
       {label && (
-        <label htmlFor={id} className="block text-corpo font-semibold text-texto">
+        <label htmlFor={id} className="block text-sm font-semibold text-texto">
           {label}
           {required && <span className="ml-0.5 text-perigo">*</span>}
         </label>
@@ -138,7 +144,9 @@ export const Select = forwardRef<
 >(function Select({ className, children, ...rest }, ref) {
   const campo = useCampo(rest.id)
   return (
-    <select ref={ref} className={cn(baseControl, 'h-controle py-0 pr-8', className)} {...campo} {...rest}>
+    // `cj-select` (v3): a seta da casa, fina, no cinza de metadado, no lugar da
+    // seta nativa do Windows — que no escuro vinha clara e grossa.
+    <select ref={ref} className={cn(baseControl, 'cj-select h-controle py-0 pr-[36px]', className)} {...campo} {...rest}>
       {children}
     </select>
   )
