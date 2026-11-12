@@ -26,7 +26,10 @@ import {
 
 /** As chamadas que a tela faz, na ordem em que este módulo as pede. */
 export interface PassosDoEnvio {
-  /** A anotação (e as imagens). LANÇA com o motivo. */
+  /**
+   * A anotação (e as imagens). LANÇA com o motivo — `ArquivoDoEnvioNaoSubiu`
+   * quando o texto já está no card e foi um arquivo de depois que falhou.
+   */
   anotar: () => Promise<void>
   /**
    * A etiqueta do ato, com a cotação quando ele a pede (num pedido só à
@@ -58,6 +61,21 @@ export type ResultadoDoEnvio = {
 )
 
 const mensagem = (e: unknown) => (e as Error)?.message ?? String(e)
+
+/**
+ * A ANOTAÇÃO ENTROU, MAS UM ARQUIVO DEPOIS DELA NÃO (12/11/2026). O `anotar` da
+ * tela sobe o texto (na nota do primeiro arquivo) e depois os outros arquivos,
+ * um a um; falhando o segundo print, a falha saía como "A anotação não subiu
+ * para o Kommo" — com a anotação já no card. Quem lia isso ia ao Kommo e
+ * escrevia de novo à mão, e o card ficava com duas. A tela lança ESTE tipo
+ * quando o texto já está no card, e a mensagem diz o que entrou e o que não.
+ */
+export class ArquivoDoEnvioNaoSubiu extends Error {
+  constructor(mensagem: string) {
+    super(mensagem)
+    this.name = 'ArquivoDoEnvioNaoSubiu'
+  }
+}
 
 export async function registrarEnvioAoFundo({
   fundo,
@@ -106,6 +124,15 @@ export async function registrarEnvioAoFundo({
     try {
       await passos.anotar()
     } catch (e) {
+      if (e instanceof ArquivoDoEnvioNaoSubiu) {
+        throw new Error(
+          `A anotação está no card, mas ${mensagem(e)}` +
+            (comCotacao
+              ? ' A cotação não foi gravada, a etiqueta não entrou e o card não se moveu.'
+              : ' A etiqueta não entrou e o card não se moveu.') +
+            ' Confirme de novo — o que já subiu não se repete.',
+        )
+      }
       throw new Error(
         `A anotação não subiu para o Kommo: ${mensagem(e)}` +
           (comCotacao ? ' A cotação não foi gravada, a etiqueta não entrou e o card não se moveu.' : ''),

@@ -76,7 +76,7 @@ import {
   ordenarEtiquetas,
   normalizarEtiqueta,
 } from '../../supabase/functions/_shared/etiquetasDoFundo.ts'
-import type { KommoLead, KommoAnaliseInterna } from './types'
+import type { KommoLead, KommoAnaliseInterna, KommoNota } from './types'
 
 // Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
 export const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
@@ -873,8 +873,119 @@ export function useKommoLeads(pipelineId: number) {
         todos.push(...lote)
         if (lote.length < POR_PAGINA) break
       }
-      return todos
+      // AS NOTAS QUE A TELA GRAVOU E O ESPELHO AINDA NÃO TEM (12/11/2026) — ver
+      // `comNotasLocais`. Juntadas AQUI, no fim da leitura, e não só no cache:
+      // a releitura que já estava no ar quando a nota subiu também as traz.
+      return comNotasLocais(todos)
     },
+  })
+}
+
+// ---------- As notas que a tela gravou e o espelho ainda não trouxe ----------
+
+/**
+ * AS ANOTAÇÕES QUE A TELA ESCREVEU E O ESPELHO AINDA NÃO TEM (12/11/2026).
+ *
+ * A `kommo-anotar` grava a nota no Kommo e NÃO no espelho: quem a traz para
+ * `kommo_leads.notas` é a próxima sincronização (o cron, de 15 em 15 minutos).
+ * A tela punha a nota no cache na hora (`anotarNoCard`), e QUALQUER releitura do
+ * espelho a apagava — mover outro card (o `mover` invalida a lista), salvar uma
+ * análise, o "Sincronizar" que terminou de ler antes de a nota subir, voltar à
+ * página depois dos 30 s do cache. A anotação sumia do histórico do card, e quem
+ * a escreveu achava que não tinha ido e a escrevia de novo: duas notas iguais
+ * no Kommo, que a plataforma não apaga. A edição de nota tinha o mesmo defeito
+ * ao contrário: o texto antigo voltava, e a pessoa editava de novo.
+ *
+ * AQUI ELAS ESPERAM O ESPELHO: `useKommoLeads` as junta a cada leitura até ele
+ * trazer a nota — pelo id que o Kommo deu (o caso de hoje); sem id, pelo arquivo
+ * ou pelo começo do texto (o espelho guarda o texto com o rodapé de quem
+ * escreveu) — ou a edição (o texto do espelho deixou de ser o de antes). NUM
+ * MÓDULO, e não na página: sair da Análise e voltar não pode perdê-las.
+ *
+ * DUAS HORAS DE TETO: oito voltas do cron. Passado isso, ou o espelho já trouxe
+ * a nota, ou a sincronização está parada — e aí mostrar uma cópia que o Kommo
+ * nunca confirmou deixaria de ser verdade.
+ */
+export const VALIDADE_DA_NOTA_LOCAL = 2 * 60 * 60 * 1000
+
+const notasLocais: { leadId: number; nota: KommoNota; em: number; idsNoKommo: readonly number[] }[] = []
+const edicoesLocais = new Map<string, { leadId: number; notaId: number; de: string; para: string; em: number }>()
+
+/**
+ * A nota que acabou de subir para o card, até o espelho trazê-la. `idsNoKommo`:
+ * a nota que o Kommo guardou EM PARTES (a justificativa técnica longa) — a cópia
+ * daqui é o texto inteiro, e o espelho traz as partes, cada uma com o seu id.
+ */
+export function guardarNotaLocal(
+  leadId: number,
+  nota: KommoNota,
+  { agora = Date.now(), idsNoKommo = [] }: { agora?: number; idsNoKommo?: readonly number[] } = {},
+): void {
+  notasLocais.push({ leadId, nota, em: agora, idsNoKommo: idsNoKommo.filter((id) => id > 0) })
+}
+
+/**
+ * O texto que acabou de ser editado numa nota, até o espelho trazê-lo. `de` é o
+ * texto que a tela mostrava (o do espelho): enquanto o espelho o tiver, ele está
+ * atrasado e vale `para`.
+ */
+export function guardarEdicaoLocal(leadId: number, notaId: number, de: string, para: string, agora = Date.now()): void {
+  const chave = `${leadId}:${notaId}`
+  // A SEGUNDA EDIÇÃO ANTES DA SINCRONIZAÇÃO: o que a tela mostrava já era a
+  // primeira, e o espelho continua com o texto de antes dela — é esse que diz
+  // que ele está atrasado.
+  const antes = edicoesLocais.get(chave)
+  edicoesLocais.set(chave, { leadId, notaId, de: antes && antes.para === de ? antes.de : de, para, em: agora })
+  // A NOTA QUE AINDA SÓ EXISTE AQUI muda junto: senão a cópia local voltaria
+  // com o texto de antes da edição.
+  for (const l of notasLocais) if (l.leadId === leadId && l.nota.id === notaId) l.nota = { ...l.nota, texto: para }
+}
+
+/** Esquece tudo o que espera o espelho (para os testes). */
+export function esquecerNotasLocais(): void {
+  notasLocais.length = 0
+  edicoesLocais.clear()
+}
+
+/** O espelho já tem esta nota? */
+function espelhoJaTem(doEspelho: readonly KommoNota[], local: KommoNota, idsNoKommo: readonly number[]): boolean {
+  if (idsNoKommo.length > 0) return doEspelho.some((n) => idsNoKommo.includes(n.id))
+  if (local.id > 0) return doEspelho.some((n) => n.id === local.id)
+  if (local.arquivo_uuid) return doEspelho.some((n) => n.arquivo_uuid === local.arquivo_uuid)
+  const t = (local.texto ?? '').trim()
+  return t !== '' && doEspelho.some((n) => (n.texto ?? '').trim().startsWith(t))
+}
+
+/**
+ * Os cards lidos do espelho com as notas e edições que ainda só existem aqui.
+ * Esquece o que o espelho já trouxe e o que passou do teto — SÓ dos cards desta
+ * leitura: o card do outro funil não está nela, e a nota dele continua esperando.
+ */
+export function comNotasLocais(leads: KommoLead[], agora = Date.now()): KommoLead[] {
+  if (notasLocais.length === 0 && edicoesLocais.size === 0) return leads
+  const porId = new Map(leads.map((l) => [l.kommo_lead_id, l]))
+  const vencida = (em: number) => agora - em > VALIDADE_DA_NOTA_LOCAL
+
+  for (let i = notasLocais.length - 1; i >= 0; i--) {
+    const { leadId, nota, em, idsNoKommo } = notasLocais[i]
+    const lead = porId.get(leadId)
+    if (vencida(em) || (lead && espelhoJaTem(lead.notas ?? [], nota, idsNoKommo))) notasLocais.splice(i, 1)
+  }
+  for (const [chave, e] of edicoesLocais) {
+    const doEspelho = porId.get(e.leadId)?.notas?.find((n) => n.id === e.notaId)
+    if (vencida(e.em) || (doEspelho && doEspelho.texto !== e.de)) edicoesLocais.delete(chave)
+  }
+  if (notasLocais.length === 0 && edicoesLocais.size === 0) return leads
+
+  return leads.map((l) => {
+    const novas = notasLocais.filter((x) => x.leadId === l.kommo_lead_id).map((x) => x.nota)
+    const temEdicao = [...edicoesLocais.values()].some((e) => e.leadId === l.kommo_lead_id)
+    if (novas.length === 0 && !temEdicao) return l
+    const notas = [...(l.notas ?? []), ...novas].map((n) => {
+      const e = edicoesLocais.get(`${l.kommo_lead_id}:${n.id}`)
+      return e && n.texto === e.de ? { ...n, texto: e.para } : n
+    })
+    return { ...l, notas }
   })
 }
 

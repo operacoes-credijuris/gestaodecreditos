@@ -118,6 +118,8 @@ import {
   useKommoLeads,
   useKommoEtapas,
   useAnalisesProntas,
+  guardarNotaLocal,
+  guardarEdicaoLocal,
   type TomDaTag,
   type AcaoTela,
   type SubdivisaoPrecatorio,
@@ -125,7 +127,7 @@ import {
   lerTituloCard,
 } from '@/lib/kommo'
 import type { KommoLead, KommoNota } from '@/lib/types'
-import type { ArquivoNoDrive } from '@/lib/anexosDaAnotacao'
+import { LIMITE_DO_ANEXO, type ArquivoNoDrive } from '@/lib/anexosDaAnotacao'
 import { semRodapeDeAssinatura } from '@/lib/textoDoProcesso'
 import { resumoDaOportunidade, VEREDITO_JURIDICO } from '@/lib/anotacaoKommo'
 import { Modal } from '@/components/ui/Modal'
@@ -236,7 +238,7 @@ import {
 } from '@/lib/emCursoPorCard'
 import { TextoComTermos } from '@/components/layout/TextoComTermos'
 import { CamposDaCotacao, JanelaDeCotacao, useCotacaoEmEdicao } from '@/components/JanelaDeCotacao'
-import { registrarEnvioAoFundo, type ResultadoDoEnvio } from '@/lib/envioAoFundo'
+import { ArquivoDoEnvioNaoSubiu, registrarEnvioAoFundo, type ResultadoDoEnvio } from '@/lib/envioAoFundo'
 import { Tabs, idDaAba } from '@/components/ui/Tabs'
 import {
   atosDaAba,
@@ -4538,10 +4540,26 @@ export default function AnaliseCredito() {
     void criarPastaDoCard(lead)
   }
 
+  /**
+   * ESCREVE NO CACHE DA LISTA O QUE O SERVIDOR JÁ GRAVOU NO ESPELHO — a
+   * etiqueta, a cotação, a pasta do Drive —, e, COM UMA RELEITURA NO AR, pede
+   * outra (12/11/2026). A releitura que saiu antes da gravação (outro card
+   * movido, o "Sincronizar") chegava depois, com o espelho de antes, e por cima
+   * da escrita: a etiqueta recém-marcada desmarcava sozinha, e o clique seguinte
+   * a pedia de novo (ou reabria a janela da cotação). A nova releitura cancela a
+   * velha e lê o espelho já gravado. As NOTAS não passam por aqui: o espelho
+   * não as tem, e quem as segura é `comNotasLocais`.
+   */
+  function gravarNoCacheDosCards(mudar: (antes: KommoLead[] | undefined) => KommoLead[] | undefined) {
+    const releituraNoAr = qc.isFetching({ queryKey: ['kommo_leads'] }) > 0
+    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, mudar)
+    if (releituraNoAr) void qc.invalidateQueries({ queryKey: ['kommo_leads'] })
+  }
+
   /** O card passa a ter a pasta do Drive: o título vira link na mesma hora. */
   function anotarPastaNoCard(leadId: number, pastaId: string | undefined) {
     if (!pastaId) return
-    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+    gravarNoCacheDosCards((antes) =>
       antes?.map((l) => (l.kommo_lead_id === leadId ? { ...l, drive_pasta_id: pastaId } : l)),
     )
   }
@@ -4967,7 +4985,17 @@ export default function AnaliseCredito() {
 
   function prepararAnexo(lead: KommoLead, anexo: KommoNota) {
     // PELO UUID, O CACHE DA PÁGINA RESPONDE (e vence com o link).
-    if (anexo.arquivo_uuid) return enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))
+    //
+    // COM DONO PARA A FALHA (12/11/2026), como o caminho pelo nome logo abaixo:
+    // o passar do mouse e o foco chamam isto e não esperam a resposta, e a
+    // promessa do `enderecoDoAnexo` (outra, que não a do cache) rejeitava sem
+    // ninguém ouvindo — "Uncaught (in promise)" a cada anexo cujo link o Kommo
+    // recusasse. O clique continua recebendo a mesma promessa, e o erro dela.
+    if (anexo.arquivo_uuid) {
+      const pedido = enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))
+      pedido.catch(() => undefined)
+      return pedido
+    }
     const chave = `${lead.kommo_lead_id}:${nomeDoAnexo(anexo)}`
     const guardada = anexosResolvidos.current.get(chave)
     if (guardada && (guardada.venceEm === null || Date.now() < guardada.venceEm)) return guardada.promessa
@@ -5679,7 +5707,7 @@ export default function AnaliseCredito() {
         args,
       ),
     onSuccess: (r, args) => {
-      qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      gravarNoCacheDosCards((antes) =>
         antes?.map((l) => {
           if (l.kommo_lead_id !== args.leadId) return l
           // A DATA JUNTO DA ETIQUETA: a que entrou é de agora, as que saíram
@@ -5762,7 +5790,7 @@ export default function AnaliseCredito() {
         cotacao?: { texto: string; campo: { id: number; name: string; type: string } }
         campos?: ValorDeCampo[] | null
       }>('kommo-etiquetar', { leadId: id, etiqueta, acao: 'cotar', cotacao })
-      qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      gravarNoCacheDosCards((antes) =>
         antes?.map((l) => {
           if (l.kommo_lead_id !== id) return l
           const campos =
@@ -5817,7 +5845,7 @@ export default function AnaliseCredito() {
         cotacao?: { texto: string; campo: { id: number; name: string; type: string } }
         campos?: ValorDeCampo[] | null
       }>('kommo-etiquetar', { leadId: id, etiqueta, acao: 'adicionar', cotacao })
-      qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      gravarNoCacheDosCards((antes) =>
         antes?.map((l) => {
           if (l.kommo_lead_id !== id) return l
           const tags = r?.tags ?? l.tags
@@ -5961,6 +5989,9 @@ export default function AnaliseCredito() {
       toast.error(r.aviso ?? 'O texto editado foi gravado numa nota nova no card.')
       return
     }
+    // ATÉ O ESPELHO TRAZER A EDIÇÃO (12/11/2026): a próxima releitura da lista —
+    // qualquer card movido — devolvia o texto de antes (ver `comNotasLocais`).
+    guardarEdicaoLocal(lead.kommo_lead_id, nota.id, nota.texto, r?.texto ?? texto)
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
         l.kommo_lead_id !== lead.kommo_lead_id
@@ -6004,6 +6035,11 @@ export default function AnaliseCredito() {
             : []),
           { ...base, id: idDe(ids.texto, provisorio), texto, tipo: 'common' },
         ]
+    // E CONTINUA LÁ ATÉ O ESPELHO TRAZÊ-LA (12/11/2026): a kommo-anotar não
+    // grava no espelho, e a releitura seguinte da lista — qualquer card movido —
+    // apagava a nota do histórico; quem a escreveu a escrevia de novo, e o card
+    // ficava com duas. Ver `comNotasLocais`.
+    for (const n of novas) guardarNotaLocal(lead.kommo_lead_id, n)
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
         l.kommo_lead_id === lead.kommo_lead_id ? { ...l, notas: [...(l.notas ?? []), ...novas] } : l,
@@ -6064,6 +6100,9 @@ export default function AnaliseCredito() {
       tipo: 'common',
       automatica: false,
     }
+    // ATÉ O ESPELHO TRAZÊ-LA, como a do Anotar (ver `comNotasLocais`) — em
+    // partes, pelos ids delas: o espelho traz as partes, e não o texto inteiro.
+    guardarNotaLocal(lead.kommo_lead_id, nova, { idsNoKommo: ids })
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
         l.kommo_lead_id === lead.kommo_lead_id ? { ...l, notas: [...(l.notas ?? []), nova] } : l,
@@ -6156,12 +6195,20 @@ export default function AnaliseCredito() {
           anotar: async () => {
             const feitas = partesDoEnvio.current
             const parteDe = (a: File) => `${chave}:arquivo:${a.name}:${a.size}:${a.lastModified}`
+            // O GRANDE DEMAIS ANTES DE TUDO (12/11/2026): conferido só na vez
+            // dele, o segundo print de 120 MB era recusado com o texto e o
+            // primeiro já no card. Aqui, nada sobe e a mensagem diz qual é.
+            // (Numa nova tentativa com o texto já no card, a mensagem diz isso.)
+            const grande = arquivos.find((a) => !feitas.has(parteDe(a)) && a.size > LIMITE_DO_ANEXO)
+            if (grande) {
+              const motivo = `o arquivo "${grande.name}" passa de 100 MB — tire-o da lista.`
+              throw feitas.has(`${chave}:texto`) ? new ArquivoDoEnvioNaoSubiu(motivo) : new Error(motivo)
+            }
             if (!feitas.has(`${chave}:texto`)) {
               // A ANOTAÇÃO VAI NA NOTA DO PRIMEIRO ARQUIVO (03/11/2026): uma
               // mensagem, uma nota. Os outros arquivos seguem um por nota.
               const primeiro = arquivos[0]
               if (primeiro) {
-                if (primeiro.size > 100 * 1024 * 1024) throw new Error(`${primeiro.name} passa de 100 MB.`)
                 const qual = arquivos.length > 1 ? `arquivo 1 de ${arquivos.length} — ` : ''
                 await arquivoComTextoNoCard(id, primeiro, nota, parteDe(primeiro), (p) =>
                   p.fase === 'enviando'
@@ -6179,17 +6226,23 @@ export default function AnaliseCredito() {
               const a = arquivos[i]
               const parteDoArquivo = parteDe(a)
               if (feitas.has(parteDoArquivo)) continue
-              if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
               const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
-              const rArq = await enviarArquivo<{ aviso?: string | null }>(
-                'kommo-anexo-enviar',
-                a,
-                { 'x-lead-id': String(id), 'x-nome': encodeURIComponent(a.name), 'x-texto': '' },
-                (p) =>
-                  p.fase === 'enviando'
-                    ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
-                    : onAndamento(`Gravando no Kommo ${qual}…`),
-              )
+              let rArq: { aviso?: string | null } | null
+              try {
+                rArq = await enviarArquivo<{ aviso?: string | null }>(
+                  'kommo-anexo-enviar',
+                  a,
+                  { 'x-lead-id': String(id), 'x-nome': encodeURIComponent(a.name), 'x-texto': '' },
+                  (p) =>
+                    p.fase === 'enviando'
+                      ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
+                      : onAndamento(`Gravando no Kommo ${qual}…`),
+                )
+              } catch (e) {
+                // O TEXTO JÁ ESTÁ NO CARD (o passo acima): a falha é só deste
+                // arquivo, e a mensagem diz isso (ver `ArquivoDoEnvioNaoSubiu`).
+                throw new ArquivoDoEnvioNaoSubiu(`o arquivo "${a.name}" não subiu (${(e as Error)?.message ?? String(e)}).`)
+              }
               if (rArq?.aviso) toast.error(rArq.aviso)
               feitas.add(parteDoArquivo)
             }
@@ -6207,7 +6260,7 @@ export default function AnaliseCredito() {
             })
             const tags = rEt?.tags ?? [...(lead.tags ?? []), ato.etiqueta]
             if (rEt?.aviso) toast.error(rEt.aviso)
-            qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+            gravarNoCacheDosCards((antes) =>
               antes?.map((l) =>
                 l.kommo_lead_id === id
                   ? { ...l, tags, tags_em: { ...(l.tags_em ?? {}), [ato.etiqueta]: new Date().toISOString() } }
