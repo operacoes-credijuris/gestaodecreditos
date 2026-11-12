@@ -214,14 +214,16 @@ describe('o Opus do assistente é o 5.5', () => {
     expect(modeloVigente('claude-opus-5-5')).toBe('claude-opus-5-5')
   })
 
-  it('Sonnet e Haiku passam como estão: a troca foi só do Opus', () => {
-    expect(modeloVigente('claude-sonnet-5')).toBe('claude-sonnet-5')
-    expect(modeloVigente('claude-haiku-4-5-20251001')).toBe('claude-haiku-4-5-20251001')
+  // A GERAÇÃO 5.5 TAMBÉM NO SONNET E NO HAIKU (12/11/2026): o id antigo guardado
+  // no navegador vira o vigente da mesma família.
+  it('Sonnet e Haiku antigos viram os vigentes da mesma família', () => {
+    expect(modeloVigente('claude-sonnet-5')).toBe('claude-sonnet-5-5')
+    expect(modeloVigente('claude-haiku-4-5-20251001')).toBe('claude-haiku-5-5')
   })
 
   it('o servidor aceita só a lista; o resto cai no padrão', () => {
     expect(resolverModeloDoAssistente('claude-opus-5')).toBe('claude-opus-5-5')
-    expect(resolverModeloDoAssistente('claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(resolverModeloDoAssistente('claude-sonnet-5')).toBe('claude-sonnet-5-5')
     expect(resolverModeloDoAssistente('gpt-qualquer')).toBe(MODELO_PADRAO_DO_ASSISTENTE)
     expect(resolverModeloDoAssistente(undefined)).toBe(MODELO_PADRAO_DO_ASSISTENTE)
     expect(resolverModeloDoAssistente(42)).toBe(MODELO_PADRAO_DO_ASSISTENTE)
