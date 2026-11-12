@@ -267,6 +267,10 @@ function GerarPanel() {
     if (cardPedido === null) return
     let cancelado = false
     originadorDoCardAplicado.current = false
+    // O CARD ANTERIOR SAI JUNTO (12/11/2026): com o `?card=` trocado e a tela
+    // aberta, o efeito do originador (abaixo) via a trava zerada com o card
+    // VELHO ainda aqui e aplicava o originador dele antes de o novo chegar.
+    setDoCard(null)
     setOriginadorDoCard(null)
     setErroDoCard(null)
     supabase

@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { iniciais } from '@/lib/iniciais'
 import type { Profile } from '@/lib/types'
-import { ADMIN_EMAIL } from '@/contexts/AuthContext'
+import { ADMIN_EMAIL, useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Field'
@@ -34,6 +34,7 @@ import {
 export function SecaoUsuarios() {
   const qc = useQueryClient()
   const toast = useToast()
+  const { user, recarregarPerfil } = useAuth()
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['profiles'],
     queryFn: async () => {
@@ -81,6 +82,10 @@ export function SecaoUsuarios() {
         ...(edicao.password ? { password: edicao.password } : {}),
       })
       await qc.invalidateQueries({ queryKey: ['profiles'] })
+      // O PRÓPRIO PERFIL TAMBÉM (12/11/2026): o do topo e das Tarefas vem do
+      // AuthContext, fora do cache — sem isto o nome corrigido só valia depois
+      // de recarregar a página.
+      if (editando.id === user?.id) await recarregarPerfil()
       toast.success('Usuário atualizado.')
       setEditando(null)
     } catch (err) {
@@ -151,6 +156,9 @@ export function SecaoUsuarios() {
   const [trocando, setTrocando] = useState(false)
 
   function pedirTroca(p: Profile) {
+    // O ATIVAR VAI DIRETO, sem a confirmação que trava o Desativar: o segundo
+    // clique enquanto grava mandava outra atualização (12/11/2026).
+    if (trocando) return
     if (p.ativo) setADesativar(p)
     else void toggleAtivo(p)
   }

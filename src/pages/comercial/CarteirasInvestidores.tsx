@@ -35,7 +35,9 @@ import { invokeFunction } from '@/lib/functions'
 import { copiarTexto } from '@/lib/copiar'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import {
+  avisoDosResumos,
   montarCarteiraDoInvestidor,
+  type RespostaDosResumos,
   type DadosCarteira,
   type LinhaCarteira,
 } from '@/lib/carteiraInvestidor'
@@ -469,39 +471,31 @@ function Individual() {
 
   const gerar = useMutation({
     mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
-      invokeFunction<{ gerados: number; pulados: number; falhas: number; restantes: number }>(
-        'carteira-resumo',
-        vars,
-      ),
+      invokeFunction<RespostaDosResumos>('carteira-resumo', vars),
     onSuccess: (r, vars) => {
       qc.invalidateQueries({ queryKey: ['carteira_resumos'] })
-      if (vars.processo_id) {
-        if (r.falhas > 0) toast.error('Não foi possível gerar o resumo deste crédito.')
-        else toast.success('Resumo gerado.')
-        return
+      // O `ok: false` QUE VEM COM HTTP 200 conta como falha (12/11/2026): ver
+      // avisoDosResumos em lib/carteiraInvestidor.ts.
+      const { avisos, acompanhar } = avisoDosResumos(r, !!vars.processo_id)
+      for (const a of avisos) {
+        if (a.tipo === 'erro') toast.error(a.texto)
+        else toast.success(a.texto)
       }
-      // Varredura: a resposta volta antes do fim (o servidor segue em lotes).
-      if (r.restantes > 0) {
+      if (acompanhar) {
         setVarrendo(true)
-        toast.success('Gerando os resumos — os textos vão aparecendo aqui.')
         // Teto do acompanhamento: 95 créditos levam poucos minutos. O PRAZO
         // RECOMEÇA a cada varredura: o relógio da anterior, que seguia correndo,
         // desligava o acompanhamento da nova no meio.
         window.clearTimeout(fimDaVarredura.current)
         fimDaVarredura.current = window.setTimeout(() => setVarrendo(false), 6 * 60 * 1000)
-      } else {
-        toast.success(
-          r.gerados > 0
-            ? `${r.gerados === 1 ? '1 resumo gerado' : `${r.gerados} resumos gerados`}.`
-            : 'Nenhum crédito teve novidade desde a última geração.',
-        )
       }
     },
     onError: (e) => toast.error((e as Error).message),
   })
 
-  // Réguas do semáforo da coluna Status. Calculadas no render: na virada do dia
-  // a cor anda sozinha, sem ninguém reabrir a tela.
+  // Réguas do semáforo da coluna Status. A DATA FICA CONGELADA NA MONTAGEM
+  // (12/11/2026, o comentário dizia o contrário): a tela, o Excel e o relatório
+  // usam este mesmo `hoje` — ver `DadosCarteira.hoje` em lib/carteiraInvestidor.ts.
   const hoje = useMemo(() => hojeISO(), [])
 
   // Cessionários distintos, em ordem alfabética.
@@ -747,6 +741,10 @@ function Individual() {
             variant="secondary"
             icon={<Sparkles className="h-[16px] w-[16px]" />}
             loading={gerar.isPending && !gerar.variables?.processo_id}
+            // UMA MUTAÇÃO, DOIS BOTÕES (12/11/2026): o `variables` guarda só a
+            // última chamada, e o "Gerar novamente" da caixa religava este botão
+            // no meio de uma varredura — dava para disparar outra, paga.
+            disabled={gerar.isPending}
             onClick={() => setConfirmarResumos(true)}
             title="Refaz o estágio processual e as providências de TODOS os créditos com cessionário, não só os deste investidor. Cada crédito é uma consulta à IA."
           >
@@ -1062,6 +1060,7 @@ function Individual() {
               <Button
                 icon={<Sparkles className="h-[16px] w-[16px]" />}
                 loading={gerar.isPending && !!gerar.variables?.processo_id}
+                disabled={gerar.isPending}
                 onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
               >
                 Gerar novamente

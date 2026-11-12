@@ -118,12 +118,16 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
   const prefixoEm = useRef<number | null>(null)
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
+      // A ESPERA DO "G" ACABA ANTES DO `defaultPrevented` (12/11/2026): uma tela
+      // que consome a segunda tecla (o J/K da Análise) devolvia aqui sem zerar o
+      // prefixo, e "g", "j", "c" em 1,5 s levava a Créditos.
+      const prefixo = prefixoEm.current
+      prefixoEm.current = null
       if (e.defaultPrevented) return
       // A SEGUNDA TECLA DO "G e a letra". Qualquer tecla encerra a espera — a
       // que não é letra de tela também (e segue o caminho normal abaixo).
-      if (prefixoEm.current !== null) {
-        const destino = destinoDaSequencia(e, prefixoEm.current, Date.now())
-        prefixoEm.current = null
+      if (prefixo !== null) {
+        const destino = destinoDaSequencia(e, prefixo, Date.now())
         if (destino && decidirAtalho('navegar', e.target as HTMLElement | null, haDialogoAberto()) === 'agir') {
           e.preventDefault()
           navigate(destino)

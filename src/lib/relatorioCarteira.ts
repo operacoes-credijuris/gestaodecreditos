@@ -265,8 +265,23 @@ export function evolucao(c: CarteiraCalculada): Evolucao | null {
   }
   if (datas.length < 2) return null
   datas.sort()
-  const inicio = datas[0].slice(0, 7)
   const fim = datas[datas.length - 1].slice(0, 7)
+  // O TETO NÃO PODE DEIXAR O "HOJE" DE FORA (12/11/2026): contado da data mais
+  // antiga, uma aquisição digitada com o ano errado PARA TRÁS (2002 no lugar de
+  // 2022) fazia a janela ser 2002–2011, e o `indexOf` do mês de hoje dava -1 —
+  // virava 0, e o relatório que vai ao investidor desenhava o "Hoje", o
+  // recebido e o projetado em jan/2002. Nesse caso a janela começa 60 meses
+  // antes de hoje.
+  const mesHoje = c.hoje.slice(0, 7)
+  const [anoHoje, mesDeHoje] = mesHoje.split('-').map(Number)
+  const cincoAnosAntes = `${anoHoje - 5}-${String(mesDeHoje).padStart(2, '0')}`
+  const ultimoNoTeto = (() => {
+    let x = datas[0].slice(0, 7)
+    for (let i = 1; i < 120; i++) x = mesSeguinte(x)
+    return x
+  })()
+  const inicio =
+    mesHoje > ultimoNoTeto && datas[0].slice(0, 7) < cincoAnosAntes ? cincoAnosAntes : datas[0].slice(0, 7)
 
   const meses: string[] = []
   let m = inicio

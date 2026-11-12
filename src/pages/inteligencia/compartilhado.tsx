@@ -55,7 +55,7 @@ export function usePainel(): {
   painel: PainelEconomico | null
   carregando: boolean
   erro: unknown
-  tentarDeNovo: () => void
+  tentarDeNovo: () => Promise<unknown>
 } {
   const processos = processosCrud.useList()
   const params = useParametrosAtualizacao()
@@ -68,10 +68,10 @@ export function usePainel(): {
         : montarPainel(processos.data, params.data ?? undefined, hoje),
     [carregando, processos.data, params.data, hoje],
   )
-  const tentarDeNovo = () => {
-    void processos.refetch()
-    void params.refetch()
-  }
+  // DEVOLVE A PROMESSA (12/11/2026): com ela o "Tentar novamente" do ErrorState
+  // gira e fica desligado até as duas leituras voltarem — antes, sem promessa,
+  // cada clique disparava as duas de novo, e nada dizia que estava tentando.
+  const tentarDeNovo = () => Promise.all([processos.refetch(), params.refetch()])
   // ERRO SÓ QUANDO NÃO HÁ CARTEIRA. A cada troca de aba a carteira é relida
   // (passados 30 s); se essa releitura falha, o React Query GUARDA os dados que
   // já tinha e acende o erro junto. Repassar o erro direto trocava o painel
@@ -91,7 +91,7 @@ export function CarregandoPainel() {
 }
 
 /** O erro de carga das abas do Quadro, agora com "Tentar novamente". */
-export function ErroPainel({ tentarDeNovo }: { tentarDeNovo: () => void }) {
+export function ErroPainel({ tentarDeNovo }: { tentarDeNovo: () => void | Promise<unknown> }) {
   return (
     <Card>
       <ErrorState message="Confira a conexão e tente de novo." onRetry={tentarDeNovo} />
