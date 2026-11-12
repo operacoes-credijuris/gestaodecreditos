@@ -778,7 +778,9 @@ function PublicacaoCard({
               "Tratada" em toda caixa da lista, sem dizer qual era. */}
           <span className="sr-only">Publicação {formatCNJ(p.numero_processo ?? '')} tratada</span>
         </label>
-        <span className="font-semibold tabular-nums text-texto">
+        {/* O CNJ SEM `tabular-nums` (v3, §3): no cartão não há coluna a alinhar, e
+            a Inter tabular alarga o ponto e o hífen do número. */}
+        <span className="font-semibold text-texto">
           {formatCNJ(p.numero_processo ?? '')}
         </span>
         {/* COPIAR O NÚMERO (qualidade de vida): ler a publicação e ir ao PJe é
@@ -1228,7 +1230,7 @@ function ProcessoMovimentacoes({
         )}
       >
         <div className="flex flex-wrap items-center gap-x-s2 gap-y-s1">
-          <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
+          <span className="font-semibold text-texto">{formatCNJ(numero)}</span>
           <SeloDoVinculo info={info} />
           {/* No celular a contagem desce para a linha da data: sozinha, ela
               ocupava uma linha inteira do cartão. */}
@@ -1268,13 +1270,23 @@ function ProcessoMovimentacoes({
         )}
       </button>
 
+      {/* A LINHA DO TEMPO (v3): o ponto na cor da marca (`marca-viva`, e não
+          mais o `brand-400` solto), o mais recente cheio e com o halo
+          champanhe, os anteriores vazados — o mesmo desenho do Histórico da
+          ficha. Abre com o `animate-fade-in` da casa (zerado no movimento
+          reduzido). */}
       {aberto && (
-        <ol className="ml-s6 space-y-s3 border-l border-borda pb-s4 pl-s4 pr-s5">
-          {movs.map((m) => (
+        <ol className="ml-s6 animate-fade-in space-y-s3 border-l border-borda pb-s4 pl-s4 pr-s5">
+          {movs.map((m, i) => (
             <li key={m.id} className="relative">
               <span
                 aria-hidden="true"
-                className="absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-superficie bg-brand-400"
+                className={cn(
+                  'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2',
+                  i === 0
+                    ? 'border-superficie bg-marca-viva ring-[3px] ring-ouro/20'
+                    : 'border-borda-forte bg-superficie',
+                )}
               />
               <div className="text-xs font-semibold tabular-nums text-texto-2">
                 {formatDate(m.data)}
@@ -1312,11 +1324,12 @@ function ProcessoParalisado({
     // "sério" e "crítico" trocam só a cor dela.
     <Card faixa={cor.faixa} className={cn('px-s4 py-s3', cor.corDaFaixa)}>
       <div className="flex flex-wrap items-center gap-s2">
-        <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
+        <span className="font-semibold text-texto">{formatCNJ(numero)}</span>
         <SeloDoVinculo info={info} />
         <span
           className={cn(
-            'inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset',
+            // A ETIQUETA DE CANTO DA v3 (como a Badge: 6px, não pílula).
+            'inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-controle px-s2 text-xs font-semibold ring-1 ring-inset',
             cor.selo,
           )}
         >

@@ -332,7 +332,7 @@ export default function Requerimentos() {
             {lista.map((r) => (
               <CartaoNoCelular
                 key={r.id}
-                titulo={<span className="tabular-nums">{r.numero_protocolo || '—'}</span>}
+                titulo={r.numero_protocolo || '—'}
                 linhas={[
                   <Partes a={r.requerente} b={r.requerido} />,
                   [r.tribunal_entidade, r.orgao, r.classe_processual].filter(Boolean).join(' · '),
@@ -403,7 +403,8 @@ export default function Requerimentos() {
                     {/* O selo só desce de linha quando falta espaço (1280px com o menu
                         aberto); com folga, fica ao lado do número. */}
                     <span className="inline-flex flex-wrap items-center gap-s1.5">
-                      <span className="whitespace-nowrap font-semibold tabular-nums">
+                      {/* Número de identificação: SEM `tabular-nums` (v3, §3). */}
+                      <span className="whitespace-nowrap font-semibold">
                         {r.numero_protocolo || '—'}
                       </span>
                       {seloDaClasse(r)}
@@ -477,7 +478,7 @@ export default function Requerimentos() {
         title={editing?.id ? 'Editar requerimento' : 'Novo requerimento'}
         description={
           editing?.id ? (
-            <span className="tabular-nums">{editing.numero_protocolo}</span>
+            <span>{editing.numero_protocolo}</span>
           ) : undefined
         }
         // Formulário: 640px (auditoria visual, C8).
@@ -657,7 +658,12 @@ export default function Requerimentos() {
                 ['Tribunal / entidade', detalhe.tribunal_entidade],
                 ['Classe processual', detalhe.classe_processual],
                 ['Matéria', detalhe.materia],
-                ['Data de protocolo', detalhe.data_protocolo ? formatDate(detalhe.data_protocolo) : null],
+                [
+                  'Data de protocolo',
+                  detalhe.data_protocolo ? (
+                    <span className="tabular-nums">{formatDate(detalhe.data_protocolo)}</span>
+                  ) : null,
+                ],
               ]}
             />
 

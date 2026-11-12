@@ -326,7 +326,7 @@ export function CreditoFormModal({
       title={editando ? 'Editar crédito' : 'Novo crédito'}
       description={
         editando ? (
-          <span className="tabular-nums">{formatCNJ(inicial.numero_cnj)}</span>
+          <span>{formatCNJ(inicial.numero_cnj)}</span>
         ) : (
           'Preencha à mão ou escolha a pasta do Drive para a IA ler os documentos.'
         )

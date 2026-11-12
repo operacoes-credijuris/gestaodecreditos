@@ -238,12 +238,12 @@ export function useApensosManager(parentField: ParentField) {
             <div
               key={a.id}
               onClick={() => setFicha(a)}
-              className="flex cursor-pointer items-center gap-s3 rounded-campo border border-borda bg-superficie px-s3 py-s2 text-corpo transition-colors hover:border-marca-viva"
+              className="flex cursor-pointer items-center gap-s3 rounded-campo border border-borda bg-superficie px-s3 py-s2 text-corpo transition-colors duration-rapida ease-saida hover:border-marca-viva"
               title="Abrir ficha do apenso"
             >
               <div className="min-w-0 flex-1 space-y-s0.5">
                 <div className="text-texto">
-                  <span className="font-semibold tabular-nums">{formatCNJ(a.numero)}</span>
+                  <span className="font-semibold">{formatCNJ(a.numero)}</span>
                   {a.classe_processual && (
                     <span className="text-texto-2"> · {a.classe_processual}</span>
                   )}
@@ -293,9 +293,7 @@ export function useApensosManager(parentField: ParentField) {
     return (
       <tr className="bg-superficie-2">
         <td colSpan={colSpan} className="px-s4 py-s3">
-          <div className="font-display mb-s2 text-xs font-bold uppercase tracking-wider text-texto-3">
-            Apensos
-          </div>
+          <div className="cj-sobretitulo mb-s2">Apensos</div>
           {cartoes(parentId, 'Nenhum apenso vinculado a este registro.')}
         </td>
       </tr>

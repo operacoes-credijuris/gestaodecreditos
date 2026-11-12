@@ -366,10 +366,12 @@ export default function TarefasAdvbox() {
         >
           {bloco ? (
             <>
-              <div className="font-display text-xl font-bold leading-none tabular-nums">
+              {/* v3: o dia é o número-herói do cartão (`cj-numero`, seminegrito),
+                  e o mês, o sobretítulo da casa na cor do prazo. */}
+              <div className="cj-numero font-display text-xl font-semibold leading-none">
                 {bloco.dia}
               </div>
-              <div className="mt-s1 text-xs font-semibold uppercase leading-none tracking-wider">
+              <div className="cj-sobretitulo mt-s1 leading-none text-current">
                 {bloco.mes}
               </div>
               {curto && (
@@ -382,7 +384,7 @@ export default function TarefasAdvbox() {
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1">
-            <span className="font-display text-base font-bold tracking-tight text-texto">
+            <span className="font-display text-base font-semibold text-texto">
               {t.tipo ? sentenceCase(t.tipo) : '—'}
             </span>
             {/* O prazo por extenso para o leitor de tela: a folhinha é só
@@ -392,7 +394,8 @@ export default function TarefasAdvbox() {
               <span
                 aria-hidden="true"
                 className={cn(
-                  'inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset sm:hidden',
+                  // A etiqueta de canto da v3 (6px, como a Badge), não pílula.
+                  'inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-controle px-s2 text-xs font-semibold tabular-nums ring-1 ring-inset sm:hidden',
                   TOM_SELO[tom],
                 )}
               >
@@ -432,7 +435,7 @@ export default function TarefasAdvbox() {
             <NumeroProcessoDrive
               processo={cred}
               numero={t.processo}
-              className="font-semibold tabular-nums text-texto"
+              className="font-semibold text-texto"
               classeDoIcone={SO_NO_HOVER}
             />
             {/* COPIAR O NÚMERO (qualidade de vida): clicar nele abre a pasta, e o
@@ -470,7 +473,7 @@ export default function TarefasAdvbox() {
                 >
                   <span
                     aria-hidden="true"
-                    className="font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full bg-marca-suave text-xs font-bold leading-none text-marca-texto"
+                    className="font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full bg-marca-suave text-xs font-semibold leading-none text-marca-texto"
                   >
                     {iniciais(r)}
                   </span>

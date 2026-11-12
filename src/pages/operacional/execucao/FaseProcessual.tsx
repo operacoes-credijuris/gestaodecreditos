@@ -422,10 +422,13 @@ function SituacaoSelect({
       </button>
 
       {aberto && (
-        <div className="absolute z-20 mt-s1 max-h-72 w-full overflow-auto rounded-flutuante border border-borda bg-superficie py-s1 shadow-nivel-2 scrollbar-thin dark:ring-1 dark:ring-white/[0.06]">
+        // v3: o menu suspenso da casa — VIDRO ELEVADO com a linha fina, a
+        // sombra 2 e a entrada do menu (DESIGN-SYSTEM-V3 §9). A sombra do escuro
+        // já traz o fio de luz: o `dark:ring-white/…` à mão saiu.
+        <div className="cj-vidro-elevado absolute z-20 mt-s1 max-h-72 w-full animate-menu-in overflow-auto rounded-flutuante border border-borda py-s1 shadow-nivel-2 scrollbar-thin">
           {/* O CABEÇALHO DIZ DE QUAL FASE SÃO AS SITUAÇÕES (o `.ph` da amostra):
               a lista muda de fase para fase, e quem abre o menu precisa saber. */}
-          <p className="px-s3 pb-s1 pt-s2 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+          <p className="cj-sobretitulo px-s3 pb-s1 pt-s2">
             Situações de "{nomeFase}"
           </p>
           <button
@@ -467,7 +470,7 @@ function SituacaoSelect({
                         setExcluindoId(null)
                       }
                     }}
-                    className="inline-flex h-controle-sm items-center gap-s1 rounded-controle bg-perigo-cheio px-s2 text-sm font-semibold text-white hover:brightness-105"
+                    className="cj-brilho inline-flex h-controle-sm items-center gap-s1 rounded-controle bg-perigo-cheio px-s2 text-sm font-semibold text-white hover:brightness-110"
                   >
                     <Trash2 className="h-[14px] w-[14px]" aria-hidden />
                     Excluir
@@ -630,7 +633,7 @@ function SituacaoSelect({
                       className={cn(
                         'h-[20px] w-[20px] shrink-0 rounded-full',
                         c.bola,
-                        novaCor === c.chave && 'ring-2 ring-offset-1 ring-texto-3',
+                        novaCor === c.chave && 'ring-2 ring-texto-3 ring-offset-1 ring-offset-elevada',
                       )}
                     />
                   ))}
@@ -760,7 +763,9 @@ function CartaoDaFase({
       onClick={onClick}
       aria-pressed={ativo}
       className={cn(
-        'flex h-full flex-col gap-s1 rounded-cartao border p-s4 text-left shadow-nivel-1 transition hover:border-borda-forte focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+        // v3: o cartão inteiro é clicável, então ERGUE 1px sob o mouse
+        // (`cj-ergue`, parado no movimento reduzido), como o StatCard clicável.
+        'cj-ergue flex h-full flex-col gap-s1 rounded-cartao border p-s4 text-left shadow-nivel-1 hover:border-borda-forte focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
         aviso ? 'border-aviso-borda bg-aviso-fundo' : 'border-borda bg-superficie',
         ativo && 'border-marca-viva ring-[3px] ring-marca-viva/15',
       )}
@@ -772,7 +777,7 @@ function CartaoDaFase({
       {/* O NÚMERO NO PÉ DO CARTÃO (`mt-auto`, revisão UX, 09/10/2026): numa
           fileira com rótulos de uma, duas e três linhas, os números ficavam em
           alturas diferentes e a comparação se fazia em zigue-zague. */}
-      <span className="font-display mt-auto text-2xl font-bold tabular-nums leading-tight text-texto">{n}</span>
+      <span className="cj-numero font-display mt-auto text-2xl font-semibold leading-tight text-texto">{n}</span>
       <span className="text-xs text-texto-3">{n === 1 ? 'crédito' : 'créditos'}</span>
     </button>
   )
@@ -1116,7 +1121,7 @@ export function FaseProcessual({
                           className="max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-s2 max-sm:pb-s3"
                         >
                           <TD className="max-sm:col-span-2 max-sm:pb-s2">
-                            <p className="flex items-center gap-s1.5 whitespace-nowrap font-semibold tabular-nums text-texto">
+                            <p className="flex items-center gap-s1.5 whitespace-nowrap font-semibold text-texto">
                               {formatCNJ(processo.numero_cnj)}
                               {r?.conclusao_pendente && (
                                 <span title="Concluso para decisão">
@@ -1177,12 +1182,12 @@ export function FaseProcessual({
               onClick={() => setRecentesAbertas((v) => !v)}
               aria-expanded={recentesAbertas}
             >
-              <h3 className="font-display text-lg font-bold tracking-tight text-texto">
+              <h3 className="font-display text-lg font-semibold text-texto">
                 Movimentações recentes
                 {/* A CONTAGEM SÓ DEPOIS DE CARREGAR: "(0)" durante a leitura
                     afirmaria que não há nada. */}
                 {recentes.porCredito.size > 0 && !recentes.isError && !recentes.isLoading && (
-                  <span className="ml-s2 text-sm font-semibold text-texto-3">({recentes.porCredito.size})</span>
+                  <span className="ml-s2 text-sm font-semibold tabular-nums text-texto-3">({recentes.porCredito.size})</span>
                 )}
               </h3>
               <ChevronDown
@@ -1235,7 +1240,9 @@ export function FaseProcessual({
                         // TRATADA ESMAECE (a amostra): continua na lista, no fim, e
                         // volta a acender sozinha quando chega movimentação nova.
                         className={cn(
-                          'cursor-pointer rounded-campo border border-borda p-s3 transition-colors hover:bg-superficie-3/60',
+                          // O BLOCO INTERNO DA CASA (v3): `rounded-campo bg-superficie-2`,
+                          // sem borda — nada de cartão dentro de cartão.
+                          'cursor-pointer rounded-campo bg-superficie-2 p-s3 transition-colors duration-rapida ease-saida hover:bg-superficie-3',
                           tratado && 'opacity-[.55]',
                         )}
                         onClick={() => onAbrirDetalhe(p)}
@@ -1262,7 +1269,7 @@ export function FaseProcessual({
                               }
                             />
                           </label>
-                          <span className="min-w-0 flex-1 font-semibold tabular-nums text-texto">
+                          <span className="min-w-0 flex-1 font-semibold text-texto">
                             {formatCNJ(p.numero_cnj)}
                           </span>
                           <span className="shrink-0 text-xs tabular-nums text-texto-3">{formatDate(mov.data)}</span>
@@ -1383,7 +1390,7 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
           classificado pede "Escolher fase…" primeiro. */}
       <div className="grid gap-s3">
         <label className="block space-y-s1.5">
-          <span className="block text-corpo font-semibold text-texto">Fase processual</span>
+          <span className="block text-sm font-semibold text-texto">Fase processual</span>
           <Select
           className="w-full"
           value={r?.fase_codigo ?? ''}
@@ -1414,7 +1421,7 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
 
         {r && (
           <div className="space-y-s1.5">
-            <span className="block text-corpo font-semibold text-texto">Situação</span>
+            <span className="block text-sm font-semibold text-texto">Situação</span>
             {/* Mesmo motivo da lista: catálogo que falhou não é "nenhuma situação". */}
             {situacoes.isError ? (
               <p className="text-xs text-perigo">

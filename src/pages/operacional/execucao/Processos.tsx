@@ -90,9 +90,12 @@ const N_COLUNAS = 7
 // Bolinha de status ao lado do nº do processo — o status por extenso é
 // redundante com o filtro de pílulas acima da tabela; a cor basta.
 // Só os tones que STATUS_PROCESSO produz; tone novo cai no fallback cinza.
+//
+// v3: o ponto com um HALO do próprio tom (o fundo do estado, 3px) — um sinal de
+// painel de mercado, que se lê aceso sem crescer. O cinza não tem halo.
 const DOT_STATUS: Record<string, string> = {
-  green: 'bg-sucesso-cheio',
-  yellow: 'bg-aviso-cheio',
+  green: 'bg-sucesso-cheio ring-[3px] ring-sucesso-fundo',
+  yellow: 'bg-aviso-cheio ring-[3px] ring-aviso-fundo',
   gray: 'bg-texto-3',
 }
 
@@ -390,7 +393,7 @@ export default function Processos() {
                   key={p.id}
                   titulo={
                     <span className="inline-flex flex-wrap items-center gap-s1.5">
-                      <span className="whitespace-nowrap tabular-nums">{formatCNJ(p.numero_cnj)}</span>
+                      <span className="whitespace-nowrap">{formatCNJ(p.numero_cnj)}</span>
                       {p.especie_requisitorio && (
                         <Badge size="sm" tone={esp?.tone ?? 'gray'}>
                           {esp?.label ?? p.especie_requisitorio}

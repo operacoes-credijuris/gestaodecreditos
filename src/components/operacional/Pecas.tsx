@@ -110,7 +110,13 @@ export function CartaoNoCelular({
   return (
     <li
       onClick={onAbrir}
-      className={cn('flex items-start gap-s2 px-s4 py-s3', onAbrir && 'cursor-pointer')}
+      // v3: o cartão acende como a linha da tabela (superfície 3 a 70%), com a
+      // mesma transição curta — o toque tem resposta, sem sombra nem salto.
+      className={cn(
+        'flex items-start gap-s2 px-s4 py-s3',
+        onAbrir &&
+          'cursor-pointer transition-colors duration-rapida ease-saida hover:bg-superficie-3/70 active:bg-superficie-3/70',
+      )}
     >
       <div className="min-w-0 flex-1">
         <div className="text-corpo font-semibold text-texto">{titulo}</div>
@@ -219,11 +225,14 @@ export function TituloDoGrupo({
   tom?: 'neutro' | 'perigo' | 'aviso'
 }) {
   return (
-    <h2 className="font-display mb-s3 flex items-center gap-s2 text-sm font-bold uppercase tracking-wide text-texto-2">
+    // v3: o SOBRETÍTULO da casa (`cj-sobretitulo`), um degrau mais escuro que o
+    // de tabela — aqui ele abre um grupo da lista, e não uma coluna. A contagem
+    // fica na pílula, em algarismos tabulares, sem a caixa alta do título.
+    <h2 className="cj-sobretitulo mb-s3 flex items-center gap-s2 text-texto-2">
       {titulo}
       <span
         className={cn(
-          'rounded-full px-s2 py-s0.5 text-xs font-bold normal-case tabular-nums tracking-normal',
+          'inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full px-s1.5 text-xs font-semibold normal-case tabular-nums tracking-normal',
           tom === 'perigo'
             ? 'bg-perigo-fundo text-perigo'
             : tom === 'aviso'
@@ -266,11 +275,12 @@ export function CabecalhoDaFicha({
 }) {
   return (
     <div className="min-w-0">
-      <p className="font-display text-xs font-bold uppercase tracking-wider text-marca-texto">
-        {etiqueta}
-      </p>
-      <div className="mt-s0.5 flex items-center gap-s1">
-        <h2 className="font-display min-w-0 break-words text-lg font-extrabold tabular-nums tracking-tight text-texto">
+      {/* v3: a etiqueta é o sobretítulo em champanhe que se lê (`ouro-texto`), e
+          o número vem em seminegrito — SEM `tabular-nums`: no CNJ, a Inter
+          tabular alarga também o ponto e o hífen (DESIGN-SYSTEM-V3 §3). */}
+      <p className="cj-sobretitulo text-ouro-texto">{etiqueta}</p>
+      <div className="mt-s1 flex items-center gap-s1">
+        <h2 className="font-display min-w-0 break-words text-lg font-semibold text-texto">
           {titulo}
         </h2>
         {acao}
@@ -284,7 +294,9 @@ export function CabecalhoDaFicha({
 export function TituloDaSecao({ children, acao }: { children: ReactNode; acao?: ReactNode }) {
   return (
     <div className="mb-s2 mt-s5 flex items-center justify-between gap-s3 first:mt-0">
-      <h3 className="font-display text-xs font-bold uppercase tracking-wider text-texto-3">
+      {/* O MESMO TÍTULO DO `DrawerSection` do kit: sobretítulo com o fio
+          champanhe antes — as fichas do Operacional e as do kit falam igual. */}
+      <h3 className="cj-sobretitulo flex items-center gap-s2 before:h-px before:w-[12px] before:bg-ouro-forte">
         {children}
       </h3>
       {acao}
@@ -316,9 +328,13 @@ export function SecaoDaFicha({
   return (
     <section>
       <TituloDaSecao>{titulo}</TituloDaSecao>
-      <dl className={cn(GRADE_DA_FICHA, 'text-corpo')}>
+      {/* O LIVRO-RAZÃO (v3): cada par numa linha própria, com o fio fino entre
+          as linhas — a grade de relatório financeiro. Cada linha repete a MESMA
+          grade de colunas fixas (176px / 40%), então rótulos e valores
+          continuam alinhados numa coluna só, de seção a seção (C9). */}
+      <dl className="divide-y divide-borda border-y border-borda text-corpo">
         {linhas.map(([rotulo, valor]) => (
-          <div key={rotulo} className="contents">
+          <div key={rotulo} className={cn(GRADE_DA_FICHA, 'py-s1.5')}>
             <dt className="text-texto-3">{rotulo}</dt>
             <dd className="min-w-0 break-words text-texto">
               {valor === null || valor === undefined || valor === '' ? '—' : valor}
@@ -338,9 +354,14 @@ export function CartaoDeValor({ rotulo, valor }: { rotulo: string; valor: ReactN
     // borda nem sombra. E DOIS POR LINHA TAMBÉM NO CELULAR (a grade é da ficha),
     // com o número um degrau menor lá: empilhados, os valores empurravam as
     // Partes para a segunda tela.
-    <div className="min-w-0 rounded-campo bg-papel px-s3 py-s3 sm:px-s4">
-      <p className="text-sm font-medium text-texto-2 sm:text-corpo">{rotulo}</p>
-      <p className="font-display mt-s0.5 break-words text-lg font-bold tabular-nums tracking-tight text-texto sm:text-xl">
+    //
+    // v3: o bloco interno da casa (`rounded-campo bg-superficie-2`, sem borda),
+    // com um FIO CHAMPANHE de 2px à esquerda — a régua do indicador, a única
+    // cor do bloco. O rótulo em sobretítulo; o número em `cj-numero` (tabular,
+    // altura de maiúscula), seminegrito: o número manda.
+    <div className="relative min-w-0 overflow-hidden rounded-campo bg-superficie-2 px-s3 py-s3 before:absolute before:inset-y-s3 before:left-0 before:w-[2px] before:rounded-full before:bg-ouro sm:px-s4">
+      <p className="cj-sobretitulo">{rotulo}</p>
+      <p className="cj-numero font-display mt-s1 break-words text-lg font-semibold text-texto sm:text-xl">
         {valor}
       </p>
     </div>
@@ -399,7 +420,8 @@ export function SecaoDoFormulario({
 }) {
   return (
     <fieldset className="m-0 min-w-0 border-0 p-0">
-      <legend className="font-display mb-3 p-0 text-xs font-bold uppercase tracking-wider text-texto-3">
+      {/* v3: o sobretítulo com o fio champanhe, como as seções das fichas. */}
+      <legend className="cj-sobretitulo mb-s3 flex items-center gap-s2 p-0 before:h-px before:w-[12px] before:bg-ouro-forte">
         {titulo}
       </legend>
       {children}

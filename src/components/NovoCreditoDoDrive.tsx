@@ -349,7 +349,7 @@ export function NovoCreditoDoDrive({
           é o sinal de que o dado esperado não estava onde se pensava. */}
       {!!extracao?.lidos?.length && (
         <div className="rounded-campo bg-superficie-2 p-s4 text-corpo text-texto-2">
-          <p className="font-display mb-s1 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+          <p className="cj-sobretitulo mb-s1">
             Lido pela IA · {contar(extracao.lidos.length, 'arquivo', 'arquivos')}
           </p>
           <ul className="list-disc space-y-s0.5 pl-s5">
@@ -374,7 +374,7 @@ export function NovoCreditoDoDrive({
           texto são o caso em que falta campo, e é aqui que se descobre por quê. */}
       {!!extracao?.ignorados?.length && (
         <div role="alert" className="rounded-campo border border-perigo-borda bg-perigo-fundo px-s4 py-s3 text-corpo text-texto-2">
-          <p className="font-display mb-s1 text-xs font-bold uppercase tracking-[0.06em] text-perigo">
+          <p className="cj-sobretitulo mb-s1 text-perigo">
             Não foi possível ler
           </p>
           <ul className="list-disc space-y-s0.5 pl-s5">

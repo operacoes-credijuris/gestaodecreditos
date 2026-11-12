@@ -22,6 +22,7 @@ import { AlertTriangle, Flame, Star } from 'lucide-react'
 import { ErrorState } from '@/components/ui/Table'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Segmented'
+import { TituloDaSecao } from '@/components/operacional/Pecas'
 import { formatDate, formatNome, onlyDigits, sentenceCase } from '@/lib/format'
 
 interface MovLinha {
@@ -59,13 +60,21 @@ const CLAMP_CHARS = 280
 const INTERVALO_SYNC_MS = 60 * 1000
 const ultimoSyncPorProcesso = new Map<string, number>()
 
-/** Trilho da linha do tempo: bolinha ancorada à esquerda do item. */
-function Bolinha({ tone }: { tone: string }) {
+/**
+ * Trilho da linha do tempo: bolinha ancorada à esquerda do item.
+ *
+ * v3: o contorno é a cor da GAVETA (`elevada`), e não a do cartão — no escuro
+ * as duas diferem, e o anel da `superficie` aparecia como um aro escuro em
+ * volta do ponto. O ponto em destaque (o andamento mais recente) ganha um halo
+ * champanhe discreto: ancora o olhar sem virar enfeite.
+ */
+function Bolinha({ tone, destaque }: { tone: string; destaque?: boolean }) {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-superficie',
+        'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-elevada',
+        destaque && 'ring-[3px] ring-ouro/20',
         tone,
       )}
     />
@@ -104,7 +113,7 @@ function TextoLongo({ texto }: { texto: string }) {
 function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
   return (
     <li className="relative">
-      <Bolinha tone={primeiro ? 'bg-marca-viva' : 'bg-borda-forte'} />
+      <Bolinha tone={primeiro ? 'bg-marca-viva' : 'bg-borda-forte'} destaque={primeiro} />
       <div className="text-xs font-semibold tabular-nums text-texto-2">
         {mov.data ? formatDate(mov.data) : 'sem data'}
       </div>
@@ -207,6 +216,24 @@ function ChipSituacao({
       {rotulo}
       <span className="tabular-nums">{qtd}</span>
     </button>
+  )
+}
+
+/**
+ * O carregamento com a FORMA da linha do tempo (v3): o trilho, e em cada item a
+ * data curta e o texto — o lugar que o conteúdo vai ocupar, e não dois blocos
+ * cinzas soltos. O brilho é o `skeleton` da casa (para no movimento reduzido).
+ */
+function EsqueletoDaLinhaDoTempo() {
+  return (
+    <div aria-hidden="true" className="ml-1.5 space-y-s4 border-l border-borda pl-4">
+      {['w-11/12', 'w-9/12', 'w-10/12'].map((largura, i) => (
+        <div key={i} className="space-y-s1.5">
+          <div className="skeleton h-3 w-[72px] rounded-controle" />
+          <div className={cn('skeleton h-4 rounded-controle', largura)} />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -319,9 +346,9 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       {/* O HISTÓRICO É UMA SEÇÃO DA FICHA, com o título de seção das outras, e as
           duas visões num controle segmentado (a amostra). A contagem só aparece
           depois de carregar: "(0)" durante a leitura afirmaria que não há nada. */}
-      <h3 className="font-display mb-s2 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
-        Histórico
-      </h3>
+      {/* v3: o mesmo título das outras seções da ficha (TituloDaSecao: o
+          sobretítulo com o fio champanhe). */}
+      <TituloDaSecao>Histórico</TituloDaSecao>
       <div className="mb-s3 flex flex-wrap items-center justify-between gap-x-s3 gap-y-s2">
         <Segmented
           ariaLabel="Alternar entre movimentações e tarefas do processo"
@@ -372,10 +399,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
 
       {aba === 'movimentacoes' ? (
         movs.isLoading ? (
-          <div className="space-y-2">
-            <div className="skeleton h-12 w-full rounded-campo" />
-            <div className="skeleton h-12 w-11/12 rounded-campo" />
-          </div>
+          <EsqueletoDaLinhaDoTempo />
         ) : movs.isError ? (
           // O ERRO DE TODA LISTA (§0.10, revisão visual 2): com "Tentar novamente".
           <ErrorState
@@ -412,10 +436,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           )}
 
           {tarefas.isLoading ? (
-            <div className="space-y-2">
-              <div className="skeleton h-12 w-full rounded-campo" />
-              <div className="skeleton h-12 w-11/12 rounded-campo" />
-            </div>
+            <EsqueletoDaLinhaDoTempo />
           ) : tarefas.isError ? (
             <ErrorState
               message={`Não foi possível carregar o histórico: ${(tarefas.error as Error).message}`}

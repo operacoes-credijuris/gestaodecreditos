@@ -192,7 +192,10 @@ export function CreditoDrawer({
                       ))
                     : null,
                 ],
-                ['Data de aquisição', processo.data_aquisicao ? formatDate(processo.data_aquisicao) : null],
+                [
+                  'Data de aquisição',
+                  processo.data_aquisicao ? <span className="tabular-nums">{formatDate(processo.data_aquisicao)}</span> : null,
+                ],
                 [
                   'Expectativa de liquidação',
                   <SeloExpectativa
@@ -203,7 +206,7 @@ export function CreditoDrawer({
                 ],
                 liquidando && [
                   'Data de liquidação',
-                  processo.data_liquidacao ? formatDate(processo.data_liquidacao) : null,
+                  processo.data_liquidacao ? <span className="tabular-nums">{formatDate(processo.data_liquidacao)}</span> : null,
                 ],
                 // O SÓLIDO DA ESPÉCIE EM `sm` (auditoria visual, CR2), como na lista de Créditos.
                 ['Espécie do requisitório', esp ? <Badge size="sm" tone={esp.tone}>{esp.label}</Badge> : null],
@@ -219,7 +222,10 @@ export function CreditoDrawer({
                     </div>
                   ) : null,
                 ],
-                ['Data de referência', processo.data_referencia ? formatDate(processo.data_referencia) : null],
+                [
+                  'Data de referência',
+                  processo.data_referencia ? <span className="tabular-nums">{formatDate(processo.data_referencia)}</span> : null,
+                ],
                 [
                   'Índice de atualização',
                   processo.indice_atualizacao
