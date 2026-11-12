@@ -25,9 +25,10 @@ describe('assistente: teto de 150 s', () => {
 
 describe('assistente: leituras sem o corte calado de 1000 linhas', () => {
   const f = ler('assistente/index.ts')
-  it('painel, resumo financeiro, cessões, investidores e paralisados leem paginado', () => {
+  // SEM AS CESSÕES desde 12/11/2026: `resumo_cessoes` saiu (lia uma tabela que nada
+  // mais grava) — ver assistenteFerramentasDaOperacao.test.ts.
+  it('painel, resumo financeiro, investidores e paralisados leem paginado', () => {
     expect(f).toContain("lerTudo(() => svc.from('processos').select(COLUNAS_PAINEL), ['id'])")
-    expect(f).toContain("() => svc.from('cessoes').select('status, valor_face, valor_aquisicao, valor_cessao'),")
     expect(f).toContain("}, ['tipo', 'nome_chave'])")
     expect(f).toContain("() => svc.from('advbox_processo_status').select('numero_processo, ultima_movimentacao'),")
     // As formas antigas, cruas, não voltam.
@@ -36,7 +37,9 @@ describe('assistente: leituras sem o corte calado de 1000 linhas', () => {
     expect(f).not.toMatch(/\.select\('cessionario, originador'\)\n/)
   })
   it('o teto de investidores não vem antes do filtro de ficha incompleta', () => {
-    const trecho = f.slice(f.indexOf("case 'listar_investidores'"), f.indexOf("case 'listar_analises'"))
+    // O FIM DO TRECHO é o case seguinte: era 'listar_analises', que saiu em 12/11/2026.
+    const trecho = f.slice(f.indexOf("case 'listar_investidores'"), f.indexOf("case 'listar_requerimentos'"))
+    expect(trecho.length).toBeGreaterThan(100)
     expect(trecho).not.toContain('.limit(LIMITE_MAX)')
     expect(trecho).toContain('pessoas: pessoas.slice(0, limite(args.limite)),')
   })

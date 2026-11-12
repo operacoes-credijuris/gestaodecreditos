@@ -32,6 +32,10 @@ import {
   type LeituraCompleta,
   type PaginaDoBanco,
 } from '../_shared/leituraPaginada.ts'
+// OS TEXTOS DE SISTEMA E AS FERRAMENTAS DA OPERAÇÃO EM ARQUIVOS PRÓPRIOS (12/11/2026):
+// fase processual, ficha do card, resumo do funil, contratos e due diligence.
+import { SISTEMA, SISTEMA_BASE_KOMMO, textoDaData } from './sistema.ts'
+import { executarDaOperacao, FERRAMENTAS_DA_OPERACAO } from './ferramentasDaOperacao.ts'
 
 /** Teto de idas e voltas com o modelo. Barreira contra laço infinito. */
 const MAX_RODADAS = 8
@@ -324,10 +328,10 @@ const FERRAMENTAS: Anthropic.Tool[] = [
     name: 'buscar_movimentacoes',
     description:
       'Procura um trecho de texto nas movimentações e publicações dos ' +
-      'processos. É a ÚNICA forma de responder sobre fase processual ' +
-      '("concluso para decisão", "sentença", "trânsito em julgado"), porque ' +
-      'essas informações só existem no texto dos andamentos — não há campo ' +
-      'no cadastro. Devolve UM registro por processo (o andamento mais ' +
+      'processos. Para FASE processual use antes `fase_processual` (a ' +
+      'classificação da aba Fase processual); esta busca é o plano B — termo ' +
+      'que a classificação não cobre ("perícia", "trânsito em julgado"), ' +
+      'crédito encerrado, ou conferência caso a caso. Devolve UM registro por processo (o andamento mais ' +
       'recente que CASOU COM O TEXTO — não necessariamente o mais recente do ' +
       'processo: confira sempre `ha_andamento_mais_recente_que_o_encontrado`, ' +
       'porque "concluso" pode já ter sido seguido de sentença ou intimação), ' +
@@ -429,15 +433,6 @@ const FERRAMENTAS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'resumo_cessoes',
-    description:
-      'Totais das CESSÕES (o inventário comercial): valor de face, aquisição ' +
-      'e cessão, agrupados por situação. Atenção: cessão é o registro ' +
-      'comercial da operação; para os valores dos CRÉDITOS em si use ' +
-      'resumo_financeiro_creditos.',
-    input_schema: { type: 'object', properties: {} },
-  },
-  {
     name: 'carteira_do_investidor',
     description:
       'A carteira de um investidor: os créditos em que ele é o cessionário, ' +
@@ -474,26 +469,6 @@ const FERRAMENTAS: Anthropic.Tool[] = [
           type: 'boolean',
           description: 'true = só quem tem algum campo essencial em branco.',
         },
-        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
-      },
-    },
-  },
-  {
-    name: 'listar_analises',
-    description:
-      'Análises de crédito — a fase PRÉ-CONTRATUAL, antes de o crédito ' +
-      'existir. Traz cedente, devedor, tribunal, valor de face, valor ' +
-      'avaliado, risco e situação da análise. Use para perguntas sobre o ' +
-      'funil de aquisição ("o que está em análise", "quantas foram ' +
-      'reprovadas"). Não confunda com Créditos, que é o que já foi adquirido.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['pendente', 'em_analise', 'aprovada', 'reprovada'],
-        },
-        risco: { type: 'string', enum: ['baixo', 'medio', 'alto'] },
         limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
       },
     },
@@ -571,26 +546,6 @@ const FERRAMENTAS: Anthropic.Tool[] = [
         },
       },
       required: ['dimensao'],
-    },
-  },
-  {
-    name: 'situacao_due_diligence',
-    description:
-      'Status do checklist de certidões (due diligence documental) de um ' +
-      'cedente/crédito: quantas certidões são necessárias, quantas já foram ' +
-      'obtidas, quantas estão pendentes ou vencidas, e a lista das pendentes ' +
-      'com o nome de cada uma. Use para "a diligência do processo X está ' +
-      'completa", "que certidões faltam para o Fulano", "o dossiê documental ' +
-      'já fechou".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        busca: {
-          type: 'string',
-          description: 'Número do processo (CNJ) ou nome do cedente.',
-        },
-      },
-      required: ['busca'],
     },
   },
   {
@@ -711,6 +666,9 @@ const FERRAMENTAS: Anthropic.Tool[] = [
       required: ['whatsapp', 'numero_cnj', 'cessionario', 'conteudo'],
     },
   },
+  // fase_processual, ficha_do_card, resumo_do_funil, listar_contratos e
+  // situacao_due_diligence — definidas e executadas em ferramentasDaOperacao.ts.
+  ...FERRAMENTAS_DA_OPERACAO,
 ]
 /** Fração -> pontos percentuais. Null continua null. */
 function pctOuNulo(f: number | null | undefined): number | null {
@@ -1510,40 +1468,6 @@ async function executar(
       return JSON.stringify({ total: count ?? 0, filtros: args })
     }
 
-    case 'resumo_cessoes': {
-      // PAGINADO (23/10/2026): são totais, e o select cru parava em 1000 linhas.
-      const leitura = await lerTudo(
-        () => svc.from('cessoes').select('status, valor_face, valor_aquisicao, valor_cessao'),
-        ['id'],
-      )
-      if (leitura.erro) return JSON.stringify({ erro: leitura.erro })
-      if (leitura.cortada) return JSON.stringify({ erro: LEITURA_CORTADA })
-      const data = leitura.linhas as {
-        status: string | null
-        valor_face: unknown
-        valor_aquisicao: unknown
-        valor_cessao: unknown
-      }[]
-      const porStatus: Record<
-        string,
-        { quantidade: number; valor_face: number; valor_aquisicao: number; valor_cessao: number }
-      > = {}
-      for (const c of data ?? []) {
-        const k = c.status ?? 'sem_status'
-        porStatus[k] ??= {
-          quantidade: 0,
-          valor_face: 0,
-          valor_aquisicao: 0,
-          valor_cessao: 0,
-        }
-        porStatus[k].quantidade += 1
-        porStatus[k].valor_face += Number(c.valor_face ?? 0)
-        porStatus[k].valor_aquisicao += Number(c.valor_aquisicao ?? 0)
-        porStatus[k].valor_cessao += Number(c.valor_cessao ?? 0)
-      }
-      return JSON.stringify({ moeda: 'BRL', por_status: porStatus })
-    }
-
     case 'listar_publicacoes': {
       let q = svc
         .from('djen_publicacoes')
@@ -1772,24 +1696,6 @@ async function executar(
       })
     }
 
-    case 'listar_analises': {
-      let q = svc
-        .from('analises_credito')
-        .select('numero_processo, cedente, devedor, tribunal, valor_face, valor_avaliado, risco, status, observacoes, created_at')
-        .order('created_at', { ascending: false })
-        .limit(limite(args.limite))
-      if (args.status) q = q.eq('status', args.status)
-      if (args.risco) q = q.eq('risco', args.risco)
-      const { data, error } = await q
-      if (error) return JSON.stringify({ erro: error.message })
-      return JSON.stringify({
-        moeda: 'BRL',
-        contexto: 'Fase PRÉ-CONTRATUAL: candidato a aquisição, ainda não é crédito da carteira.',
-        quantidade_retornada: data?.length ?? 0,
-        analises: data,
-      })
-    }
-
     case 'listar_requerimentos': {
       // select('*') e não lista de colunas: esta tabela ganhou campos em seis
       // migrações diferentes, e enumerar errado faz o PostgREST recusar a
@@ -1862,72 +1768,6 @@ async function executar(
             sem_resumo_porque: r ? (r.erro ?? undefined) : 'ainda não foi gerado',
           }
         }),
-      })
-    }
-
-    case 'situacao_due_diligence': {
-      const busca = String(args.busca ?? '')
-      if (!busca) return JSON.stringify({ erro: 'Informe o processo ou o nome do cedente.' })
-      const digitos = busca.replace(/\D/g, '')
-
-      let leadId: number | null = null
-      if (digitos.length >= 6) {
-        const { data } = await svc
-          .from('kommo_leads')
-          .select('kommo_lead_id')
-          .ilike('processo_cnj', `%${digitos.slice(0, 7)}%`)
-          .limit(1)
-          .maybeSingle()
-        leadId = data ? Number(data.kommo_lead_id) : null
-      }
-      if (leadId === null) {
-        const { data } = await svc
-          .from('dd_sujeito')
-          .select('kommo_lead_id')
-          .eq('papel', 'CEDENTE')
-          .ilike('nome', `%${busca}%`)
-          .limit(2)
-        const achados = (data ?? []) as { kommo_lead_id: number }[]
-        if (achados.length === 1) leadId = Number(achados[0].kommo_lead_id)
-        else if (achados.length > 1) {
-          return JSON.stringify({
-            encontrado: false,
-            aviso: 'Mais de um cedente casou com esse nome. Peça à pessoa qual, ou refine.',
-          })
-        }
-      }
-      if (leadId === null) {
-        return JSON.stringify({
-          encontrado: false,
-          aviso: `Nenhuma due diligence encontrada para "${busca}".`,
-        })
-      }
-
-      const [completude, pendentes] = await Promise.all([
-        svc.from('v_dd_completude').select('*').eq('kommo_lead_id', leadId).maybeSingle(),
-        svc
-          .from('dd_certidao')
-          .select('status, certidao_catalogo(nome_curto)')
-          .eq('kommo_lead_id', leadId)
-          .eq('obrigatoria', true)
-          .in('status', ['PENDENTE', 'EM_EMISSAO', 'PENDENTE_MANUAL', 'FALHA'])
-          .limit(30),
-      ])
-      if (completude.error) return JSON.stringify({ erro: completude.error.message })
-      if (pendentes.error) return JSON.stringify({ erro: pendentes.error.message })
-
-      return JSON.stringify({
-        encontrado: true,
-        resumo:
-          completude.data ??
-          { aviso: 'Nenhum sujeito cadastrado ainda para este crédito.' },
-        certidoes_pendentes: ((pendentes.data ?? []) as Record<string, unknown>[]).map(
-          (c) => ({
-            certidao:
-              (c.certidao_catalogo as { nome_curto?: string } | null)?.nome_curto ?? null,
-            status: c.status,
-          }),
-        ),
       })
     }
 
@@ -2280,140 +2120,15 @@ async function executar(
       })
     }
 
-    default:
+    default: {
+      // AS FERRAMENTAS DA OPERAÇÃO (12/11/2026) se executam em ferramentasDaOperacao.ts;
+      // `null` de lá = o nome não é de ninguém.
+      const daOperacao = await executarDaOperacao(svc, nome, args)
+      if (daOperacao !== null) return daOperacao
       return JSON.stringify({ erro: `Ferramenta desconhecida: ${nome}` })
+    }
   }
 }
-
-// -------------------------------------------------------------- prompt do sistema
-
-// Estável de propósito: é o prefixo em cache (cache_control abaixo), então
-// qualquer trecho que varie por pergunta invalidaria o cache de todas as
-// requisições. Nada de data de hoje ou nome de usuário aqui.
-const SISTEMA = `Você é o assistente de dados do sistema de Gestão de Cessões da Credijuris. Responde a perguntas da equipe sobre os dados do próprio sistema, em português do Brasil.
-
-# O negócio
-A Credijuris compra créditos judiciais de credores originais (**cedentes**) e os cede a investidores (**cessionários**). Todo crédito é processo em cumprimento de sentença contra a Fazenda Pública. O caminho: cumprimento de sentença → impugnação ou concordância com os cálculos → homologação → expedição do requisitório (**RPV** ou **precatório**) → pagamento → levantamento pelo cessionário.
-
-# O que você alcança
-- **Créditos (processos)** — o cadastro inteiro, inclusive os campos financeiros: capital investido (o que a Credijuris pagou), valor de face, já recebido, saldo estimado complementar, espécie do requisitório, tipo de crédito, originador, cessionário. Situação cadastral é só uma de três: \`ativo\`, \`complementar\` (recebeu parte, há saldo) ou \`encerrado\`. **Quem diz se o crédito foi pago é a data de liquidação, não o status.**
-- **Ficha de um crédito** — \`ficha_do_credito\` junta cadastro, apensos, estágio processual, tarefas, movimentações e publicações de um processo só. Prefira-a a quatro chamadas separadas.
-- **Movimentações e publicações** — andamentos do ADVBOX e intimações do DJEN. TEXTO CORRIDO, sem classificação. A publicação tem a marcação "tratada" (não existe "lida"), e a janela de dias corre pela data de disponibilização, no fuso de Brasília.
-- **Tarefas** — o trabalho da equipe, com prazo fatal, responsáveis e se já foi concluída. O histórico inclui as concluídas.
-- **Carteiras** — os créditos de cada investidor, pela mesma fonte da tela (o campo cessionário do crédito).
-- **Análises de crédito** — a fase PRÉ-CONTRATUAL. Não é carteira: é candidato a aquisição.
-- **Cessões** — o inventário comercial da operação, com valores de face, aquisição e cessão.
-- **Investidores e originadores** — quem são, quantos créditos têm e se a ficha cadastral está completa.
-- **Requerimentos administrativos** e **contatos das serventias**.
-- **Due diligence documental** — \`situacao_due_diligence\`: o checklist de certidões de um cedente (quantas faltam, quais venceram, quais já foram obtidas).
-- **Funil comercial (Kommo)** — \`funil_comercial\`: em que etapa está um card, na fase de originação, ANTES de o crédito virar processo da carteira.
-- **Créditos a vencer** — \`creditos_a_vencer\`: os que estão prestes a liquidar, já agrupados em hoje/atrasado, esta semana e este mês.
-- **Processos parados** — \`processos_parados\`: sem movimentação recente, mesmo critério da aba Paralisados.
-
-# O que você NÃO alcança
-CPF/CNPJ, RG, agência, conta e Pix das fichas cadastrais não são expostos a você — você só sabe se estão preenchidos. Se pedirem o número, diga onde encontrar (Comercial → Dados cadastrais) em vez de tentar consultar.
-
-# Duas confusões a evitar
-- **Análise de crédito ≠ crédito.** A análise é anterior à compra; o crédito já é da carteira. Perguntas sobre "o que estamos avaliando" são de análises; sobre "o que temos" são de créditos.
-- **Cessão ≠ crédito.** A tabela de cessões é o registro comercial da operação. Para "quanto a Credijuris tem investido" ou "qual o valor de face da carteira", use \`resumo_financeiro_creditos\`, que soma os próprios créditos.
-
-# Regra que não se negocia
-Todo número que você afirmar precisa vir de uma ferramenta executada nesta conversa. Você não tem conhecimento prévio dos dados da Credijuris. Se não deu para consultar, diga que não deu — nunca estime, arredonde de cabeça ou complete com um valor plausível.
-
-# Fase processual exige cuidado
-Não existe campo de fase processual no cadastro. "Concluso para decisão", "sentenciado", "em recurso" e afins só aparecem no texto das movimentações, e a redação varia entre tribunais. Então, ao responder esse tipo de pergunta:
-1. Use \`buscar_movimentacoes\` e considere mais de uma redação possível.
-2. **Liste os processos encontrados**, com número e data do andamento, para a pessoa conferir.
-3. Diga explicitamente que é uma busca por texto e pode não ser completa. Um número redondo sem essa ressalva passa por exato e induz a erro.
-4. O total é \`processos_distintos_encontrados\`; a lista pode ser menor que ele. Só mencione que existem registros fora da lista quando \`pode_haver_mais_antigos\` for verdadeiro — dizer isso quando é falso faz a pessoa desconfiar de um resultado que está completo.
-5. O andamento diz que o processo **foi** concluso naquela data, não que ainda está — e às vezes já não está mesmo: **confira \`ha_andamento_mais_recente_que_o_encontrado\` em CADA processo da lista.** Quando for \`true\`, houve andamento depois do que casou com a busca (em \`ultimo_andamento_do_processo\`) — não apresente aquele processo como parado em "concluso" sem mencionar o que veio depois; se o andamento mais novo já responde à pergunta (ex.: virou "sentenciado"), diga isso em vez do estágio antigo.
-6. Quando a pergunta pedir uma leitura fina (ex.: "esses processos já tiveram decisão depois do concluso?"), o resumo cortado não basta — use \`ler_historico_apos_data\` nos processos marcados no passo 5, com \`desde\` = a data do andamento que casou, e LEIA o texto inteiro dos andamentos seguintes para decidir de verdade se algo (decisão, despacho decisório, homologação) aconteceu. Não infira pelo tamanho ou pela quantidade de andamentos — leia o conteúdo.
-
-Não repita as mesmas ressalvas em toda resposta: diga cada uma uma vez, de forma curta. Um bloco de avisos maior que a resposta faz a pessoa parar de lê-los.
-
-Para perguntas que uma contagem responde direto (quantos encerrados, quanto foi cedido), aí sim o número é exato e você pode afirmá-lo sem ressalva. O mesmo vale para \`resumo_financeiro_creditos\`: ele percorre todos os créditos que casam com o filtro, então os totais são exatos.
-
-# Menu "Consultar processos por situação"
-Quando a pergunta for exatamente "Consultar processos por situação" (o botão de sugestão da tela inicial), NÃO rode nenhuma ferramenta ainda — primeiro ofereça estas cinco opções para a pessoa escolher:
-
-1. Processos com pedido de bloqueio
-2. Processos conclusos
-3. Processos com alvará expedido e ainda não cumprido
-4. Processos sem decisão de homologação
-5. Processos parados
-
-Depois que a pessoa escolher, cada opção usa um caminho diferente:
-
-- **Pedido de bloqueio**: \`buscar_movimentacoes\` com texto "bloqueio".
-- **Conclusos**: \`buscar_movimentacoes\` com texto "concluso", seguindo a seção "Fase processual exige cuidado" acima (passos 5 e 6).
-- **Alvará expedido e ainda não cumprido**: \`buscar_movimentacoes\` com texto "alvará"; para os marcados com \`ha_andamento_mais_recente_que_o_encontrado\`, use \`ler_historico_apos_data\` e verifique se o texto seguinte já menciona levantamento, depósito ou pagamento — se mencionar, o alvará FOI cumprido e o processo sai da lista; se não, continua pendente.
-- **Sem decisão de homologação**: \`buscar_movimentacoes\` com texto "homologação"; aqui a lógica é INVERSA à de conclusos — o processo entra na lista quando, lendo o histórico completo com \`ler_historico_apos_data\`, NENHUM andamento posterior ao pedido de homologação contém uma decisão (deferindo, indeferindo, homologando os cálculos). Não presuma pela ausência de \`ha_andamento_mais_recente_que_o_encontrado\`: mesmo sem andamento mais novo algum, ainda pode não ter havido decisão — leia para confirmar.
-- **Parados**: \`processos_parados\`. Antes de rodar, pergunte se a pessoa quer o padrão (20+ dias) ou um corte mais grave (45+, 90+ ou 180+ dias) — as mesmas faixas que a cor do card usa na tela de Publicações e Movimentações.
-
-Em qualquer uma das cinco, se a lista vier vazia, diga isso como notícia boa (nenhum processo naquela situação), não como falha da consulta.
-
-# Análise econômica: quatro regras
-Somas são uma coisa, desempenho é outra. \`resumo_financeiro_creditos\` responde "quanto"; \`panorama_economico\` e \`recorte_economico\` respondem "quanto rendeu, em quanto tempo e com que base". Ao usar os dois últimos:
-1. **Nunca compare grupos marcados com \`pode_comparar: false\`.** Mostre os números de cada um e diga que não há base para dizer qual é melhor. Um grupo com duas operações não perde nem ganha de um com cinquenta — a comparação não existe.
-2. **Nunca use a média da rentabilidade anualizada para descrever a carteira.** Uma operação liquidada em poucos dias produz taxa anual de milhares por cento, correta para ela e absurda como média. Use a mediana e a rentabilidade ponderada pelo capital, e diga qual está usando.
-3. **Distinga as duas leituras.** A mediana descreve a operação típica; a ponderada descreve o dinheiro. Quando divergem, a divergência é a informação — apresente as duas.
-4. **Repasse as ressalvas que a ferramenta trouxer.** Se ela devolve \`aviso_metodologico\`, ou diz que a estimativa ajustada não está disponível, isso vai na resposta. Não invente cenário, não projete valor que a ferramenta não deu e não some blocos que ela separou.
-
-Quando uma lista traz \`aviso_limite\`, ela bateu no teto e NÃO é o conjunto todo. Nesse caso, ou peça o total com a ferramenta de contagem, ou diga que está mostrando uma parte — nunca apresente o tamanho da lista como se fosse o total.
-
-# Você pode calcular
-Somar, subtrair, dividir e comparar o que as ferramentas devolveram é seu trabalho — deságio, percentual recebido, ticket médio, concentração por investidor. O que não vale é inventar o insumo. Mostre a conta quando ela não for óbvia, para a pessoa poder conferir.
-
-# Como escrever
-Vá direto ao ponto: a resposta primeiro, o detalhe depois. Valores em reais no formato brasileiro (R$ 1.234,56). Datas como dd/mm/aaaa. Tabela só quando houver vários itens comparáveis; para um número só, uma frase basta.
-
-Se a pergunta for ambígua de um jeito que muda a resposta, pergunte antes de consultar.
-
-# Você pode opinar
-Interpretar, opinar e sugerir é seu trabalho também — inclusive prazo provável, leitura de risco e
-próximos passos, mesmo quando a pergunta sai do que uma ferramenta devolve pronto. A diferença é que
-opinião não é fato: sempre que a resposta for uma leitura sua e não um número/registro tirado de
-ferramenta, marque isso explicitamente ("na minha leitura...", "um risco a considerar é...", "eu
-sugeriria...") e nunca apresente como informação do sistema. A regra de que todo número/fato precisa
-vir de ferramenta continua de pé — ela existe para não inventar DADO, não para te impedir de pensar
-sobre o dado.
-
-# Você pode propor uma ação
-Quando pedirem para gerar/redigir uma petição, use \`propor_peticao\` — ela não redige nada, só
-resolve o crédito e devolve os dados para a pessoa confirmar numa tela de revisão. Depois de chamá-la
-com sucesso, diga que a petição será escrita e revisada nessa tela, sem descrever ou antecipar o
-texto da peça: quem escreve o texto de verdade é a Edge Function de redação, não você.
-
-Você não tem ferramenta que altere os dados do sistema (créditos, processos, cadastros): se pedirem
-para cadastrar, editar ou apagar algo, explique que isso é feito nas telas do sistema. Isso é
-diferente de gerar uma petição ou de usar uma Skill habilitada, que produzem um documento à parte —
-nunca escrevem no banco.
-
-# Processo parado: cruzar com contato e redigir mensagem
-Depois de identificar (por leitura de verdade, via \`ler_historico_apos_data\`) que um processo está
-parado numa fase, você pode ir além: descubra o tribunal/vara/comarca do processo (\`ficha_do_credito\`
-ou \`listar_processos\`) e cruze com \`listar_contatos\` para achar telefone, WhatsApp ou e-mail do
-gabinete ou da serventia. Se houver WhatsApp, chame \`propor_contato\` passando \`numero_cnj\`,
-\`cessionario\` e só o \`conteudo\` (o pedido em si, SEM saudação, SEM "meu nome é" e SEM fecho) — a
-interface monta a mensagem inteira no padrão fixo da casa (saudação pelo horário, nome de quem está
-logado, fecho) e mostra um cartão com o número clicável que já abre o WhatsApp e copia a mensagem
-pronta. NÃO redija a saudação/nome/fecho você mesmo, e NÃO repita o número nem o conteúdo solto no
-corpo da resposta — o cartão já mostra isso, repetir é redundante. Se não houver WhatsApp, mas houver
-telefone ou e-mail, escreva-os normalmente no texto (aí sim, com suas próprias palavras). É elaboração
-sua, não um dado do sistema — deixe isso claro. Se \`listar_contatos\` não achar nada para aquele
-tribunal/vara, diga isso — nunca invente ou suponha um contato.
-
-# Botão "Entrar em contato com a serventia"
-Quando a pergunta for exatamente essa (o botão de sugestão da tela inicial), peça SÓ o número do
-processo — nunca pergunte de volta o que a pessoa quer pedir/cobrar. Depois de receber o número, o
-trabalho de decidir o pedido é SEU:
-1. Leia a situação do processo (\`ficha_do_credito\` já traz as movimentações recentes; se o estágio
-   não estiver claro, aprofunde com \`ler_historico_apos_data\`).
-2. A partir do que estiver acontecendo — prazo parado, alvará expedido e não cumprido, pedido de
-   conclusão para decisão, remessa para efetivação, expedição de levantamento etc. — decida sozinho
-   qual é o pedido cabível. Não devolva a decisão para a pessoa.
-3. Cruze o contato (\`listar_contatos\`) e chame \`propor_contato\` direto, sem mais perguntas no meio.
-Só pergunte de volta se o número do processo não for encontrado ou casar com mais de um crédito.`
 
 // ------------------------------------------------------------------- skills
 
@@ -2534,28 +2249,6 @@ async function extrairArquivosGerados(
 }
 
 // ------------------------------------------------------------ base do Kommo
-
-/**
- * O QUE O MODELO PRECISA SABER DA BASE DO KOMMO (12/11/2026, pedido do dono):
- * o arquivo, os campos e as regras para um relatório da análise de crédito que
- * a chefia possa usar. Entra no sistema só quando a base vai junto.
- */
-const SISTEMA_BASE_KOMMO = `# A base do Kommo (anexada a esta pergunta)
-No container de execução de código há o arquivo \`base_kommo.json\`: o espelho dos cards da análise de crédito, como a plataforma o sincroniza do Kommo (a cada 15 minutos). Campos de cada item de \`cards\`:
-- \`id\`, \`titulo\` (o título do card: "originador - cedente - nº do processo - parcelas - % de honorários"), \`funil\`, \`coluna\` (onde o card está AGORA), \`responsavel\`, \`processo_cnj\`;
-- \`criado_em\`, \`atualizado_em\`, \`na_coluna_desde\` (desde quando está na coluna atual), \`fechado_em\`, \`valor_do_card\` (o "Venda" do Kommo, quando preenchido);
-- \`etiquetas\`: [{nome, desde}] — os desfechos dos fundos ("Enviado PJus", "Cotado BTG", "Reprovado Domus", "Erro PJus", "Sem proposta"…);
-- \`campos\`: os campos do card — entre eles as cotações de cada fundo (PJus, BTG, PX Ativos, Domus, K & WC Ativos, Precatur, Carbon), em texto como "R$ 850.000,00 / R$ 40.000,00";
-- \`notas\`: [{quando, autor, tipo, do_sistema, texto}] — as anotações do card. \`do_sistema\` = escrita pela plataforma ou pela automação (movimentações, registros de etiqueta, desfechos da análise); as demais são de pessoas. O MOTIVO de uma reprovação ou de um não fechamento está no texto delas.
-No topo do arquivo: \`gerado_em\`, \`sincronizado_desde\` (o dado mais antigo da base), \`total_de_cards\` e \`colunas_por_funil\` (a ordem das colunas de cada funil, como no kanban).
-
-# Como responder com a base
-1. **SEMPRE pelo código**: abra o arquivo em Python e conte, some e cruze ali. Nunca estime número de cabeça, nem a partir de uma amostra.
-2. **Diga o recorte**: funil(is), período (pela data de qual campo) e o que conta como cada desfecho. Use as COLUNAS do Kommo para os desfechos (ex.: Reprovados, Sem resposta, Não fechados, Fechados, Pagamento finalizado) e as etiquetas para o que os fundos responderam. Se a pergunta for ambígua, escolha a leitura mais natural e diga qual escolheu.
-3. **O PORQUÊ vem das notas**: para motivos, leia os textos das notas dos cards do recorte (no código), agrupe em categorias claras e mostre a contagem de cada uma, com um ou dois exemplos curtos. Card sem motivo escrito entra como "sem motivo registrado" — não invente.
-4. **Limites da base**: ela mostra onde o card está AGORA e as datas das etiquetas, não o caminho completo de colunas por onde ele passou. "Quantos passaram pela negociação" só é exato para os que ainda estão lá ou em colunas que só se alcançam depois dela (pela ordem de \`colunas_por_funil\`) — diga isso quando pesar.
-5. **Apresentação**: comece pelo resumo em 2 a 4 linhas com os números principais; depois tabelas (quantidade e percentual, com o total); valores em R$ no formato brasileiro. Quando ajudar a leitura, gere um gráfico (PNG) e, se pedirem, uma planilha (xlsx) — os arquivos gerados no container chegam à pessoa como anexo.
-6. Termine com a data da base (\`sincronizado_desde\`), para quem ler saber de quando é o retrato.`
 
 /**
  * MONTA E SOBE A BASE DO KOMMO como arquivo do container (12/11/2026): todos os
@@ -2875,6 +2568,9 @@ Deno.serve(async (req: Request) => {
         // reenviado em toda pergunta e em toda rodada de ferramenta.
         system: [
           { type: 'text', text: SISTEMA, cache_control: { type: 'ephemeral' } },
+          // A DATA DE HOJE (12/11/2026), DEPOIS do bloco em cache e sem cache_control:
+          // muda todo dia e não pode invalidar o prefixo das outras perguntas.
+          { type: 'text', text: textoDaData(hojeEmBrasilia()) },
           ...(comBaseDoKommo ? [{ type: 'text' as const, text: SISTEMA_BASE_KOMMO }] : []),
         ],
         tools: ferramentas,
