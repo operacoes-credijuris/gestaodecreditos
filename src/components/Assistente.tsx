@@ -1108,9 +1108,10 @@ export function Assistente({
                 )}
               </div>
 
-              {/* Só aparece se houver skill ativa — não faz sentido escolher
-                  dentro de uma lista vazia. */}
-              {skillsQuery.data && skillsQuery.data.length > 0 && (
+              {/* SEMPRE À VISTA desde 12/11/2026: a Base do Kommo é um item fixo
+                  da lista, e não depende de skill cadastrada em Configurações. */}
+              {(
+
                 <div className="relative" ref={skillsRef}>
                   <Button
                     type="button"
@@ -1125,7 +1126,8 @@ export function Assistente({
                         ganhava o espaço do gap além do próprio. */}
                     <span>
                       Skills
-                      {skillsSelecionadas.size > 0 && ` (${skillsSelecionadas.size})`}
+                      {skillsSelecionadas.size + (comBaseDoKommo ? 1 : 0) > 0 &&
+                        ` (${skillsSelecionadas.size + (comBaseDoKommo ? 1 : 0)})`}
                     </span>
                     <ChevronDown className="h-[16px] w-[16px]" />
                   </Button>
@@ -1143,7 +1145,30 @@ export function Assistente({
                         aria-multiselectable="true"
                         aria-labelledby="assistente-skills-titulo"
                       >
-                        {skillsQuery.data.map((s) => {
+                        {/* A BASE DO KOMMO COMO SKILL (12/11/2026, pedido do dono):
+                            marcada, cada pergunta leva todos os cards da análise
+                            de crédito — ver SISTEMA_BASE_KOMMO no assistente.
+                            Começa DESMARCADA: deixa a resposta mais lenta. */}
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={comBaseDoKommo}
+                          onClick={() => setComBaseDoKommo((v) => !v)}
+                          title="Relatórios sobre os cards da análise de crédito no Kommo: reprovados e por quê, não fechados, pagos, propostas"
+                          className={itemDeMenu}
+                        >
+                          <span
+                            className={cn(
+                              'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
+                              comBaseDoKommo ? 'border-marca bg-marca text-white' : 'border-borda-forte bg-superficie',
+                            )}
+                          >
+                            {comBaseDoKommo && <Check className="h-[12px] w-[12px]" />}
+                          </span>
+                          <Database className="h-[14px] w-[14px] shrink-0 text-texto-3" aria-hidden />
+                          <span className="truncate">Base do Kommo (relatórios)</span>
+                        </button>
+                        {(skillsQuery.data ?? []).map((s) => {
                           const marcada = skillsSelecionadas.has(s.skill_id)
                           return (
                             <button
@@ -1173,25 +1198,6 @@ export function Assistente({
                   )}
                 </div>
               )}
-
-              {/* A BASE DO KOMMO: um interruptor, e não um item das Skills — vale
-                  para todos os perfis e não depende de skill cadastrada. */}
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setComBaseDoKommo((v) => !v)}
-                aria-pressed={comBaseDoKommo}
-                title={
-                  comBaseDoKommo
-                    ? 'Base do Kommo ligada: cada pergunta leva todos os cards da análise de crédito (clique para desligar)'
-                    : 'Ligar a Base do Kommo: para relatórios sobre os cards da análise de crédito — reprovados, não fechados, pagos, propostas'
-                }
-                className={cn('px-s2', comBaseDoKommo && 'bg-marca-leve text-marca-texto hover:bg-marca-leve')}
-              >
-                <Database className="h-[16px] w-[16px]" />
-                <span className="max-sm:sr-only">Base do Kommo</span>
-                {comBaseDoKommo && <Check className="h-[14px] w-[14px]" />}
-              </Button>
 
               <input
                 ref={inputArquivos}

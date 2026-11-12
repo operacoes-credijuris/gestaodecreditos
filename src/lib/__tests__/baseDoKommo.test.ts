@@ -91,7 +91,9 @@ describe('o assistente', () => {
   })
   it('a tela tem o interruptor e manda o pedido', () => {
     const t = readFileSync(join(raiz, 'src/components/Assistente.tsx'), 'utf8')
-    expect(t).toContain('aria-pressed={comBaseDoKommo}')
+    // COMO SKILL (12/11/2026): um item fixo da lista de Skills, que aparece sempre.
+    expect(t).toContain('aria-selected={comBaseDoKommo}')
+    expect(t).toContain('Base do Kommo (relatórios)')
     expect(t).toContain('...(comBaseDoKommo ? { base_kommo: true } : {}),')
     expect(t).toContain("if (comBaseDoKommo) form.append('base_kommo', 'true')")
   })
