@@ -707,7 +707,19 @@ function Andamento({
           const agora = i === atual
           const comFrentes = e === 'pesquisando' && frentes.length > 0 && (agora || feita)
           return (
-            <li key={e} aria-current={agora ? 'step' : undefined}>
+            <li
+              key={e}
+              aria-current={agora ? 'step' : undefined}
+              // O TRILHO ENTRE AS ETAPAS: um fio fino do círculo de uma ao da
+              // seguinte, verde no trecho já feito — a geração lida como um
+              // percurso, e não como uma lista solta.
+              className={cn(
+                'relative',
+                i < ordem.length - 1 &&
+                  'before:absolute before:bottom-[-10px] before:left-[11.5px] before:top-[26px] before:w-px',
+                i < ordem.length - 1 && (feita ? 'before:bg-sucesso-borda' : 'before:bg-borda'),
+              )}
+            >
               <div className="flex items-center gap-s3">
                 <span
                   className={cn(
@@ -805,7 +817,7 @@ function NotasInternas({
       aria-label="Notas internas"
       className="rounded-campo border border-aviso-borda bg-aviso-fundo px-s4 py-s3 dark:bg-superficie-2"
     >
-      <h3 className="m-0 flex items-center gap-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-2">
+      <h3 className="cj-sobretitulo m-0 flex items-center gap-s1.5">
         <Lock className="h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
         Notas internas (não vão para o cedente)
       </h3>

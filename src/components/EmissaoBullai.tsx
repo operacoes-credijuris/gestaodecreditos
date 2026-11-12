@@ -353,7 +353,7 @@ export function EmissaoBullai({
     <div className={moldura}>
       <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1.5">
         <div className="min-w-0 flex-1">
-          <b className="text-corpo font-bold text-texto">Emitir pela BullAI</b>
+          <b className="text-corpo font-semibold text-texto">Emitir pela BullAI</b>
           <span className="ml-s2 text-xs text-texto-3">
             {nMarcadas} marcada{nMarcadas === 1 ? '' : 's'} pelas regras da planilha ({consultas} consulta{consultas === 1 ? '' : 's'}) ·{' '}
             {restantes == null ? 'plano ilimitado' : `${restantes} ${restantes === 1 ? 'consulta' : 'consultas'} no plano`}
@@ -439,7 +439,7 @@ export function EmissaoBullai({
               <div key={s.id} className="border-t border-borda pb-1 pt-2">
                 <div className="mb-1 flex flex-wrap items-center gap-2 text-corpo">
                   <Selo tom="info">{s.papel}</Selo>
-                  <b className="font-bold text-texto">{s.nome}</b>
+                  <b className="font-semibold text-texto">{s.nome}</b>
                   {s.tipo_pessoa === 'PF' && !s.data_nascimento && (
                     <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
                       falta a data de nascimento — a BullAI exige
@@ -551,7 +551,7 @@ export function EmissaoBullai({
                     aria-label={`Acrescentar certidão do catálogo para ${s.nome}`}
                   />
                   {achados.length > 0 && (
-                    <ul className="mt-1 max-h-[240px] overflow-auto rounded-campo border border-borda bg-superficie p-1 shadow-nivel-2">
+                    <ul className="mt-1 max-h-[240px] animate-menu-in overflow-auto rounded-flutuante border border-borda cj-vidro-elevado p-1 shadow-nivel-2 scrollbar-thin">
                       {achados.map((p) => (
                         <li key={p.chave}>
                           <button
@@ -563,7 +563,7 @@ export function EmissaoBullai({
                               }))
                               setBusca((antes) => ({ ...antes, [s.id]: '' }))
                             }}
-                            className="flex min-h-11 w-full items-center rounded-controle px-2.5 text-left text-corpo text-texto hover:bg-superficie-3 focus-visible:bg-superficie-3"
+                            className="flex min-h-11 w-full items-center rounded-controle px-2.5 text-left text-corpo text-texto transition-colors duration-rapida hover:bg-superficie-3/70 focus-visible:bg-superficie-3/70"
                             title={p.criterio}
                           >
                             {p.rotulo}
