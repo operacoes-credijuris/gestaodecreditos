@@ -42,6 +42,10 @@ describe('SISTEMA: o que mudou', () => {
       'pode_comparar',
       'aviso_limite',
       'numero_cnj',
+      // Argumentos de ferramenta (os dois primeiros vêm do ramo assist-t, 12/11/2026).
+      'parados_ha_dias',
+      'prazo_de',
+      'prazo_ate',
     ])
     const fantasmas = citadas.filter((c) => !declaradas.has(c) && !campos.has(c))
     expect(fantasmas).toEqual([])
@@ -109,6 +113,13 @@ describe('SISTEMA: as regras de conduta pedidas', () => {
     expect(SISTEMA).toContain('Base do Kommo (relatórios)')
     const t = readFileSync(join(raiz, 'src/components/Assistente.tsx'), 'utf8')
     expect(t).toContain('Base do Kommo (relatórios)')
+  })
+  it('coerente com o ramo assist-t: grupos de creditos_a_vencer, prazo_de e funil parado', () => {
+    // creditos_a_vencer passou a devolver atrasados / proximos_7_dias / de_8_a_30_dias.
+    expect(SISTEMA).not.toMatch(/hoje\/atrasado|esta semana e este mês/)
+    expect(SISTEMA).toContain('atrasados, próximos 7 dias e de 8 a 30 dias')
+    expect(SISTEMA).toContain('`prazo_de` e `prazo_ate`')
+    expect(SISTEMA).toContain('`funil_comercial` (busca rápida de card; com `parados_ha_dias`')
   })
   it('não prevê desfecho de processo', () => {
     expect(SISTEMA).toMatch(/Não preveja o desfecho do processo/)
