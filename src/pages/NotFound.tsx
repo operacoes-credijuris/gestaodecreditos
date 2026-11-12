@@ -14,20 +14,23 @@ import { INICIO } from '@/components/layout/navigation'
 export default function NotFound() {
   const navigate = useNavigate()
   return (
-    <div className="mx-auto max-w-[560px] pt-s12">
-      <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie px-s5 py-s12 text-center">
-        <div className="mx-auto mb-s2 grid h-[52px] w-[52px] place-items-center rounded-cartao bg-marca-suave text-marca-texto">
-          <Compass className="h-[20px] w-[20px]" aria-hidden />
+    <div className="mx-auto max-w-[560px] pt-s12 max-sm:pt-s6">
+      {/* v3: a placa champanhe com contorno fino (a do vazio do kit), o código
+          do erro em sobretítulo e o título na serifa — é o h1 desta página. */}
+      <div className="animate-page rounded-cartao border border-dashed border-borda-forte bg-superficie px-s5 py-s12 text-center">
+        <div className="mx-auto mb-s4 grid h-[56px] w-[56px] place-items-center rounded-cartao bg-ouro-suave text-ouro-texto ring-1 ring-inset ring-ouro-borda">
+          <Compass className="h-[24px] w-[24px]" aria-hidden />
         </div>
-        <h1 className="font-display text-lg font-bold text-texto">Página não encontrada</h1>
-        <p className="mx-auto mt-s1 max-w-[420px] text-corpo text-texto-2">
+        <p className="cj-sobretitulo mb-s1">Erro 404</p>
+        <h1 className="font-titulo text-2xl font-semibold text-texto">Página não encontrada</h1>
+        <p className="mx-auto mt-s2 max-w-[420px] text-corpo text-texto-2">
           O endereço acessado não existe ou foi movido. Confira o link ou volte para o início.
         </p>
         {/* "VOLTAR" AO LADO DO INÍCIO (revisão UX em equipe, 20/10/2026): quem
             chega por um link quebrado vindo de outra tela quer, quase sempre,
             voltar para onde estava — e não recomeçar da Análise. Sem página
             anterior (link aberto numa aba nova), só o início. */}
-        <div className="mt-s4 flex flex-wrap justify-center gap-s2">
+        <div className="mt-s5 flex flex-wrap justify-center gap-s2">
           {/* PÁGINA ANTERIOR DA PLATAFORMA, e não do navegador (23/10/2026): o
               `history.length` conta também o site de onde a aba veio, e o
               Voltar saía da plataforma. O `idx` é o do React Router: 0 é a

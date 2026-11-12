@@ -21,7 +21,8 @@ export function CabecalhoSecao({
   return (
     <div className="mb-s5 flex flex-wrap items-start justify-between gap-s3">
       <div className="min-w-0">
-        <h2 className="font-display text-xl font-extrabold tracking-tight text-texto">{titulo}</h2>
+        {/* O H2 DE SEÇÃO DA V3: 18px em seminegrito (era o extranegrito). */}
+        <h2 className="font-display text-xl font-semibold tracking-[-0.01em] text-texto">{titulo}</h2>
         {apoio && <p className="mt-s1 text-corpo text-texto-2">{apoio}</p>}
       </div>
       {direita && <div className="flex flex-wrap items-center gap-s2">{direita}</div>}
@@ -66,9 +67,7 @@ export const DUAS_COLUNAS = 'min-[900px]:col-span-2'
 /** O `.fs-h` da amostra: título pequeno, em caixa alta, de um bloco dentro da seção. */
 export function TituloBloco({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mb-s2 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
-      {children}
-    </h3>
+    <h3 className="cj-sobretitulo mb-s2">{children}</h3>
   )
 }
 
@@ -175,7 +174,7 @@ export function SeloIntegracao({
  * tom de informação do plano. Mesmas medidas da Badge `md` (20px de altura, §0.8).
  */
 export const PILULA =
-  'inline-flex h-[20px] items-center gap-[5px] whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset'
+  'inline-flex h-[20px] items-center gap-[5px] whitespace-nowrap rounded-controle px-s2 text-xs font-semibold tracking-[0.01em] ring-1 ring-inset'
 
 /**
  * O SEGREDO TRATADO COMO SEGREDO (item "Novo" da amostra).

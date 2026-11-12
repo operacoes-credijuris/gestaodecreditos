@@ -201,7 +201,7 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
             <p className="text-corpo text-texto-2">Nenhuma skill enviada ainda.</p>
           )}
           {data && data.length > 0 && (
-            <div className="rounded-cartao border border-borda">
+            <div className="rounded-campo border border-borda">
               <Table>
                 <THead>
                   <tr>
