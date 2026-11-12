@@ -5,6 +5,7 @@ import { Field, Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
 import { CaixaDeAviso } from '@/components/analise/Pecas'
 import { onlyDigits } from '@/lib/format'
+import { cn } from '@/lib/cn'
 import { perguntarDescarte } from '@/lib/descarte'
 import {
   type Comissao,
@@ -62,13 +63,14 @@ function CampoReais({
   }
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute left-s4 top-1/2 -translate-y-1/2 text-corpo text-texto-2">R$</span>
+      {/* O PREFIXO DISCRETO, o número em destaque: o "R$" é unidade, quem se lê é o valor. */}
+      <span className="pointer-events-none absolute left-s4 top-1/2 -translate-y-1/2 text-sm font-medium text-texto-3">R$</span>
       <Input
         inputMode="numeric"
         autoComplete="off"
         placeholder="0,00"
         aria-label={rotulo}
-        className="pl-[44px] text-right tabular-nums"
+        className="pl-[44px] text-right font-medium tabular-nums"
         value={valor === null ? '' : formatarReaisSemPrefixo(valor)}
         onPaste={colar}
         onKeyDown={teclaEnter(onEnter)}
@@ -122,7 +124,7 @@ function CampoPercentual({
         autoComplete="off"
         placeholder="0"
         aria-label={rotulo}
-        className="pr-[34px] text-right tabular-nums"
+        className="pr-[34px] text-right font-medium tabular-nums"
         value={valor}
         onPaste={colar}
         onKeyDown={teclaEnter(onEnter)}
@@ -132,7 +134,7 @@ function CampoPercentual({
           onMudar(t)
         }}
       />
-      <span className="pointer-events-none absolute right-s4 top-1/2 -translate-y-1/2 text-corpo text-texto-2">%</span>
+      <span className="pointer-events-none absolute right-s4 top-1/2 -translate-y-1/2 text-sm font-medium text-texto-3">%</span>
     </div>
   )
 }
@@ -554,9 +556,16 @@ export function CamposDaCotacao({
             <SemPartirValores texto={erroDaConta} />
           </p>
         )}
-        <div className="flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1">
-          <span className="text-xs font-bold uppercase tracking-[0.06em] text-texto-3">No campo {fundo}</span>
-          <span className="min-w-0 text-right text-corpo font-semibold tabular-nums text-texto">
+        {/* O BILHETE DA COTAÇÃO: o sobretítulo à esquerda e, à direita, o
+            texto do campo no tamanho de um total (o número manda). */}
+        <div
+          className={cn(
+            'flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1',
+            (resumo || (!cotacao && erroDaConta)) && 'border-t border-borda pt-s2',
+          )}
+        >
+          <span className="cj-sobretitulo">No campo {fundo}</span>
+          <span className="cj-numero min-w-0 text-right font-display text-lg font-semibold text-texto">
             {cotacao ? <TextoQuebrandoNaBarra texto={textoDaCotacao(cotacao)} /> : '—'}
           </span>
         </div>

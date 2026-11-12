@@ -379,6 +379,10 @@ function cenarioDasVerbas(r: RespostaAnaliseRpv | null | undefined): string | nu
  * servidor prefixa com "⚠️" o que exige decisão. O resto é contexto, fica
  * recolhido, e some do caminho de quem só quer o número.
  */
+/** O cabeçalho da `.tbl.mini` (o confronto da auditoria): o sobretítulo da v3, denso. */
+const CAB_MINI =
+  'cj-sobretitulo whitespace-nowrap border-b border-borda-forte bg-superficie-2 px-2.5 py-1.5 text-left'
+
 /** O nome de cada verba na tela — 'principal' não é rótulo, é chave. */
 const NOME_DA_VERBA: Record<string, string> = {
   principal: 'Crédito principal',
@@ -415,10 +419,11 @@ function PainelPreco({ valores, esmaecido }: { valores: ValoresRpv; esmaecido?: 
   const desagioDe = (p: { liquido: number; preco: number }) =>
     p.liquido > 0 ? 1 - p.preco / p.liquido : 0
 
-  // A `.tbl` da amostra: cabeçalho em caixa alta sobre a superfície 2, células
-  // de 14 px e o total sobre a superfície 3, em negrito.
+  // A `.tbl` da amostra na v3: o cabeçalho em sobretítulo sobre a superfície 2,
+  // com a linha forte só embaixo dele; células de 14 px e o total sobre a
+  // superfície 3, em seminegrito, com os algarismos do número-herói.
   const cab =
-    'whitespace-nowrap border-b border-borda bg-superficie-2 px-4 py-2.5 text-xs font-bold uppercase tracking-[.04em] text-texto-3'
+    'cj-sobretitulo whitespace-nowrap border-b border-borda-forte bg-superficie-2 px-4 py-2.5'
   const celula = 'whitespace-nowrap border-b border-borda px-4 py-3 text-right tabular-nums'
 
   return (
@@ -455,7 +460,7 @@ function PainelPreco({ valores, esmaecido }: { valores: ValoresRpv; esmaecido?: 
               </td>
             </tr>
           ))}
-          <tr className="bg-superficie-3 font-bold text-texto">
+          <tr className="cj-numero bg-superficie-3 font-semibold text-texto">
             <td className="px-4 py-3 text-left">Total</td>
             <td className={cn(celula, 'border-b-0')}>{formatBRL(receber)}</td>
             <td className={cn(celula, 'border-b-0')}>{formatBRL(pagar)}</td>
@@ -514,9 +519,14 @@ function ResumoInvestimento({
     // gesto mais repetido da janela. Na tela estreita ele desce e deixa de colar.
     <aside
       aria-label="Resumo do investimento"
-      className="grid gap-4 rounded-cartao border border-borda bg-superficie-2 p-[14px] min-[900px]:sticky min-[900px]:top-0"
+      // A ÁREA DE DESTAQUE DA JANELA (`cj-destaque`, uma por tela): é o painel
+      // que responde à pergunta da análise. Caixa interna (`rounded-campo`),
+      // não cartão dentro de cartão.
+      className="cj-destaque grid gap-4 rounded-campo border border-borda bg-superficie-2 p-s4 min-[900px]:sticky min-[900px]:top-0"
     >
-      <h3 className="text-sm font-semibold text-texto-2">Resumo do investimento</h3>
+      <h3 className="cj-sobretitulo flex items-center gap-s2 before:h-px before:w-[12px] before:shrink-0 before:bg-ouro-forte">
+        Resumo do investimento
+      </h3>
       <dl className={lista}>
         {linha('Preço total da cessão', formatBRL(valores.preco_cessao), 'cessao')}
         {linha('Comissão', formatBRL(valores.comissao), 'comissao')}
@@ -533,14 +543,14 @@ function ResumoInvestimento({
       {/* O QUE SAI E O QUE VOLTA, em destaque (o `.hl-box`). O custo é o CHEIO
           do motor — ver o comentário da função —, e não a soma das linhas de
           cima. */}
-      <div className="grid grid-cols-2 gap-2 rounded-campo bg-marca-suave p-[10px]">
+      <div className="grid grid-cols-2 gap-2 rounded-campo border border-ouro-borda bg-marca-suave px-s3 py-[10px]">
         <div>
           <span className="block text-xs text-texto-2">Custo total</span>
-          <b className="text-lg font-bold tabular-nums text-texto">{formatBRL(valores.custo_total)}</b>
+          <b className="cj-numero font-display text-lg font-semibold text-texto">{formatBRL(valores.custo_total)}</b>
         </div>
         <div>
           <span className="block text-xs text-texto-2">A receber</span>
-          <b className="text-lg font-bold tabular-nums text-texto">{formatBRL(valores.liquido_base)}</b>
+          <b className="cj-numero font-display text-lg font-semibold text-texto">{formatBRL(valores.liquido_base)}</b>
         </div>
       </div>
 
@@ -854,7 +864,7 @@ function CampoEmReais({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-xs font-bold uppercase tracking-[.04em] text-texto-3">
+      <label htmlFor={id} className="cj-sobretitulo">
         {rotulo}
       </label>
       <div
@@ -863,7 +873,7 @@ function CampoEmReais({
           'focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20',
         )}
       >
-        <span className="grid place-items-center bg-superficie-3 px-3 text-corpo text-texto-3">R$</span>
+        <span className="grid place-items-center border-r border-borda bg-superficie-2 px-3 text-sm font-medium text-texto-3">R$</span>
         <input
           id={id}
           className="w-28 bg-transparent px-3 text-corpo tabular-nums text-texto placeholder:text-texto-3 focus:outline-none disabled:cursor-not-allowed disabled:bg-superficie-3 disabled:text-texto-2"
@@ -1097,12 +1107,12 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
                     {/* A `.tbl.mini` da amostra: a mesma tabela, mais densa. */}
                     <table className="w-full min-w-[34rem] border-collapse text-xs">
                       <thead>
-                        <tr className="text-xs font-bold uppercase tracking-[.04em] text-texto-3">
-                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">Verba</th>
-                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">Critério</th>
-                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">O título manda</th>
-                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">A conta fez</th>
-                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">Confere</th>
+                        <tr>
+                          <th className={CAB_MINI}>Verba</th>
+                          <th className={CAB_MINI}>Critério</th>
+                          <th className={CAB_MINI}>O título manda</th>
+                          <th className={CAB_MINI}>A conta fez</th>
+                          <th className={CAB_MINI}>Confere</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1127,7 +1137,7 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
                                   <td className="px-2.5 py-1.5 text-texto">{c.conta || '—'}</td>
                                 </>
                               )}
-                              <td className={cn('whitespace-nowrap px-2.5 py-1.5 font-bold', v.cor)}>{v.texto}</td>
+                              <td className={cn('whitespace-nowrap px-2.5 py-1.5 font-semibold', v.cor)}>{v.texto}</td>
                             </tr>
                           )
                         })}
@@ -2477,7 +2487,7 @@ export function AnaliseRpvModal({
             gravar esta.{' '}
             {salvo.drive_file_url && (
               <a
-                className="rounded-sm font-semibold text-marca-texto underline focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+                className="rounded-[2px] font-semibold text-marca-texto underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
                 href={salvo.drive_file_url}
                 target="_blank"
                 rel="noreferrer"
@@ -2538,10 +2548,10 @@ export function AnaliseRpvModal({
         <div className="space-y-5">
           {/* A `.reprov-box` da amostra: o título e os motivos, e só — o
               desfecho está no rodapé. */}
-          <div className="flex items-start gap-3.5 rounded-cartao border border-perigo-borda bg-perigo-fundo px-[18px] py-4">
+          <div className="flex items-start gap-3.5 rounded-campo border border-perigo-borda bg-perigo-fundo px-s4 py-4">
             <XCircle className="h-[22px] w-[22px] flex-none text-perigo" aria-hidden />
             <div className="min-w-0">
-              <p className="m-0 font-display text-lg font-bold text-perigo">{tituloDaReprovacao}</p>
+              <p className="m-0 font-display text-lg font-semibold text-perigo">{tituloDaReprovacao}</p>
               <ul className="my-2 grid list-disc gap-1 pl-[18px] text-corpo text-texto">
                 {(atual.motivos ?? []).map((m, i) => (
                   <li key={i}>{m}</li>
@@ -2735,7 +2745,7 @@ export function AnaliseRpvModal({
               Planilha salva.
               {salvo.drive_file_url && (
                 <a
-                  className="rounded-sm font-semibold underline focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+                  className="rounded-[2px] font-semibold underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
                   href={salvo.drive_file_url}
                   target="_blank"
                   rel="noreferrer"
@@ -2765,8 +2775,8 @@ export function AnaliseRpvModal({
                       // cor da marca, à direita; a resposta na superfície, à
                       // esquerda — a quina reta aponta quem falou.
                       m.papel === 'usuario'
-                        ? 'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca py-2 text-marca-contraste'
-                        : 'max-w-[80%] self-start rounded-[14px_14px_14px_4px] bg-superficie-3 py-2.5 text-texto',
+                        ? 'max-w-[85%] self-end rounded-janela rounded-br-controle bg-marca py-2 text-marca-contraste shadow-nivel-1'
+                        : 'max-w-[80%] self-start rounded-janela rounded-bl-controle border border-borda bg-superficie-2 py-2.5 text-texto',
                     )}
                   >
                     {m.texto}

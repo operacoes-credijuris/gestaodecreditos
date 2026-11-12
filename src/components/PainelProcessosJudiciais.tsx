@@ -138,11 +138,14 @@ function SeloDoRisco({ risco }: { risco: unknown }) {
  */
 function Vazio({ icone, titulo, texto }: { icone: ReactNode; titulo: string; texto: string }) {
   return (
-    <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie px-6 py-12 text-center">
-      <div className="mx-auto mb-4 grid h-[52px] w-[52px] place-items-center rounded-cartao bg-marca-suave text-marca-texto">
+    // NA V3, A PLACA DO VAZIO É CHAMPANHE COM CONTORNO (a do EmptyState de ui),
+    // e a moldura tracejada é uma caixa interna da janela (`rounded-campo`), não
+    // um cartão dentro dela.
+    <div className="animate-fade-in rounded-campo border border-dashed border-borda-forte bg-superficie-2/50 px-6 py-12 text-center">
+      <div className="mx-auto mb-4 grid h-[52px] w-[52px] place-items-center rounded-cartao border border-ouro-borda bg-ouro-suave text-ouro-texto shadow-nivel-1">
         {icone}
       </div>
-      <p className="font-display text-lg font-bold text-texto">{titulo}</p>
+      <p className="font-display text-lg font-semibold text-texto">{titulo}</p>
       <p className="mx-auto mt-2 max-w-[420px] text-corpo text-texto-2">{texto}</p>
     </div>
   )
@@ -1009,7 +1012,7 @@ export function PainelProcessosJudiciais({
           verbas que o título declara (ver alvosDaCessao): numa cessão só do
           principal os três campos do advogado ficam vazios, e nada é buscado em
           nome dele. */}
-      <div className="grid gap-x-[16px] gap-y-4 sm:grid-cols-3">
+      <div className="grid gap-x-[16px] gap-y-4 rounded-campo bg-superficie-2 p-s4 sm:grid-cols-3">
         {campo('Cedente', cedenteNome, setCedenteNome)}
         {campo(
           comDica('CPF do cedente', 'Sem CPF a busca vai pelo nome, e homônimo entra.'),
@@ -1086,7 +1089,7 @@ export function PainelProcessosJudiciais({
                       : 'border-borda bg-superficie hover:bg-superficie-2',
                   )}
                 >
-                  <span className="flex items-center gap-2 text-corpo font-bold text-texto">
+                  <span className="flex items-center gap-2 text-corpo font-semibold text-texto">
                     {a.label}
                     <span
                       className={cn(
@@ -1221,9 +1224,10 @@ export function PainelProcessosJudiciais({
                 <TBody>
                   {listados.map((x) => (
                     <TR key={x.id}>
-                      {/* O NÚMERO EM ALGARISMOS DE LARGURA FIXA, e não em fonte mono
-                          de 12px: na amostra ele tem o tamanho da célula, e as colunas
-                          de dígitos continuam alinhadas de uma linha para a outra. */}
+                      {/* O NÚMERO NO TAMANHO DA CÉLULA, e não em fonte mono de 12px.
+                          SEM `tabular-nums` desde a v3 (DESIGN-SYSTEM-V3 §3): na
+                          Inter o modo tabular alarga também o ponto e o hífen do
+                          CNJ, e um número de identificação não se soma em coluna. */}
                       <TD className="whitespace-nowrap">
                         {x.url_fonte ? (
                           <a
@@ -1231,13 +1235,13 @@ export function PainelProcessosJudiciais({
                             target="_blank"
                             rel="noreferrer"
                             title="Abre em nova aba"
-                            className="inline-flex items-center gap-1 rounded-controle tabular-nums text-marca-texto underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+                            className="inline-flex items-center gap-1 rounded-controle text-marca-texto underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel"
                           >
                             {x.numero_processo}
                             <ExternalLink className="h-[16px] w-[16px] flex-none" aria-hidden />
                           </a>
                         ) : (
-                          <span className="tabular-nums">{x.numero_processo}</span>
+                          <span>{x.numero_processo}</span>
                         )}
                         {x.tribunal && (
                           <span className="mt-0.5 block text-xs text-texto-3">{x.tribunal}</span>

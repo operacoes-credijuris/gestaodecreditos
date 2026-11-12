@@ -800,7 +800,7 @@ function Sugestoes({
                 className={CAND}
               >
                 <span className="flex flex-wrap items-center gap-2">
-                  <b className="font-bold tabular-nums">{n.iso.split('-').reverse().join('/')}</b>
+                  <b className="font-semibold tabular-nums">{n.iso.split('-').reverse().join('/')}</b>
                   {doCedente(n.contexto) && <Selo tom="info">menciona o cedente</Selo>}
                 </span>
                 <span className={SUB}>
@@ -825,7 +825,7 @@ function Sugestoes({
                 className={CAND}
               >
                 <span className="flex flex-wrap items-center gap-2">
-                  <b className="font-bold">
+                  <b className="font-semibold">
                     {l.municipio}/{l.uf}
                   </b>
                   {l.residencial && <Selo tom="info">perto de &quot;residente&quot;</Selo>}
@@ -2111,7 +2111,7 @@ export function PainelCertidoes({
       <>
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-xs text-texto-3">{rotulo}</span>
-          <b className="font-bold">{valor}</b>
+          <b className="font-semibold">{valor}</b>
         </span>
         {evidencia && <span className={TRECHO}>“{evidencia}”</span>}
       </>
@@ -2145,7 +2145,7 @@ export function PainelCertidoes({
         itemDaLeitura(
           'doc',
           rotuloDoc(tipoDaLeitura),
-          <span className="tabular-nums">{formatCpfCnpjInput(docDaLeitura.valor)}</span>,
+          <span>{formatCpfCnpjInput(docDaLeitura.valor)}</span>,
           docDaLeitura.evidencia,
           () => {
             if (tipoDaLeitura !== tipoCedente) {
@@ -2182,7 +2182,7 @@ export function PainelCertidoes({
           <>
             {ROTULO_ESTADO_CIVIL[leituraIA.estado_civil.valor] ?? leituraIA.estado_civil.valor}
             {j?.nome && ` — cônjuge: ${j.nome.valor}`}
-            {j?.cpf && <span className="tabular-nums"> (CPF {formatCpfCnpjInput(j.cpf.valor)})</span>}
+            {j?.cpf && <span> (CPF {formatCpfCnpjInput(j.cpf.valor)})</span>}
           </>,
           leituraIA.estado_civil.evidencia,
           usarEstadoCivilLido,
@@ -2262,7 +2262,7 @@ export function PainelCertidoes({
                 className={CAND}
               >
                 <span className="flex flex-wrap items-center gap-2">
-                  <b className="font-bold tabular-nums">{formatCpfCnpjInput(c.doc)}</b>
+                  <b className="font-semibold">{formatCpfCnpjInput(c.doc)}</b>
                   {c.rotulado && <Selo tom="info">rotulado &quot;{doc}&quot;</Selo>}
                   {menciona(c.contexto) && <Selo tom="info">menciona o cedente</Selo>}
                 </span>
@@ -2433,7 +2433,7 @@ export function PainelCertidoes({
   /** Um número do placar, com o rótulo ao lado. */
   const numero = (n: ReactNode, rotulo: string, tom = 'text-texto') => (
     <span className="inline-flex items-baseline gap-s1.5">
-      <b className={cn('font-display text-lg font-bold tabular-nums', tom)}>{n}</b>
+      <b className={cn('cj-numero font-display text-lg font-semibold', tom)}>{n}</b>
       <span className="text-texto-2">{rotulo}</span>
     </span>
   )
@@ -2459,12 +2459,12 @@ export function PainelCertidoes({
         <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1.5">
           <div className="flex min-w-[min(100%,300px)] flex-1 flex-wrap items-center gap-x-s2 gap-y-s1 text-corpo">
             <span className="text-sm font-semibold text-texto-2">Cedente</span>
-            <b className="min-w-0 break-words font-bold text-texto">{nome || 'ainda sem cadastro'}</b>
+            <b className="min-w-0 break-words font-semibold text-texto">{nome || 'ainda sem cadastro'}</b>
             {doc && (
               <CopiarTexto
                 valor={doc}
                 rotulo={`Copiar o ${rotuloDoc(tipo)} do cedente`}
-                className="flex-none tabular-nums text-texto-2"
+                className="flex-none text-texto-2"
               >
                 {formatCpfCnpjInput(doc)}
               </CopiarTexto>
@@ -2538,7 +2538,7 @@ export function PainelCertidoes({
         {!editando && conjugeGravado && (
           <p className="mt-s1 text-sm text-texto-2">
             Cônjuge: <b className="text-texto">{conjugeGravado.nome}</b> ·{' '}
-            <span className="tabular-nums">{formatCpfCnpjInput(conjugeGravado.documento)}</span>
+            <span>{formatCpfCnpjInput(conjugeGravado.documento)}</span>
             {conjugeGravado.uf_atual &&
               ` · ${[conjugeGravado.municipio_atual, conjugeGravado.uf_atual].filter(Boolean).join('/')}`}
           </p>
@@ -3087,7 +3087,7 @@ export function PainelCertidoes({
               {temConjuge && !conjugeVisivel && (
                 <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-campo border border-borda bg-superficie-2 px-3 py-1.5 text-sm text-texto-2">
                   <b className="text-texto">{conjuge.nome}</b>
-                  <span className="tabular-nums">CPF {conjuge.cpf}</span>
+                  <span>CPF {conjuge.cpf}</span>
                   {conjuge.nascimento && <span className="tabular-nums">{dataBr(conjuge.nascimento)}</span>}
                   <span>
                     {conjuge.uf

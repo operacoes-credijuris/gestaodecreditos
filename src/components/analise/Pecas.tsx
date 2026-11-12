@@ -80,7 +80,8 @@ const SELO: Record<TomDaPeca, string> = {
 
 /**
  * O SELO da amostra (`.pill`), na medida do selo `md` de ui (auditoria visual,
- * §0.8): 20 px de altura, 8 px de lado, 12 px em negrito, redondo. Para
+ * §0.8): 20 px de altura, 8 px de lado, 12 px em seminegrito, e o canto de 6 px
+ * da Badge da v3 (etiqueta, não pílula). Para
  * estado (finalizado, parado, sem número) e para os campos do card (objeto,
  * percentual). As etiquetas do Kommo continuam na Badge, que tem a paleta de
  * reserva delas.
@@ -102,7 +103,7 @@ export function Selo({
     <span
       title={title}
       className={cn(
-        'inline-flex h-[20px] max-w-full items-center gap-s1 whitespace-nowrap rounded-full border px-s2 text-xs font-semibold',
+        'inline-flex h-[20px] max-w-full items-center gap-s1 whitespace-nowrap rounded-controle border px-s2 text-xs font-semibold',
         SELO[tom],
         className,
       )}
@@ -147,19 +148,23 @@ export function IdentificacaoDoCard({ titulo }: { titulo: string | null | undefi
       {campos.numero && (
         <>
           {' · '}
-          <span className="whitespace-nowrap tabular-nums">{campos.numero}</span>
+          <span className="whitespace-nowrap">{campos.numero}</span>
         </>
       )}
     </span>
   )
 }
 
-/** O RÓTULO DE SEÇÃO dentro de uma janela (`.dsec`): caixa alta, 12 px, discreto. */
+/**
+ * O RÓTULO DE SEÇÃO dentro de uma janela (`.dsec`): o sobretítulo da v3
+ * (`cj-sobretitulo`) com o fio champanhe antes dele — a mesma marca de seção da
+ * ficha lateral (`DrawerSection`), para janela e gaveta falarem a mesma língua.
+ */
 export function RotuloDeSecao({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <h4
       className={cn(
-        'font-display mb-s2 mt-s5 text-xs font-bold uppercase tracking-[.06em] text-texto-3 first:mt-0',
+        'cj-sobretitulo mb-s2 mt-s5 flex items-center gap-s2 first:mt-0 before:h-px before:w-[12px] before:shrink-0 before:bg-ouro-forte',
         className,
       )}
     >

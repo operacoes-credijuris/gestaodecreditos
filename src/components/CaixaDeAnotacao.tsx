@@ -357,7 +357,7 @@ function MiniaturaDoAnexo({
         type="button"
         onClick={onTirar}
         disabled={enviando}
-        className="absolute right-s0.5 top-s0.5 grid h-s5 w-s5 place-items-center rounded-full bg-superficie text-texto-2 shadow-nivel-1 hover:text-perigo disabled:hidden dark:ring-1 dark:ring-white/[0.06]"
+        className="absolute right-s0.5 top-s0.5 grid h-s5 w-s5 place-items-center rounded-full bg-superficie text-texto-2 shadow-nivel-1 hover:text-perigo disabled:hidden"
         aria-label={`Tirar ${arquivo.name}`}
         title={`Tirar ${arquivo.name}`}
       >

@@ -62,7 +62,7 @@ function FundoDaLinha({ linha }: { linha: LinhaDaCotacao }) {
   const s = linha.situacao
   return (
     <span className="min-w-0">
-      <span className={cn('block truncate text-corpo text-texto', s?.ato === 'Cotado' ? 'font-bold' : 'font-medium')}>
+      <span className={cn('block truncate text-corpo text-texto', s?.ato === 'Cotado' ? 'font-semibold' : 'font-normal')}>
         {linha.fundo}
       </span>
       {s && (
@@ -101,7 +101,7 @@ export function ListaDeCotacoes({
 }) {
   return (
     <>
-      <p className="flex items-baseline justify-between gap-s3 px-s3 pb-s1 pt-s2 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
+      <p className="cj-sobretitulo flex items-baseline justify-between gap-s3 px-s3 pb-s1 pt-s2">
         <span id={tituloId}>{titulo}</span>
         <span className="whitespace-nowrap" aria-hidden>
           Proposta
