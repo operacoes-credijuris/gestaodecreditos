@@ -25,6 +25,8 @@ import {
   RefreshCw,
   Copy,
   Database,
+  ArrowUpRight,
+  FileText,
 } from 'lucide-react'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
@@ -72,6 +74,7 @@ import {
   type ArquivoGerado,
 } from '@/lib/arquivosDoAssistente'
 import { cn } from '@/lib/cn'
+import { LEITURA_DA_IA } from '@/lib/leituraDaIA'
 import type { Processo } from '@/lib/types'
 import {
   MODELO_PADRAO_DO_ASSISTENTE,
@@ -248,6 +251,12 @@ const SUGESTOES = [
   'Quais créditos estão próximos da data de liquidação?',
   'Consultar processos por situação',
 ]
+
+/** A extensão curta do arquivo gerado ("xlsx", "pdf"), para a placa da ficha; ou null. */
+function extensaoDe(nome: string): string | null {
+  const m = /\.([a-z0-9]{2,4})$/i.exec(nome.trim())
+  return m ? m[1] : null
+}
 
 // A MESMA lista que o servidor aceita (`_shared/modeloDoAssistente.ts`).
 const MODELOS = MODELOS_DO_ASSISTENTE
@@ -953,17 +962,28 @@ export function Assistente({
     )
   }
 
-  // Item de menu da amostra (`.pop .mi`): 36px de altura, o ✓ à esquerda.
+  // Item de menu da amostra (`.pop .mi`): 36px de altura, o ✓ à esquerda. No
+  // vidro, o realce é a superfície a 70% (o desfoque continua passando).
   const itemDeMenu = cn(
     'flex h-controle w-full items-center gap-s2 rounded-controle px-s2 text-left text-corpo text-texto',
-    'hover:bg-superficie-3 focus:outline-none focus-visible:bg-superficie-3',
+    'transition-colors duration-rapida ease-saida',
+    'hover:bg-superficie-3/70 focus:outline-none focus-visible:bg-superficie-3/70',
   )
+  // A CAIXINHA DE MARCAR das Skills: o contorno na `borda-controle` (a linha de
+  // controle de 3:1, que se vê nos dois temas) e, marcada, o primário.
+  const caixaDeMarcar = (marcada: boolean) =>
+    cn(
+      'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border transition-colors duration-rapida',
+      marcada ? 'border-marca bg-marca text-marca-contraste' : 'border-borda-controle bg-superficie',
+    )
   // A LISTA CABE NA TELA (12/11/2026): no celular, a de Skills saía do botão
   // para a direita com 220px de largura mínima e era cortada na borda — com nome
   // de Skill comprido, sumia o fim. Agora tem largura máxima (a da tela menos as
   // margens; no computador, a do painel), e o nome comprido corta com "…".
+  // O VIDRO ELEVADO DOS MENUS DA V3: a sombra do escuro já traz o fio de luz,
+  // e o anel claro feito à mão saiu.
   const menuFlutuante =
-    'absolute bottom-full z-20 mb-s1 min-w-[220px] max-w-[calc(100vw-16px)] sm:max-w-[300px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
+    'absolute bottom-full z-20 mb-s1.5 min-w-[220px] max-w-[calc(100vw-16px)] sm:max-w-[300px] cj-vidro-elevado rounded-flutuante border border-borda p-s1.5 shadow-nivel-2 animate-menu-in'
 
   /**
    * NO CELULAR O PAINEL É A TELA INTEIRA — e então é modal (12/11/2026): o Tab
@@ -996,10 +1016,12 @@ export function Assistente({
         onKeyDown={prenderTab}
         className={cn(
           // O PAINEL na camada dele (z-assistente-painel), abaixo das janelas que
-          // ele mesmo abre. No escuro, a borda forte e o anel claro o separam da
-          // página (auditoria visual, E3).
+          // ele mesmo abre. Na v3 é uma janela como as outras: a superfície
+          // `elevada`, a linha fina e a sombra do nível 3 — que no escuro já traz
+          // o fio de luz por dentro (a borda forte e o anel claro feitos à mão
+          // da auditoria E3 saíram). Chega como as janelas, subindo 4px.
           'fixed z-assistente-painel flex flex-col overflow-hidden sm:rounded-janela sm:border sm:border-borda',
-          'bg-superficie shadow-nivel-3 dark:sm:border-borda-forte dark:sm:ring-1 dark:sm:ring-white/[0.06]',
+          'bg-elevada shadow-nivel-3 animate-modal-in',
           // CELULAR: A TELA INTEIRA, como todo chat de celular (revisão geral,
           // 07/10/2026). Antes era um cartão a 48px do alto, e uma tira do topo
           // da plataforma (menu, busca) ficava à vista atrás dele, sem uso.
@@ -1008,14 +1030,21 @@ export function Assistente({
           'sm:h-[min(620px,calc(100vh-40px))] sm:w-[420px]',
         )}
       >
-        <header className="flex items-center gap-s1.5 border-b border-borda bg-superficie p-s2">
+        <header className="flex items-center gap-s1.5 border-b border-borda bg-elevada p-s2">
           <IconButton
             label="Histórico de conversas"
             icon={<Menu className="h-[16px] w-[16px]" />}
             onClick={() => setHistoricoAberto((v) => !v)}
           />
-          <p className="flex min-w-0 flex-1 items-center gap-[8px] font-display text-corpo font-bold text-texto">
-            <Sparkles className="h-[16px] w-[16px] shrink-0 text-marca-texto" />
+          {/* A MARCA DO CONSOLE: a faísca numa placa champanhe com contorno (a
+              placa dos estados vazios da v3), e o nome em seminegrito. */}
+          <p className="flex min-w-0 flex-1 items-center gap-s2 font-display text-corpo font-semibold tracking-[-0.005em] text-texto">
+            <span
+              aria-hidden
+              className="grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle border border-ouro-borda bg-ouro-suave text-ouro-texto"
+            >
+              <Sparkles className="h-[15px] w-[15px]" />
+            </span>
             <span className="truncate">Assistente de dados</span>
           </p>
           {/* A CONVERSA INTEIRA, em texto corrido, para colar num e-mail ou
@@ -1043,7 +1072,7 @@ export function Assistente({
               "pop" instantâneo. */}
           <div
             className={cn(
-              'absolute inset-0 z-10 flex flex-col overflow-hidden bg-superficie',
+              'absolute inset-0 z-10 flex flex-col overflow-hidden bg-elevada',
               // `invisible` FECHADO: fora da vista pelo transform, os botões do
               // histórico continuavam na ordem do Tab — o teclado entrava em
               // conversas que não estavam na tela. A visibilidade entra na
@@ -1052,8 +1081,8 @@ export function Assistente({
               historicoAberto ? 'translate-x-0' : 'invisible -translate-x-full pointer-events-none',
             )}
           >
-            <div className="flex items-center gap-[6px] px-s2 pb-[6px] pt-s2">
-              <p className="min-w-0 flex-1 font-display text-corpo font-bold text-texto">
+            <div className="flex items-center gap-[6px] px-s3 pb-s2 pt-s3">
+              <p className="min-w-0 flex-1 cj-sobretitulo">
                 Conversas
               </p>
               <Button
@@ -1100,8 +1129,12 @@ export function Assistente({
                   <div
                     key={c.id}
                     className={cn(
-                      'flex items-center rounded-campo',
-                      atual ? 'bg-marca-leve' : 'hover:bg-superficie-3',
+                      'flex items-center rounded-campo transition-colors duration-rapida ease-saida',
+                      // A CONVERSA ABERTA ACENDE como o item do menu lateral: o
+                      // fundo da opção destacada e a barra champanhe à esquerda.
+                      atual
+                        ? 'bg-marca-leve shadow-[inset_2px_0_0_rgb(var(--ouro))]'
+                        : 'hover:bg-superficie-3/70',
                     )}
                   >
                     <button
@@ -1115,13 +1148,13 @@ export function Assistente({
                     >
                       <span
                         className={cn(
-                          'truncate text-corpo font-bold',
+                          'truncate text-corpo font-semibold',
                           atual ? 'text-marca-texto' : 'text-texto',
                         )}
                       >
                         {c.titulo}
                       </span>
-                      <span className="text-xs text-texto-3">
+                      <span className="text-xs tabular-nums text-texto-3">
                         {formatDateTime(c.atualizado_em)}
                       </span>
                     </button>
@@ -1139,31 +1172,43 @@ export function Assistente({
           <div className="relative flex flex-1 flex-col overflow-hidden">
             <div className="flex flex-1 flex-col gap-s2 overflow-y-auto scrollbar-thin p-s3">
               {mensagens.length === 0 && (
-                <div className="my-auto text-center">
-                  <div className="mx-auto mb-s2 flex h-[48px] w-[48px] items-center justify-center rounded-cartao bg-marca-suave text-marca-texto">
+                <div className="my-auto animate-fade-in px-s1 text-center">
+                  {/* A PLACA DO VAZIO DA V3: champanhe com contorno, a faísca na
+                      tinta que se lê. */}
+                  <div className="mx-auto mb-s3 grid h-[48px] w-[48px] place-items-center rounded-cartao border border-ouro-borda bg-ouro-suave text-ouro-texto shadow-nivel-1">
                     <Sparkles className="h-[20px] w-[20px]" />
                   </div>
-                  <p className="font-display text-xl font-extrabold text-texto">
+                  <p className="font-display text-xl font-semibold tracking-[-0.01em] text-texto">
                     Olá{primeiroNome ? `, ${primeiroNome}` : ''}!
                   </p>
                   {/* A FRASE DE APOIO diz o que ele sabe responder antes das
                       sugestões — o painel só com "Olá" não dava pista nenhuma. */}
-                  <p className="mb-s3 mt-s1 text-corpo text-texto-2">
+                  <p className="mb-s5 mt-s1 text-corpo text-texto-2">
                     Pergunte sobre a carteira, os processos ou os contatos.
                   </p>
-                  <div className="grid gap-s1.5">
+                  <div className="grid gap-s2 text-left">
                     {SUGESTOES.map((s) => (
                       <button
                         key={s}
                         type="button"
                         onClick={() => enviar(s, 'sugestao')}
                         className={cn(
-                          'rounded-campo border border-borda bg-superficie-2 px-s3 py-[10px] text-left text-sm text-texto',
-                          'transition-colors hover:border-marca-viva hover:bg-marca-leve',
+                          // A SUGESTÃO COMO FICHA: a linha fina e a sombra de
+                          // contato, e a seta que chega da esquerda sob o mouse.
+                          'group flex min-h-controle-lg items-center gap-s2 rounded-campo border border-borda bg-superficie px-s3 py-[9px] text-left text-sm text-texto shadow-nivel-1',
+                          'transition-[border-color,background-color,box-shadow] duration-rapida ease-saida',
+                          'hover:border-ouro-borda hover:bg-marca-leve hover:shadow-nivel-2',
                           'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                         )}
                       >
-                        {s}
+                        <span className="min-w-0 flex-1">{s}</span>
+                        <ArrowRight
+                          aria-hidden
+                          className={cn(
+                            'h-[14px] w-[14px] shrink-0 text-texto-3 transition-[transform,color] duration-rapida ease-saida',
+                            'group-hover:translate-x-[2px] group-hover:text-ouro-forte group-focus-visible:text-ouro-forte',
+                          )}
+                        />
                       </button>
                     ))}
                   </div>
@@ -1175,8 +1220,9 @@ export function Assistente({
                   <div
                     key={i}
                     className={cn(
-                      'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca px-s3 py-[8px]',
-                      'text-corpo text-marca-contraste [overflow-wrap:anywhere]',
+                      // O RAIO DA JANELA, com o canto da fala no do controle (§10).
+                      'max-w-[85%] animate-fade-in self-end rounded-janela rounded-br-controle bg-marca px-s3 py-[9px]',
+                      'text-corpo text-marca-contraste shadow-nivel-1 [overflow-wrap:anywhere]',
                     )}
                   >
                     <p className="whitespace-pre-wrap">{m.content}</p>
@@ -1201,21 +1247,27 @@ export function Assistente({
                   // inteira, senão a tabela nasce comprimida.
                   <div
                     key={i}
-                    className="relative w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-s3 py-[10px] pr-s10 text-corpo text-texto"
+                    className={cn(
+                      // A RESPOSTA COMO FOLHA DE ANÁLISE (v3): a caixa interna da
+                      // casa (`superficie-2`) com a linha fina, o raio da janela e
+                      // o canto da fala no do controle.
+                      'relative w-full animate-fade-in rounded-janela rounded-bl-controle border border-borda bg-superficie-2',
+                      'px-s4 py-s3 pr-s10 text-corpo text-texto',
+                    )}
                   >
                     {/* COPIAR A RESPOSTA com um clique, no canto — a lista de
                         processos ou o texto pronto vão para a conversa com o
                         cliente sem selecionar à mão. Do tamanho do "Copiar
                         conversa" do cabeçalho (28px, ícone de 16px), e o hover
-                        no tom da superfície: o cinza de sempre é o da bolha e
-                        sumia nela (revisão visual 2). */}
+                        um degrau acima do fundo da folha (`superficie-3` sobre
+                        a `superficie-2`), para não sumir nela (revisão visual 2). */}
                     <BotaoCopiar
                       valor={m.content}
                       rotulo="Copiar resposta"
                       tamanho="linha"
-                      className="absolute right-s1 top-s1 hover:bg-superficie"
+                      className="absolute right-s1.5 top-s1.5 hover:bg-superficie-3"
                     />
-                    <div className="[overflow-wrap:anywhere]">
+                    <div className={LEITURA_DA_IA}>
                       {/* Enquanto o leitor de Markdown chega (só na primeira
                           resposta), o texto cru — legível, só sem formatação. */}
                       <Suspense fallback={<p className="whitespace-pre-wrap">{m.content}</p>}>
@@ -1236,18 +1288,43 @@ export function Assistente({
                       </p>
                     )}
 
+                    {/* OS ARQUIVOS GERADOS COMO FICHAS (v3): a placa do tipo, o
+                        nome e a seta de "abre fora". A extensão na placa é só
+                        enfeite (`aria-hidden`): o nome do link continua sendo
+                        o nome do arquivo. */}
                     {m.arquivos && m.arquivos.length > 0 && (
-                      <div className="mt-s2 grid gap-s1">
+                      <div className="mt-s3 grid gap-s1.5">
                         {m.arquivos.map((f) => (
                           <a
                             key={f.url}
                             href={f.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-[6px] text-sm font-semibold text-marca-texto hover:underline"
+                            className={cn(
+                              'group flex min-h-controle-lg min-w-0 items-center gap-s2 rounded-campo border border-borda bg-superficie py-s1 pl-s1 pr-s2',
+                              'text-sm font-semibold text-marca-texto shadow-nivel-1',
+                              'transition-[border-color,background-color,box-shadow] duration-rapida ease-saida',
+                              'hover:border-ouro-borda hover:bg-marca-leve hover:shadow-nivel-2',
+                              'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                            )}
                           >
-                            <Paperclip className="h-[16px] w-[16px] shrink-0" />
-                            {f.nome}
+                            <span
+                              aria-hidden
+                              className="grid h-[30px] min-w-[30px] shrink-0 place-items-center rounded-controle border border-ouro-borda bg-ouro-suave px-[5px] text-ouro-texto"
+                            >
+                              {extensaoDe(f.nome) ? (
+                                <span className="text-xs font-semibold uppercase tracking-[0.04em]">
+                                  {extensaoDe(f.nome)}
+                                </span>
+                              ) : (
+                                <FileText className="h-[15px] w-[15px]" />
+                              )}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate group-hover:underline">{f.nome}</span>
+                            <ArrowUpRight
+                              aria-hidden
+                              className="h-[14px] w-[14px] shrink-0 text-texto-3 transition-colors duration-rapida group-hover:text-marca-texto"
+                            />
                           </a>
                         ))}
                       </div>
@@ -1262,8 +1339,11 @@ export function Assistente({
                     )}
 
                     {m.acaoProposta && !m.acaoResolvida && (
-                      <div className="mt-s2 grid gap-s1 rounded-flutuante border border-info-borda bg-marca-leve p-s3">
-                        <p className="font-bold text-texto">
+                      // A AÇÃO PROPOSTA como um bilhete à parte: a superfície do
+                      // cartão, a linha fina e o fio champanhe à esquerda (o
+                      // "passo seguinte" da v3), sem disputar com a resposta.
+                      <div className="mt-s3 grid gap-s1 rounded-campo border border-l-[3px] border-borda border-l-ouro-forte bg-superficie p-s3 shadow-nivel-1">
+                        <p className="font-semibold text-texto">
                           Gerar petição — processo {m.acaoProposta.numero_cnj ?? '(a confirmar)'}
                         </p>
                         <p className="text-texto-2">{m.acaoProposta.instrucao}</p>
@@ -1297,19 +1377,24 @@ export function Assistente({
                         type="button"
                         onClick={() => abrirWhatsapp(m.contatoSugerido!)}
                         className={cn(
-                          'mt-s2 flex w-full items-center gap-s2 rounded-flutuante border border-sucesso-borda',
-                          'bg-sucesso-fundo p-s3 text-left text-texto transition-colors hover:bg-sucesso-borda/40',
+                          'mt-s3 flex w-full items-center gap-s3 rounded-campo border border-sucesso-borda',
+                          'bg-sucesso-fundo p-s3 text-left text-texto transition-colors duration-rapida ease-saida hover:bg-sucesso-borda/40',
                           'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                         )}
                       >
-                        <MessageCircle className="h-[22px] w-[22px] shrink-0 text-sucesso" />
+                        <span
+                          aria-hidden
+                          className="grid h-[36px] w-[36px] shrink-0 place-items-center rounded-full border border-sucesso-borda bg-superficie text-sucesso"
+                        >
+                          <MessageCircle className="h-[18px] w-[18px]" />
+                        </span>
                         <span className="grid min-w-0 flex-1">
                           {m.contatoSugerido.nome_contato && (
                             <span className="truncate text-xs text-sucesso">
                               {m.contatoSugerido.nome_contato}
                             </span>
                           )}
-                          <span className="font-bold tabular-nums text-texto">
+                          <span className="font-semibold text-texto">
                             {m.contatoSugerido.whatsapp}
                           </span>
                           <span className="text-xs text-texto-3">
@@ -1323,19 +1408,30 @@ export function Assistente({
               )}
 
               {carregando && (
+                // O "PENSANDO" DA V3: a folha da resposta já no lugar, com três
+                // pontos champanhe que respiram em sequência e duas linhas do
+                // brilho de carregamento — a resposta se anuncia no formato
+                // em que vai chegar. Com o movimento reduzido, tudo fica
+                // parado (index.css) e o texto continua dizendo o que acontece.
                 <div
                   role="status"
                   className={cn(
-                    'flex w-full items-center gap-[8px] rounded-[14px_14px_14px_4px] bg-superficie-3',
-                    'px-s3 py-[10px] text-corpo text-texto-2',
+                    'grid w-full animate-fade-in gap-[10px] rounded-janela rounded-bl-controle border border-borda bg-superficie-2',
+                    'px-s4 py-s3 text-corpo text-texto-2',
                   )}
                 >
-                  <span className="inline-flex gap-[3px]">
-                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:0ms]" />
-                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:150ms]" />
-                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:300ms]" />
+                  <span className="flex items-center gap-s2">
+                    <span aria-hidden className="inline-flex items-center gap-[4px]">
+                      <span className="h-[6px] w-[6px] animate-pulse rounded-full bg-ouro [animation-delay:0ms]" />
+                      <span className="h-[6px] w-[6px] animate-pulse rounded-full bg-ouro [animation-delay:200ms]" />
+                      <span className="h-[6px] w-[6px] animate-pulse rounded-full bg-ouro [animation-delay:400ms]" />
+                    </span>
+                    Consultando os dados…
                   </span>
-                  Consultando os dados…
+                  <span aria-hidden className="grid gap-[7px]">
+                    <span className="skeleton block h-[8px] w-[88%] rounded-full" />
+                    <span className="skeleton block h-[8px] w-[62%] rounded-full" />
+                  </span>
                 </div>
               )}
 
@@ -1348,11 +1444,11 @@ export function Assistente({
                 <div
                   role="alert"
                   className={cn(
-                    'mt-[2px] flex items-start gap-[8px] rounded-flutuante border border-perigo-borda',
-                    'bg-perigo-fundo px-s3 py-[10px] text-corpo text-perigo',
+                    'mt-[2px] flex animate-fade-in items-start gap-s2 rounded-campo border border-perigo-borda',
+                    'bg-perigo-fundo px-s3 py-s3 text-corpo text-perigo',
                   )}
                 >
-                  <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0" />
+                  <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0" aria-hidden />
                   <div className="grid min-w-0 flex-1 justify-items-start gap-s2">
                     <span className="break-words text-texto">{erro}</span>
                     <Button
@@ -1377,14 +1473,14 @@ export function Assistente({
               e.preventDefault()
               enviar(texto)
             }}
-            className="grid gap-s1.5 border-t border-borda bg-superficie p-s2"
+            className="grid gap-s2 border-t border-borda bg-elevada p-s2 sm:p-s3"
           >
             {arquivos.length > 0 && (
               <div className="flex flex-wrap gap-[6px]">
                 {arquivos.map((f, i) => (
                   <span
                     key={`${f.name}-${i}`}
-                    className="inline-flex h-[24px] max-w-full items-center gap-[6px] rounded-full bg-superficie-3 pl-[8px] text-xs text-texto-2"
+                    className="inline-flex h-[24px] max-w-full animate-fade-in items-center gap-[6px] rounded-full border border-borda bg-superficie-2 pl-[8px] text-xs text-texto-2"
                   >
                     <Paperclip className="h-[12px] w-[12px] shrink-0" />
                     <span className="max-w-[160px] truncate">{f.name}</span>
@@ -1395,7 +1491,7 @@ export function Assistente({
                       title={`Remover ${f.name}`}
                       className={cn(
                         'flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-full text-texto-3',
-                        'hover:bg-borda-forte hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                        'hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                       )}
                     >
                       <X className="h-[12px] w-[12px]" />
@@ -1421,6 +1517,17 @@ export function Assistente({
               </p>
             )}
 
+            {/* A CAIXA DE PERGUNTA DO CONSOLE (v3): o campo e a barra de
+                ferramentas numa peça só, com o contorno de campo (3:1) e o
+                halo do anel quando a PERGUNTA tem o foco — e não quando ele
+                está nos botões da barra, que têm o anel próprio. */}
+            <div
+              className={cn(
+                'grid rounded-cartao border border-borda-controle bg-superficie shadow-nivel-1',
+                'transition-[border-color,box-shadow] duration-rapida ease-saida',
+                'has-[textarea:focus]:border-anel has-[textarea:focus]:ring-[3px] has-[textarea:focus]:ring-anel/20',
+              )}
+            >
             <textarea
               ref={campo}
               rows={2}
@@ -1447,11 +1554,12 @@ export function Assistente({
               aria-label="Pergunta"
               aria-describedby={anexosSemLeitor.length > 0 ? 'assistente-aviso-anexo' : undefined}
               className={cn(
-                // A BORDA E O FOCO DOS CAMPOS (ui/Field.tsx): a `borda-controle`
-                // (3:1, o campo vazio se vê como campo) e o halo do anel.
-                'max-h-28 w-full resize-none rounded-campo border border-borda-controle bg-superficie',
-                'px-[10px] py-[8px] text-corpo text-texto placeholder:text-texto-3',
-                'focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20',
+                // A BORDA E O FOCO DOS CAMPOS (ui/Field.tsx) estão na caixa em
+                // volta: a `borda-controle` (3:1, o campo vazio se vê como
+                // campo) e o halo do anel.
+                'max-h-28 w-full resize-none rounded-t-cartao border-0 bg-transparent',
+                'px-s3 pb-s1 pt-[10px] text-corpo text-texto placeholder:text-texto-3',
+                'focus:outline-none focus:ring-0',
               )}
             />
 
@@ -1460,7 +1568,7 @@ export function Assistente({
                 clipe de anexo ficam do lado dele, e o Enviar na ponta direita. */}
             {/* RELATIVA: no celular a lista de Skills se ancora nesta linha, e
                 não no botão — assim ocupa a largura da linha e não sai da tela. */}
-            <div className="relative flex items-center gap-s1">
+            <div className="relative flex items-center gap-s1 px-s1 pb-s1">
               <div className="relative" ref={modeloRef}>
                 <Button
                   type="button"
@@ -1537,7 +1645,7 @@ export function Assistente({
                     >
                       <p
                         id="assistente-skills-titulo"
-                        className="px-s2 pb-s1 pt-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3"
+                        className="cj-sobretitulo px-s2 pb-s1.5 pt-s1"
                       >
                         Skills desta conversa
                       </p>
@@ -1558,12 +1666,7 @@ export function Assistente({
                           title="Relatórios sobre os cards da análise de crédito no Kommo: reprovados e por quê, não fechados, pagos, propostas"
                           className={itemDeMenu}
                         >
-                          <span
-                            className={cn(
-                              'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
-                              comBaseDoKommo ? 'border-marca bg-marca text-marca-contraste' : 'border-borda-forte bg-superficie',
-                            )}
-                          >
+                          <span className={caixaDeMarcar(comBaseDoKommo)}>
                             {comBaseDoKommo && <Check className="h-[12px] w-[12px]" />}
                           </span>
                           <Database className="h-[14px] w-[14px] shrink-0 text-texto-3" aria-hidden />
@@ -1580,14 +1683,7 @@ export function Assistente({
                               onClick={() => alternarSkill(s.skill_id)}
                               className={itemDeMenu}
                             >
-                              <span
-                                className={cn(
-                                  'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
-                                  marcada
-                                    ? 'border-marca bg-marca text-marca-contraste'
-                                    : 'border-borda-forte bg-superficie',
-                                )}
-                              >
+                              <span className={caixaDeMarcar(marcada)}>
                                 {marcada && <Check className="h-[12px] w-[12px]" />}
                               </span>
                               <span className="min-w-0 truncate">{s.nome}</span>
@@ -1630,6 +1726,7 @@ export function Assistente({
               >
                 <ArrowRight className="h-[16px] w-[16px]" />
               </button>
+            </div>
             </div>
           </form>
         </div>

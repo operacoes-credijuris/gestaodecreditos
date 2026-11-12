@@ -30,6 +30,7 @@ import { Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { Loading } from '@/components/ui/Table'
 import { TextoIA } from '@/components/ui/TextoIA'
+import { LEITURA_DA_IA } from '@/lib/leituraDaIA'
 import {
   aplicarModelo,
   baixarModelo,
@@ -759,7 +760,7 @@ export function PeticaoModal({
                 <div className="mb-s2 flex items-center justify-between gap-s3">
                   {/* O RÓTULO DE SEÇÃO DA CASA (§0.5): cinza, e não azul — em azul
                       ele se lia como link, ao lado do "Analisar de novo". */}
-                  <h4 className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+                  <h4 className="cj-sobretitulo flex items-center gap-s2 before:h-px before:w-[12px] before:shrink-0 before:bg-ouro-forte">
                     Panorama do caso
                   </h4>
                   {panorama.data && (
@@ -804,7 +805,9 @@ export function PeticaoModal({
                     </Button>
                   </Aviso>
                 ) : panorama.data ? (
-                  <div className="rounded-campo border border-info-borda bg-marca-leve p-s4 text-sm leading-relaxed text-texto">
+                  // A LEITURA DA IA DA CASA (lib/leituraDaIA.ts), a mesma do
+                  // assistente: tabela em grade financeira, seminegrito.
+                  <div className={`rounded-campo border border-info-borda bg-marca-leve p-s4 text-sm leading-relaxed text-texto ${LEITURA_DA_IA}`}>
                     <TextoIA texto={panorama.data.panorama} />
                   </div>
                 ) : null}
