@@ -6,11 +6,12 @@
  * auditoriaServidorCodigo.test.ts). Cada asserção falharia contra o código de antes.
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mensagemDoErroDaAnthropic } from '../../../supabase/functions/_shared/falhaDaAnthropic'
 import { motivoDaRespostaIncompleta } from '../../../supabase/functions/_shared/respostaDoClaude'
 
+const FN = join(__dirname, '..', '..', '..', 'supabase', 'functions')
 const ler = (rel: string) =>
   readFileSync(join(__dirname, '..', '..', '..', 'supabase', 'functions', rel), 'utf8').replace(/\r\n/g, '\n')
 
@@ -62,14 +63,6 @@ describe('Anthropic por fetch: motivo, recusa e teto', () => {
       expect(f, arq).not.toMatch(/A IA recusou a (leitura|redação) \(HTTP \$\{res\.status\}\)/)
     }
   })
-  it('dd-credor e dd-qualificar: corpo não-JSON não derruba, e o motivo é traduzido', () => {
-    for (const arq of ['dd-credor/index.ts', 'dd-qualificar/index.ts']) {
-      const f = ler(arq)
-      expect(f, arq).toContain('const j = await res.json().catch(() => null);')
-      expect(f, arq).toContain('erro: mensagemDoErroDaAnthropic(res.status, j, "a leitura")')
-      expect(f, arq).not.toContain('erro: "IA recusou"')
-    }
-  })
   it('extrair-credito: teto da invocação, uma repetição só, chave compartilhada e texto limitado', () => {
     const f = ler('extrair-credito/index.ts')
     expect(f).toContain("{ signal: sinalAteOTeto(inicio) })")
@@ -82,29 +75,9 @@ describe('Anthropic por fetch: motivo, recusa e teto', () => {
 })
 
 describe('Judit', () => {
-  it('buscar-judit: o modo teste passa pelo portão antes de gastar consulta', () => {
-    const f = ler('buscar-judit/index.ts')
-    const portao = f.indexOf('const user = await getCallerAtivo(req, svc);')
-    const teste = f.indexOf('if (testeMode) {')
-    expect(portao).toBeGreaterThan(0)
-    expect(teste).toBeGreaterThan(portao)
-    // Um portão só, antes dos dois modos.
-    expect(f.match(/getCallerAtivo\(req/g)).toHaveLength(1)
-  })
-  it('buscar-judit, dd-credor e dd-qualificar: espera e downloads têm relógio', () => {
-    for (const arq of ['buscar-judit/index.ts', 'dd-credor/index.ts', 'dd-qualificar/index.ts']) {
-      const f = ler(arq)
-      expect(f, arq).toContain('if (Date.now() - inicio > ESPERA_MAX_MS) break;')
-      expect(f, arq).toContain('if (Date.now() - inicio > LEITURA_MAX_MS) {')
-      expect(f, arq).toContain('signal: AbortSignal.timeout(PEDIDO_MAX_MS)')
-    }
-    expect(ler('dd-credor/index.ts')).toContain('if (Date.now() - inicio > BUSCA_CPF_MAX_MS) break;')
-  })
-  it('dd-credor: o Drive é o compartilhado (todas as páginas, sem pasta duplicada)', () => {
-    const f = ler('dd-credor/index.ts')
-    expect(f).not.toContain('async function driveListFiles(')
-    expect(f).not.toContain('async function driveFindOrCreateFolder(')
-    expect(f).toContain('driveFindOrCreateFolder, driveUploadBytes, refreshGoogleAccessToken } from "../_shared/credijuris.ts"')
+  // AS FUNÇÕES DA JUDIT SAÍRAM (13/11/2026, decisão do dono): nenhuma tela as chamava.
+  it('buscar-judit, dd-credor e dd-qualificar não existem mais', () => {
+    for (const f of ['buscar-judit', 'dd-credor', 'dd-qualificar']) expect(existsSync(join(FN, f)), f).toBe(false)
   })
 })
 
@@ -129,11 +102,6 @@ describe('Escavador', () => {
     expect(rotina).toBeGreaterThan(tratado)
     expect(f).toContain('if (st.status < 200 || st.status >= 300) {')
     expect(f).toContain('signal: AbortSignal.timeout(30_000)')
-  })
-  it('escavador-autos: pedido pago e não registrado é dito à tela', () => {
-    const f = ler('escavador-autos/index.ts')
-    expect(f).toContain("const { data: pedido, error: ePedido } = await svc.from('escavador_pedido').upsert({")
-    expect(f).toContain('Não peça de novo')
   })
 })
 

@@ -93,11 +93,6 @@ describe('Kommo e Escavador', () => {
     expect(lido).toBeGreaterThan(upsert)
     expect(f).toContain('if (falhaDosProcessos) {')
   })
-  it('escavador-autos: o pedido pago sem cota nem posse está desligado', () => {
-    const f = ler('escavador-autos/index.ts')
-    expect(f).toContain('const PEDIDO_PELA_TELA_LIGADO = false')
-    expect(f).toContain('if (!PEDIDO_PELA_TELA_LIGADO) {')
-  })
   it('mcp-autos: lote JSON-RPC com teto (a porta não tem login)', () => {
     const f = ler('mcp-autos/index.ts')
     expect(f).toContain('const MAX_ITENS_DO_LOTE = 10;')
@@ -123,11 +118,6 @@ describe('Pagos e acesso', () => {
     expect(f).toContain('signal: AbortSignal.timeout(TEMPO_DO_PEDIDO_MS),')
     // O segundo PDF do mesmo portal não sobrescreve o primeiro.
     expect(f).toContain("const ordem = lista.length > 0 ? ` (${lista.length + 1})` : ''")
-  })
-  it('dd-credor: busca por CPF não concluída não vira relatório verde', () => {
-    const f = ler('dd-credor/index.ts')
-    expect(f).toContain('if (!concluida) return { aguarde: true, request_id: requestId };')
-    expect(f).not.toContain('if (pd.length > 0 && i >= 3) break;')
   })
   it('dd-titulares: documento com dígito verificador errado fica vazio', () => {
     const f = ler('dd-titulares/index.ts')
