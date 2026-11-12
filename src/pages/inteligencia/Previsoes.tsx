@@ -16,7 +16,7 @@ import { formatCNJ, formatDate } from '@/lib/format'
 import type { OperacaoAnalitica } from '../../../supabase/functions/_shared/nucleo/tipos.ts'
 import {
   usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Painel, Metricas, LinhaMetrica,
-  SeloAmostra, CartaoNumero, GradeCartoes, ICONE_CARTAO, ProcessoOuRef, TABELA_NO_PAINEL,
+  SeloAmostra, CartaoNumero, PainelHeroi, ICONE_CARTAO, ProcessoOuRef, TABELA_NO_PAINEL,
   brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 import { GraficoPrevisoes } from './graficos'
@@ -47,7 +47,7 @@ function SeloDoBloco({ rotulo }: { rotulo: string }) {
   // (a meia força no escuro). Com 22px e borda, lado a lado com os outros selos,
   // parecia de outra família.
   return (
-    <span className={cn('inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset dark:ring-opacity-50', estilo.cor)}>
+    <span className={cn('inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-controle px-s2 text-xs font-semibold tracking-[0.01em] ring-1 ring-inset', estilo.cor)}>
       {estilo.Icone && <estilo.Icone className="h-[12px] w-[12px]" aria-hidden />}
       {rotulo}
     </span>
@@ -96,8 +96,10 @@ function ListaOperacoes({
 }) {
   if (operacoes.length === 0) return null
   return (
-    <div className="mx-s5 mb-s3 mt-s1 rounded-campo border border-borda bg-superficie-2 px-s3 py-s2">
-      <p className="mb-s1 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
+    // O BLOCO INTERNO DA V3: a superfície 2 de canto de campo, sem borda (nada
+    // de cartão dentro do painel).
+    <div className="mx-s5 mb-s3 mt-s1 rounded-campo bg-superficie-2 px-s3 py-s2">
+      <p className="cj-sobretitulo mb-s1">
         {titulo} · {operacoes.length}{' '}
         {operacoes.length === 1 ? 'operação' : 'operações'}
       </p>
@@ -177,7 +179,7 @@ export default function Previsoes() {
 
       {/* OS CARTÕES GANHARAM ÍCONE (Novo, só visual); o tom vermelho/âmbar da
           previsão vencida é o de sempre. */}
-      <GradeCartoes>
+      <PainelHeroi rotulo="Totais a receber">
         <CartaoNumero
           rotulo="Previsto com mês definido"
           valor={brl(forecast.totalFuturo)}
@@ -197,7 +199,7 @@ export default function Previsoes() {
           icone={<Wallet className={ICONE_CARTAO} />}
           dica="Tudo somado: meses futuros, previsão vencida, sem previsão e complementar."
         />
-      </GradeCartoes>
+      </PainelHeroi>
 
       <Painel
         titulo="Operações a receber por mês"

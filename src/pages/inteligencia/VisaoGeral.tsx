@@ -19,7 +19,7 @@ import { formatDate } from '@/lib/format'
 import { evolucaoDaCarteira } from '@/lib/graficosDoQuadro'
 import {
   usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Ressalva, Painel, Metricas,
-  LinhaMetrica, Separador, SeloAmostra, CartaoNumero, GradeCartoes, ICONE_CARTAO,
+  LinhaMetrica, Separador, SeloAmostra, CartaoNumero, PainelHeroi, ICONE_CARTAO,
   pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 import { GraficoEvolucao } from './graficos'
@@ -89,7 +89,9 @@ export default function VisaoGeral() {
         </Ressalva>
       )}
 
-      <GradeCartoes>
+      {/* O PLACAR DA CARTEIRA (v3): os três números de dinheiro numa faixa só,
+          o painel de destaque desta aba. */}
+      <PainelHeroi rotulo="Números da carteira">
         <CartaoNumero
           rotulo="Capital total investido"
           valor={brl(painel.capitalTotalInvestido)}
@@ -134,12 +136,12 @@ export default function VisaoGeral() {
           icone={<AlertTriangle className={ICONE_CARTAO} />}
           dica={EXPLICA.vencida}
         />
-      </GradeCartoes>
+      </PainelHeroi>
 
       {/* A SEGUNDA FAIXA, UM DEGRAU ABAIXO (auditoria visual, Q3): taxa e prazo
           em 18px, e o dinheiro, em cima, em 22px. Seis números do mesmo peso
           não diziam qual olhar primeiro. */}
-      <GradeCartoes>
+      <PainelHeroi rotulo="Rentabilidade e prazo das encerradas" destaque={false}>
         <CartaoNumero
           menor
           rotulo="Rentabilidade do investidor"
@@ -173,7 +175,7 @@ export default function VisaoGeral() {
             'encerradas. Metade levou menos que isso, metade levou mais.'
           }
         />
-      </GradeCartoes>
+      </PainelHeroi>
 
       {(insights.length > 0 || painel.operacoes.length > 0) && (
         <div className="grid gap-s4 min-[1180px]:grid-cols-2">

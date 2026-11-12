@@ -279,7 +279,7 @@ function TabelaGrupos({
                         {/* "(sem tribunal)", "(sem investidor)": o grupo de quem
                             não tem o dado aparece apagado, para não se ler como um
                             tribunal ou um investidor de verdade. */}
-                        <TD className={cn('min-w-[180px] font-bold', g.nome.startsWith('(') ? 'text-texto-3' : 'text-texto')}>
+                        <TD className={cn('min-w-[180px] font-semibold', g.nome.startsWith('(') ? 'text-texto-3' : 'text-texto')}>
                           {nomeProprio(g.rotulo)}
                         </TD>
                         <TD className="text-right tabular-nums">{g.total}</TD>
