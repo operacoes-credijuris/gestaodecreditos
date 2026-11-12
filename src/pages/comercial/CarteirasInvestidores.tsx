@@ -61,7 +61,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
 import { Chip } from '@/components/ui/Chip'
-import { GradeDeIndicadores } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { Field, Select } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
@@ -92,6 +91,7 @@ import {
   CartaoNumero,
   ICONE_CARTAO,
   Painel,
+  PainelHeroi,
   TABELA_NO_PAINEL,
   TabelaQueRola,
 } from '@/pages/inteligencia/compartilhado'
@@ -276,7 +276,8 @@ function CelulasDoGrupo({
     case 'ide':
       return (
         <>
-          <TD className="font-bold tabular-nums text-texto">{formatCNJ(p.numero_cnj)}</TD>
+          {/* O CNJ sem tabular-nums (v3, §3): número de identificação. */}
+          <TD className="whitespace-nowrap font-semibold text-texto">{formatCNJ(p.numero_cnj)}</TD>
           <TD>{p.cedente || '—'}</TD>
           <TD>{p.cedente_advogado || '—'}</TD>
           {/* Numa linha só: a coluna se alarga conforme o texto (a tabela já
@@ -323,7 +324,7 @@ function CelulasDoGrupo({
           <TD>
             <span
               title={sl.dica}
-              className={cn('inline-flex items-center gap-1 text-sm font-bold', estilo.cor)}
+              className={cn('inline-flex items-center gap-s1 text-sm font-semibold', estilo.cor)}
             >
               {estilo.Icone && <estilo.Icone className="h-[13px] w-[13px] shrink-0" aria-hidden />}
               {sl.label}
@@ -379,7 +380,7 @@ function CelulasDoGrupo({
           </TD>
           {/* Efetivada = crédito já pago, então a taxa é a que aconteceu;
               Estimada = ainda projeção. O verde segue a convenção do Status. */}
-          <TD className={l.pago ? 'font-bold text-sucesso' : 'text-texto-2'}>{l.statusTir}</TD>
+          <TD className={l.pago ? 'font-semibold text-sucesso' : 'text-texto-2'}>{l.statusTir}</TD>
           {/* Taxa equivalente do fluxo cessão -> data do valor. O title mostra
               o prazo usado, que NÃO é "Dias em carteira" quando a expectativa
               é futura. */}
@@ -405,7 +406,7 @@ function CelulasDoGrupo({
               <Vazio />
             ) : (
               <span
-                className={ganho < 0 ? 'font-bold text-perigo' : undefined}
+                className={ganho < 0 ? 'font-semibold text-perigo' : undefined}
                 title={
                   p.valor_estimado_complementar
                     ? `Inclui ${formatBRL(p.valor_estimado_complementar)} de complementar a receber`
@@ -420,7 +421,7 @@ function CelulasDoGrupo({
             {ret === null ? (
               <Vazio />
             ) : (
-              <span className={ret < 0 ? 'font-bold text-perigo' : undefined}>
+              <span className={ret < 0 ? 'font-semibold text-perigo' : undefined}>
                 {formatPercent(ret)}
               </span>
             )}
@@ -808,13 +809,12 @@ function Individual() {
           </Button>
         </div>
 
-        {/* A GRADE COMUM DE INDICADORES (auditoria visual, C12/Q4). A 1280px,
-            seis lado a lado espremiam o rótulo em três linhas ("A / receber /
-            estimado"). AQUI A COLUNA MÍNIMA É DE 340PX, e não 200: com 200, os
-            seis caíam em cinco mais um sobrando sozinho na segunda linha; com
-            340, ficam três por linha no computador (3 + 3), dois no tablet e um
-            no celular. */}
-        <GradeDeIndicadores className="grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))]">
+        {/* O RESUMO DO INVESTIDOR É A FAIXA-HERÓI DA TELA (v3): os seis números
+            num painel só, com a luz champanhe no canto, três por linha no
+            computador (3 + 3), dois no tablet e um no celular — a mesma
+            distribuição da grade de 340px de antes (auditoria visual, C12/Q4),
+            que evitava o rótulo espremido em três linhas e o sexto sozinho. */}
+        <PainelHeroi rotulo={`Resumo da carteira de ${investidor}`} seis>
           <CartaoNumero
             rotulo="Capital total"
             icone={<Wallet className={ICONE_CARTAO} />}
@@ -903,7 +903,7 @@ function Individual() {
             valor={investidor ? String(carteira.length) : '—'}
             dica={investidor ? 'créditos deste investidor' : sel}
           />
-        </GradeDeIndicadores>
+        </PainelHeroi>
 
         <Painel
           titulo="Carteira"
@@ -914,9 +914,7 @@ function Individual() {
             aria-label="Grupos de colunas na tela"
             className="flex flex-wrap items-center gap-s2 border-b border-borda px-s5 py-s4"
           >
-            <span className="mr-s1 text-xs font-semibold uppercase tracking-[0.06em] text-texto-3">
-              Colunas
-            </span>
+            <span className="cj-sobretitulo mr-s1">Colunas</span>
             {/* O CHIP COMUM (auditoria visual, C7): os grupos SE SOMAM, e o aceso é
                 o azul suave da marca — o preto de antes era o elemento mais escuro
                 da tela. O ✓ continua: aceso não é só cor. */}
@@ -954,13 +952,15 @@ function Individual() {
               <Table className={cn(CLASSES_CARTEIRA, TABELA_NO_PAINEL)}>
                 <THead>
                   {/* Nível 1: os grupos, cada um na sua cor, centralizados e com o
-                      sublinhado grosso. Nível 2: as colunas, na cor do grupo. */}
+                      sublinhado na cor (v3: um fio de 2px, não a régua de 3px).
+                      Nível 2: as colunas, na cor do grupo. Os dois no
+                      sobretítulo do cabeçalho da tabela. */}
                   <tr>
                     {visiveis.map((g) => (
                       <TH
                         key={g.chave}
                         colSpan={g.colunas.length}
-                        className={cn('border-b-[3px] border-current text-center', COR_GRUPO[g.chave])}
+                        className={cn('border-b-2 border-current text-center', COR_GRUPO[g.chave])}
                       >
                         {g.titulo}
                       </TH>
@@ -1117,7 +1117,7 @@ function Avatar({ nome }: { nome: string }) {
   return (
     <span
       aria-hidden
-      className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-sm font-bold text-marca-texto"
+      className="grid h-[32px] w-[32px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-xs font-semibold tracking-[0.02em] text-marca-texto ring-1 ring-inset ring-ouro-borda"
     >
       {iniciais(nome)}
     </span>
@@ -1319,7 +1319,7 @@ function Consolidado() {
                     {l.retorno === null ? (
                       '—'
                     ) : (
-                      <span className={l.retorno < 0 ? 'font-bold text-perigo' : undefined}>
+                      <span className={l.retorno < 0 ? 'font-semibold text-perigo' : undefined}>
                         {formatPercent(l.retorno)}
                       </span>
                     )}
@@ -1344,28 +1344,30 @@ function Consolidado() {
                   do cartão, o fundo da linha vazava quadrado sobre o canto. */}
               <TR
                 className={cn(
-                  'font-bold [&>td]:bg-superficie-3',
+                  // A LINHA DE TOTAL DE UM DEMONSTRATIVO (v3): o fio forte em
+                  // cima, o fundo rebaixado e o seminegrito.
+                  'font-semibold [&>td]:bg-superficie-2 [&>td]:shadow-[inset_0_1px_0_rgb(var(--borda-forte))]',
                   semCessionario === 0 &&
                     '[&>td:first-child]:rounded-bl-cartao [&>td:last-child]:rounded-br-cartao',
                 )}
               >
-                <TD className="font-bold text-texto">Total da carteira</TD>
-                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                <TD className="font-semibold text-texto">Total da carteira</TD>
+                <TD className="whitespace-nowrap text-right font-semibold tabular-nums text-texto">
                   {formatBRL(total.capital)}
                 </TD>
-                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                <TD className="whitespace-nowrap text-right font-semibold tabular-nums text-texto">
                   {formatBRL(total.aReceber)}
                 </TD>
-                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                <TD className="whitespace-nowrap text-right font-semibold tabular-nums text-texto">
                   {formatBRL(total.jaRecebido)}
                 </TD>
-                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                <TD className="whitespace-nowrap text-right font-semibold tabular-nums text-texto">
                   {total.retorno === null ? '—' : formatPercent(total.retorno)}
                 </TD>
-                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                <TD className="whitespace-nowrap text-right font-semibold tabular-nums text-texto">
                   {formatPercent(total.tirAa)}
                 </TD>
-                <TD className="text-right font-bold tabular-nums text-texto">
+                <TD className="text-right font-semibold tabular-nums text-texto">
                   {total.operacoes}
                 </TD>
               </TR>

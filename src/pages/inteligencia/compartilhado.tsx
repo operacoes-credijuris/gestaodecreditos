@@ -11,11 +11,11 @@
 // em components/ui, porque o desenho delas é do Quadro: o StatCard e o Card de
 // ui/ continuam servindo às outras telas como estão.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Check, Info } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, Info, RefreshCw } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
-import { ErrorState, Loading } from '@/components/ui/Table'
+import { ErrorState } from '@/components/ui/Table'
 import { cn } from '@/lib/cn'
 import { formatBRL, hojeISO } from '@/lib/format'
 import { restaAlemDaBorda } from '@/lib/rolagemLateral'
@@ -82,11 +82,34 @@ export function usePainel(): {
 
 export function CarregandoPainel() {
   return (
-    // SEM O CardBody: o Loading já tem o respiro dele, e os dois somados davam
-    // quase 40px de margem (revisão visual 2).
-    <Card>
-      <Loading label="Calculando a carteira…" />
-    </Card>
+    // O ESQUELETO DO PRÓPRIO QUADRO (repaginação v3): a faixa dos números-herói
+    // e dois painéis, no lugar das linhas genéricas de tabela. Quem espera já vê
+    // onde cada coisa vai cair, e a chegada do painel calculado não dá salto.
+    <div role="status" aria-live="polite" aria-busy="true" className="space-y-s4">
+      <div className="overflow-hidden rounded-cartao border border-borda bg-superficie shadow-nivel-1" aria-hidden>
+        <div className="-ml-px -mt-px grid sm:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="border-l border-t border-borda p-s5 max-sm:p-s4">
+              <div className="skeleton h-[14px] w-[45%] rounded-controle" />
+              <div className="skeleton mt-s4 h-[28px] w-[70%] rounded-controle" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-s4 min-[1180px]:grid-cols-2" aria-hidden>
+        {[0, 1].map((i) => (
+          <div key={i} className="rounded-cartao border border-borda bg-superficie p-s5 shadow-nivel-1">
+            <div className="skeleton h-[16px] w-[40%] rounded-controle" />
+            <div className="skeleton mt-s2 h-[12px] w-[65%] rounded-controle" />
+            <div className="skeleton mt-s5 h-[140px] w-full rounded-campo" />
+          </div>
+        ))}
+      </div>
+      <p className="flex items-center gap-s1.5 text-xs text-texto-3">
+        <RefreshCw className="h-[14px] w-[14px] animate-spin" aria-hidden />
+        Calculando a carteira…
+      </p>
+    </div>
   )
 }
 
@@ -185,8 +208,10 @@ export function SeloAmostra({
       tabIndex={0}
       aria-label={`${rotulo} · n=${n}. ${explicacao}`}
       className={cn(
-        // NAS MEDIDAS DA `Badge` (§0.8, revisão visual 2): 20px, contorno por dentro.
-        'inline-flex h-[20px] shrink-0 items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset dark:ring-opacity-50',
+        // NAS MEDIDAS DA `Badge` (§0.8, revisão visual 2): 20px, contorno por
+        // dentro. v3: a etiqueta de canto de controle da Badge, e não a pílula;
+        // as bordas de estado do escuro já vêm a meia força nos tokens.
+        'inline-flex h-[20px] shrink-0 items-center gap-s1 whitespace-nowrap rounded-controle px-s2 text-xs font-semibold tracking-[0.01em] ring-1 ring-inset focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
         cor,
       )}
     >
@@ -258,10 +283,11 @@ export function Painel({
   className?: string
 }) {
   return (
-    <section className={cn('min-w-0 rounded-cartao border border-borda bg-superficie shadow-nivel-1 dark:shadow-none', className)}>
+    // v3: a sombra do escuro já traz o fio de luz — sem o `dark:shadow-none`.
+    <section className={cn('min-w-0 rounded-cartao border border-borda bg-superficie shadow-nivel-1', className)}>
       <div className="flex flex-wrap items-start justify-between gap-s3 px-s5 pb-s2 pt-s4">
         <div className="min-w-0">
-          <h3 className="flex items-center gap-s2 font-display text-lg font-bold text-texto">{titulo}</h3>
+          <h3 className="flex items-center gap-s2 font-display text-lg font-semibold tracking-[-0.01em] text-texto">{titulo}</h3>
           {apoio && <p className="mt-s0.5 text-corpo text-texto-2">{apoio}</p>}
         </div>
         {acao}
@@ -327,12 +353,97 @@ export function CartaoNumero({
    */
   menor?: boolean
 }) {
+  // A PLACA DO ÍCONE DA V3, a mesma do StatCard: fundo pálido, ícone no tom
+  // forte e um contorno fino — um selo pequeno, não uma mancha. A neutra é
+  // champanhe: é o indicador da casa.
   const placa =
     tom === 'perigo'
-      ? 'bg-perigo-fundo text-perigo'
+      ? 'bg-perigo-fundo text-perigo ring-perigo-borda'
       : tom === 'aviso'
-        ? 'bg-aviso-fundo text-aviso'
-        : 'bg-marca-leve text-marca-texto'
+        ? 'bg-aviso-fundo text-aviso ring-aviso-borda'
+        : 'bg-ouro-suave text-ouro-texto ring-ouro-borda'
+  const noHeroi = useContext(DentroDoHeroi)
+  const cabecalho = (
+    <div className="flex min-w-0 items-center gap-s2">
+      {icone && (
+        <span
+          className={cn('grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle ring-1 ring-inset', placa)}
+          aria-hidden
+        >
+          {icone}
+        </span>
+      )}
+      <span className={cn('min-w-0 font-medium text-texto-2', noHeroi ? 'text-sm' : 'text-corpo')}>{rotulo}</span>
+      {dica && <Dica texto={dica} focavel={!to} />}
+    </div>
+  )
+
+  // NA FAIXA-HERÓI (PainelHeroi): uma célula do painel, sem cartão próprio. O
+  // número no maior degrau da escala, a linha de baixo e, quando leva a outra
+  // aba, a seta que anda meio passo sob o mouse.
+  if (noHeroi) {
+    const celula = (
+      <div
+        className={cn(
+          'relative flex h-full min-w-0 flex-col border-l border-t border-borda p-s5 max-sm:p-s4',
+          // A SEGUNDA FAIXA (taxa e prazo) mais baixa, e no celular numa linha
+          // só: o rótulo à esquerda e o número à direita, como antes.
+          menor && 'py-s4 max-sm:flex-row max-sm:items-center max-sm:justify-between max-sm:gap-s3 max-sm:py-s3',
+          // O TOM vira uma régua curta à esquerda, recolhida das pontas: a faixa
+          // do cartão, dentro de um painel que não é dela.
+          tom &&
+            cn(
+              'before:absolute before:bottom-s5 before:left-0 before:top-s5 before:w-[3px] before:rounded-r-full',
+              tom === 'perigo' ? 'before:bg-perigo-cheio' : 'before:bg-aviso-cheio',
+            ),
+          to && 'transition-colors duration-rapida ease-saida group-hover:bg-superficie-3/40',
+        )}
+      >
+        {cabecalho}
+        <div
+          className={cn(
+            'cj-numero animate-numero font-display font-semibold text-texto [word-spacing:0.12em]',
+            menor ? 'mt-s2 shrink-0 text-xl max-sm:mt-0' : 'mt-s3 text-3xl max-sm:text-2xl min-[1280px]:text-4xl',
+          )}
+        >
+          {valor}
+        </div>
+        {sub && (
+          <div
+            className={cn(
+              'mt-s1.5 inline-flex items-center gap-s1 text-xs text-texto-3',
+              to && 'transition-colors duration-rapida group-hover:text-marca-texto',
+            )}
+          >
+            {/* A SETA DESENHADA, e não o "→" do texto, que fica para o leitor
+                de tela e para o relatório — aqui ela anda meio passo. */}
+            {typeof sub === 'string' && to ? (
+              <>
+                <span>{sub.replace(/\s*→\s*$/, '')}</span>
+                <ArrowRight
+                  className="h-[12px] w-[12px] shrink-0 transition-transform duration-rapida ease-saida group-hover:translate-x-[2px]"
+                  aria-hidden
+                />
+              </>
+            ) : (
+              sub
+            )}
+          </div>
+        )}
+      </div>
+    )
+    if (!to) return celula
+    return (
+      <Link
+        to={to}
+        title={tituloDoLink}
+        className="group block h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-anel"
+      >
+        {celula}
+      </Link>
+    )
+  }
+
   const cartao = (
     // A FAIXA DE ESTADO é a do Card de ui/ (auditoria visual, C5): uma barra
     // interna de 3px, recortada pelo canto. O `border-l-4` de antes curvava
@@ -348,22 +459,22 @@ export function CartaoNumero({
         // da Visão geral ocupavam quase duas telas antes do primeiro gráfico; a
         // taxa e o prazo cabem numa linha só.
         menor && 'max-sm:flex-row max-sm:items-center max-sm:justify-between max-sm:gap-s3',
-        to && 'transition group-hover:border-marca-viva group-hover:shadow-nivel-2',
+        // O CARTÃO QUE LEVA A OUTRA ABA sobe 1px sob o mouse (`cj-ergue`, parado
+        // com movimento reduzido), como o StatCard.
+        to && 'cj-ergue group-hover:border-borda-forte',
       )}
     >
-      <div className="flex min-w-0 items-center gap-s2">
-        {icone && (
-          <span className={cn('grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle', placa)} aria-hidden>
-            {icone}
-          </span>
+      {cabecalho}
+      {/* v3: a Inter é a fonte do corpo E a de display, e o espaço do
+          "R$ 7.075.026,00" não some mais (era o defeito da Plus Jakarta). O
+          número no seminegrito, tabular e de altura de maiúscula
+          (`cj-numero`), chegando 4px de baixo na primeira vez. */}
+      <div
+        className={cn(
+          'cj-numero animate-numero font-display font-semibold text-texto [word-spacing:0.12em]',
+          menor ? 'shrink-0 text-xl' : 'mt-s1 text-2xl',
         )}
-        <span className="min-w-0 text-corpo font-medium text-texto-2">{rotulo}</span>
-        {dica && <Dica texto={dica} focavel={!to} />}
-      </div>
-      {/* NA FONTE DO CORPO, como o `.kpi-v` da amostra, e não na de display:
-          o espaço do "R$ 7.075.026,00" na Plus Jakarta tem 3px, e o valor se
-          lia "R$7.075.026,00". */}
-      <div className={cn('font-bold tabular-nums tracking-tight text-texto', menor ? 'shrink-0 text-xl' : 'text-2xl')}>
+      >
         {valor}
       </div>
       {sub && <div className="text-xs text-texto-3">{sub}</div>}
@@ -377,24 +488,61 @@ export function CartaoNumero({
   )
 }
 
-/** O tamanho dos ícones dos cartões (16px; `h-4` vale 12px com a raiz de 12px). */
-export const ICONE_CARTAO = 'h-[16px] w-[16px]'
+/** Dentro da faixa-herói, o `CartaoNumero` vira célula (ver `PainelHeroi`). */
+const DentroDoHeroi = createContext(false)
 
-/** Três cartões por linha (o `.kpis.three`); um por linha no celular. */
-export function GradeCartoes({ children, seis = false }: { children: ReactNode; seis?: boolean }) {
+/**
+ * A FAIXA-HERÓI (repaginação v3): os números principais da aba NUM PAINEL SÓ,
+ * divididos por linhas finas, com a luz champanhe no canto (`cj-destaque`) —
+ * o único painel de destaque da tela. Três ou seis cartões soltos do mesmo peso
+ * pareciam formulário; numa faixa, leem-se como o placar da carteira.
+ *
+ * As linhas: cada célula traz a borda de cima e a da esquerda, e a grade sobe e
+ * recua 1px dentro de um painel que corta o excesso — sobram só as linhas
+ * ENTRE as células, em qualquer número de colunas (uma no celular, duas ou três
+ * acima).
+ */
+export function PainelHeroi({
+  children,
+  rotulo,
+  seis = false,
+  destaque = true,
+}: {
+  children: ReactNode
+  /** O nome do grupo para o leitor de tela ("Números da carteira"). */
+  rotulo: string
+  /** Seis números (Carteiras): duas colunas no tablet, três no computador. */
+  seis?: boolean
+  /**
+   * A luz champanhe no canto. UMA FAIXA POR TELA a leva; a segunda faixa (a de
+   * taxa e prazo da Visão geral) tem a mesma forma, sem a luz.
+   */
+  destaque?: boolean
+}) {
   return (
-    <div
-      className={cn(
-        // 12px entre os cartões no celular (16px no computador): na coluna
-        // única, 16px somados seis vezes eram quase um cartão de vão.
-        'grid gap-s3 sm:gap-s4',
-        seis ? 'grid-cols-2 md:grid-cols-3 min-[1180px]:grid-cols-6' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
-      )}
-    >
-      {children}
-    </div>
+    <DentroDoHeroi.Provider value>
+      <section
+        aria-label={rotulo}
+        className={cn(
+          'overflow-hidden rounded-cartao border border-borda bg-superficie shadow-nivel-1',
+          destaque && 'cj-destaque',
+        )}
+      >
+        <div
+          className={cn(
+            '-ml-px -mt-px grid',
+            seis ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-3',
+          )}
+        >
+          {children}
+        </div>
+      </section>
+    </DentroDoHeroi.Provider>
   )
 }
+
+/** O tamanho dos ícones dos cartões (16px; `h-4` vale 12px com a raiz de 12px). */
+export const ICONE_CARTAO = 'h-[16px] w-[16px]'
 
 /**
  * SEM OS PARÂMETROS, A CONTA SAI INCOMPLETA E CALADA. Se a leitura de
@@ -435,7 +583,11 @@ export function Ressalva({ children }: { children: ReactNode }) {
  * Envolve as `LinhaMetrica` num `<dl>`.
  */
 export function Metricas({ children, className }: { children: ReactNode; className?: string }) {
-  return <dl className={cn('space-y-s2 px-s5 pb-s5 pt-s1', className)}>{children}</dl>
+  // v3: AS LINHAS DE UM DEMONSTRATIVO — um fio finíssimo entre cada par, para o
+  // olho não perder a linha entre o rótulo, à esquerda, e o número, à direita.
+  return (
+    <dl className={cn('divide-y divide-borda/70 px-s5 pb-s4 pt-s0.5 [&>div]:py-[7px]', className)}>{children}</dl>
+  )
 }
 
 /** Uma linha de `Metricas`. `destaque` em negrito: é o número para usar. */
@@ -470,7 +622,7 @@ export function LinhaMetrica({
           rotulo
         )}
       </dt>
-      <dd className={cn('whitespace-nowrap text-right text-corpo tabular-nums text-texto', destaque ? 'font-bold' : 'font-medium')}>
+      <dd className={cn('whitespace-nowrap text-right text-corpo tabular-nums text-texto', destaque ? 'font-semibold' : 'font-medium text-texto-2')}>
         {valor}
       </dd>
     </div>
@@ -489,7 +641,9 @@ export function Separador() {
  * oito letras aparecia sem dizer o que era).
  */
 export function ProcessoOuRef({ cnj, refInterna }: { cnj: ReactNode | null; refInterna: string }) {
-  if (cnj) return <span className="whitespace-nowrap tabular-nums">{cnj}</span>
+  // SEM `tabular-nums` NO CNJ (v3, §3): na Inter o modo tabular alarga também o
+  // ponto e o hífen, e o número de identificação não se compara em coluna.
+  if (cnj) return <span className="whitespace-nowrap">{cnj}</span>
   return (
     <span className="whitespace-nowrap font-mono text-xs text-texto-2" title={EXPLICA.processo}>
       {refInterna}
@@ -515,29 +669,51 @@ export function DicaDoGrafico({
   if (!active || !payload?.length) return null
   const ponto = payload[0]?.payload ?? {}
   return (
-    <div className="min-w-[160px] rounded-campo border border-borda bg-superficie px-s2 py-s2 text-sm text-texto shadow-nivel-2">
-      <p className="mb-s1 font-bold">{label}</p>
-      {payload.map((p) => (
-        <div key={p.name} className="flex items-center gap-s1 text-texto-2">
-          <i className="h-[10px] w-[10px] shrink-0 rounded-[3px]" style={{ background: p.color }} />
-          {p.name}
-          <span className="ml-auto pl-s2 font-bold tabular-nums text-texto">
-            {typeof p.value === 'number' ? formatar(p.value) : '—'}
-          </span>
-        </div>
-      ))}
-      {extra && <p className="mt-s1 text-xs text-texto-3">{extra(ponto)}</p>}
+    // O BALÃO EM VIDRO ELEVADO (v3), como os menus suspensos: a linha passa por
+    // baixo desfocada, sem sumir. O título é a data, em metadado; os valores,
+    // em seminegrito tabular alinhados à direita.
+    <div className="cj-vidro-elevado min-w-[180px] rounded-flutuante border border-borda px-s3 py-s2 text-sm text-texto shadow-nivel-2">
+      <p className="mb-s1.5 text-xs font-semibold text-texto-2 first-letter:uppercase">{label}</p>
+      <div className="grid gap-s1">
+        {payload.map((p) => (
+          <div key={p.name} className="flex items-center gap-s2 text-texto-2">
+            <i className="h-[8px] w-[8px] shrink-0 rounded-full" style={{ background: p.color }} />
+            {p.name}
+            <span className="ml-auto pl-s3 font-semibold tabular-nums text-texto">
+              {typeof p.value === 'number' ? formatar(p.value) : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+      {extra && <p className="mt-s2 border-t border-borda pt-s1.5 text-xs tabular-nums text-texto-3">{extra(ponto)}</p>}
     </div>
   )
 }
 
-/** A legenda dos gráficos de duas séries ou mais (`.legend`). */
-export function LegendaDoGrafico({ itens }: { itens: Array<{ nome: string; cor: string }> }) {
+/**
+ * A legenda dos gráficos de duas séries ou mais (`.legend`). v3: cada série
+ * numa etiqueta discreta de vidro, com a amostra da cor no desenho da marca —
+ * um traço curto para linha (o que se vê no gráfico), um ponto para barra.
+ */
+export function LegendaDoGrafico({
+  itens,
+  forma = 'linha',
+}: {
+  itens: Array<{ nome: string; cor: string }>
+  forma?: 'linha' | 'ponto'
+}) {
   return (
-    <div className="mb-s2 flex flex-wrap gap-x-s4 gap-y-s1 text-sm text-texto-2">
+    <div className="mb-s3 flex flex-wrap gap-s2 text-xs font-medium text-texto-2">
       {itens.map((i) => (
-        <span key={i.nome} className="inline-flex items-center gap-s1">
-          <i className="h-[10px] w-[10px] shrink-0 rounded-[3px]" style={{ background: i.cor }} aria-hidden />
+        <span
+          key={i.nome}
+          className="cj-vidro-elevado inline-flex h-[24px] items-center gap-s1.5 rounded-full border border-borda px-s2"
+        >
+          <i
+            className={cn('shrink-0', forma === 'linha' ? 'h-[2px] w-[12px] rounded-full' : 'h-[8px] w-[8px] rounded-full')}
+            style={{ background: i.cor }}
+            aria-hidden
+          />
           {i.nome}
         </span>
       ))}

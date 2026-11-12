@@ -113,7 +113,9 @@ function GrupoDados({
           {/* O PIX NUMA LINHA SÓ, cortado com "…" e inteiro na dica (auditoria
               visual, D1): quebrado no meio, "financeiro@credijuriscapi / tal.invalid"
               não se lia nem se copiava. O resto quebra entre palavras. */}
-          <dd className={`m-0 min-w-0 break-words text-texto ${l.numero ? 'whitespace-nowrap tabular-nums' : ''}`}>
+          {/* SEM tabular-nums (v3, §3): CPF, RG e conta são identificação, e na
+              Inter o modo tabular alarga também o ponto e o hífen. */}
+          <dd className={`m-0 min-w-0 break-words text-texto ${l.numero ? 'whitespace-nowrap' : ''}`}>
             {l.truncar && l.valor ? <Truncado texto={l.valor} max={9999} /> : l.valor}
           </dd>
         </Fragment>
@@ -127,7 +129,7 @@ function Avatar({ nome }: { nome: string }) {
   return (
     <span
       aria-hidden
-      className="grid h-[32px] w-[32px] flex-none place-items-center rounded-full bg-marca-suave font-display text-xs font-bold text-marca-texto"
+      className="grid h-[32px] w-[32px] flex-none place-items-center rounded-full bg-marca-suave font-display text-xs font-semibold tracking-[0.02em] text-marca-texto ring-1 ring-inset ring-ouro-borda"
     >
       {iniciaisDoNome(nome)}
     </span>
@@ -138,9 +140,7 @@ function Avatar({ nome }: { nome: string }) {
 function SecaoFicha({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="mb-s3 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
-        {titulo}
-      </h3>
+      <h3 className="cj-sobretitulo mb-s3">{titulo}</h3>
       {children}
     </section>
   )
@@ -785,7 +785,7 @@ export default function DadosPessoaisBancarios() {
                     key={i.chave}
                     titulo={i.nome}
                     linhas={[
-                      d?.cpf ? <span className="tabular-nums">{rotuloDocumento(d.cpf)} {d.cpf}</span> : null,
+                      d?.cpf ? <span>{rotuloDocumento(d.cpf)} {d.cpf}</span> : null,
                       [d?.banco, d?.agencia && d?.conta ? `${d.agencia} · ${d.conta}` : d?.agencia || d?.conta]
                         .filter(Boolean)
                         .join(' · ') || (!i.emCredito ? 'sem crédito' : null),

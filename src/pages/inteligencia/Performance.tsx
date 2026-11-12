@@ -71,7 +71,7 @@ const DIZ = {
 function Destaque({ valor, rotulo, explicacao }: { valor: string; rotulo: string; explicacao?: string }) {
   return (
     <span className="inline-flex items-baseline gap-s2">
-      <span className="text-3xl font-bold tracking-tight tabular-nums text-texto">{valor}</span>
+      <span className="cj-numero font-display text-3xl font-semibold text-texto">{valor}</span>
       <span className="inline-flex items-center gap-s0.5 text-corpo text-texto-3">
         {rotulo}
         {explicacao && <Dica texto={explicacao} />}
@@ -306,10 +306,10 @@ export default function Performance() {
                         <TD className="whitespace-nowrap tabular-nums">{formatDate(o.dataLiquidacao)}</TD>
                         <TD className="whitespace-nowrap text-right tabular-nums">{brl(o.capitalInvestido)}</TD>
                         <TD className="whitespace-nowrap text-right tabular-nums">{brl(o.jaRecebido)}</TD>
-                        <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.ganho ?? 0) < 0 && 'font-bold text-perigo')}>
+                        <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.ganho ?? 0) < 0 && 'font-semibold text-perigo')}>
                           {brl(o.ganho)}
                         </TD>
-                        <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.retorno ?? 0) < 0 && 'font-bold text-perigo')}>
+                        <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.retorno ?? 0) < 0 && 'font-semibold text-perigo')}>
                           {pct(o.retorno)}
                         </TD>
                         <TD className="whitespace-nowrap text-right tabular-nums">{dias(o.prazoDias)}</TD>
@@ -319,7 +319,7 @@ export default function Performance() {
                             {extremo && (
                               <span
                                 title={EXPLICA.extremos}
-                                className="inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full bg-aviso-fundo px-s2 text-xs font-semibold text-aviso ring-1 ring-inset ring-aviso-borda dark:ring-opacity-50"
+                                className="inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-controle bg-aviso-fundo px-s2 text-xs font-semibold tracking-[0.01em] text-aviso ring-1 ring-inset ring-aviso-borda"
                               >
                                 <AlertTriangle className="h-[12px] w-[12px]" aria-hidden />
                                 extremo

@@ -300,7 +300,7 @@ function MenuDasSecoes({
         <div key={g.titulo} className="contents">
           <div
             className={cn(
-              'hidden px-s2 pb-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3 min-[900px]:block',
+              'cj-sobretitulo hidden px-s3 pb-s1.5 min-[900px]:block',
               gi === 0 ? 'pt-0' : 'pt-s3',
             )}
           >
@@ -318,10 +318,19 @@ function MenuDasSecoes({
                 aria-current={ativo ? 'true' : undefined}
                 onClick={() => aoEscolher(id)}
                 className={cn(
-                  'flex h-controle shrink-0 items-center gap-s2 whitespace-nowrap rounded-controle px-s2 text-left text-corpo font-medium text-texto-2 transition-colors',
+                  'relative flex h-controle shrink-0 items-center gap-s2 whitespace-nowrap rounded-controle px-s3 text-left text-corpo font-medium text-texto-2 transition-colors duration-rapida',
                   'hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                  // A SEÇÃO ABERTA (v3): em relevo, na tinta, com a régua
+                  // champanhe à esquerda — o mesmo gesto do item aceso do menu
+                  // lateral. No celular, onde a fileira é horizontal, a régua
+                  // vai embaixo, como o sublinhado da aba.
                   ativo &&
-                    'bg-superficie font-bold text-marca-texto shadow-nivel-1 hover:bg-superficie hover:text-marca-texto',
+                    cn(
+                      'bg-superficie font-semibold text-texto shadow-nivel-1 hover:bg-superficie hover:text-texto',
+                      'before:absolute before:rounded-full before:bg-marca-viva',
+                      'before:inset-x-s3 before:bottom-0 before:h-[2px]',
+                      'min-[900px]:before:inset-x-auto min-[900px]:before:bottom-s2 min-[900px]:before:left-0 min-[900px]:before:top-s2 min-[900px]:before:h-auto min-[900px]:before:w-[3px]',
+                    ),
                 )}
               >
                 <span className="min-w-0 truncate">{rotulo}</span>

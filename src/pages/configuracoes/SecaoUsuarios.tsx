@@ -207,7 +207,9 @@ export function SecaoUsuarios() {
         <>
         {/* NO CELULAR, UM CARTÃO POR PESSOA (auditoria visual, K1): a tabela de
             cinco colunas rolava de lado dentro do cartão. */}
-        <div className="rounded-cartao border border-borda md:hidden">
+        {/* A LISTA NUM BLOCO DE CANTO DE CAMPO (v3): está dentro do cartão da
+            seção, e o raio de cartão aqui era cartão dentro de cartão. */}
+        <div className="rounded-campo border border-borda md:hidden">
           <ListaNoCelular rotulo="Usuários">
             {(data ?? []).map((p) => {
               const admin = p.role === 'admin' || p.email === ADMIN_EMAIL
@@ -231,7 +233,7 @@ export function SecaoUsuarios() {
             })}
           </ListaNoCelular>
         </div>
-        <div className="hidden rounded-cartao border border-borda md:block">
+        <div className="hidden rounded-campo border border-borda md:block">
           <Table>
             <THead>
               <tr>
@@ -256,7 +258,7 @@ export function SecaoUsuarios() {
                         <div className="flex items-center gap-s2">
                           <span
                             aria-hidden
-                            className="grid h-[32px] w-[32px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-sm font-bold text-marca-texto"
+                            className="grid h-[32px] w-[32px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-xs font-semibold tracking-[0.02em] text-marca-texto ring-1 ring-inset ring-ouro-borda"
                           >
                             {iniciais(p.nome)}
                           </span>

@@ -442,14 +442,16 @@ export function SecaoBullai({
           {verCatalogo && (
             <div
               id={idTabela}
-              className="relative mt-s2 max-h-96 overflow-auto rounded-cartao border border-borda scrollbar-thin"
+              className="relative mt-s2 max-h-96 overflow-auto rounded-campo border border-borda scrollbar-thin"
             >
               <table className="w-full border-collapse text-left text-corpo">
-                <thead className="sticky top-0 z-cabecalho bg-superficie-2 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+                {/* O CABEÇALHO DA TABELA DO KIT (v3): sobretítulo e a linha forte
+                    só embaixo. */}
+                <thead className="cj-sobretitulo sticky top-0 z-cabecalho bg-superficie-2 shadow-[inset_0_-1px_0_rgb(var(--borda-forte))]">
                   <tr>
-                    <th className="px-s3 py-s2 font-bold">Certidão</th>
-                    <th className="px-s3 py-s2 font-bold">Documento</th>
-                    <th className="px-s3 py-s2 font-bold">Como</th>
+                    <th className="px-s3 py-s2 font-semibold">Certidão</th>
+                    <th className="px-s3 py-s2 font-semibold">Documento</th>
+                    <th className="px-s3 py-s2 font-semibold">Como</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borda">
