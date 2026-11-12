@@ -100,14 +100,17 @@ function Passo({
   return (
     <section className="border-b border-borda py-s5 last:border-b-0">
       <div className="mb-s4 flex gap-s3">
+        {/* O NÚMERO DO PASSO NUM SELO CHAMPANHE (v3): contorno fino e o
+            algarismo na tinta champanhe que se lê — o marinho cheio de antes,
+            três vezes na tela, pesava mais que o botão de gerar. */}
         <span
           aria-hidden
-          className="grid h-[28px] w-[28px] flex-none place-items-center rounded-full bg-marca font-display text-sm font-bold text-marca-contraste"
+          className="grid h-[28px] w-[28px] flex-none place-items-center rounded-full bg-ouro-suave font-display text-sm font-semibold tabular-nums text-ouro-texto ring-1 ring-inset ring-ouro-borda"
         >
           {numero}
         </span>
         <div>
-          <h2 className="mt-s0.5 font-display text-lg font-bold text-texto">
+          <h2 className="mt-s0.5 font-display text-lg font-semibold tracking-[-0.01em] text-texto">
             <span className="sr-only">Passo {numero}: </span>
             {titulo}
           </h2>
@@ -748,8 +751,10 @@ function GerarPanel() {
             parece não ter feito nada. */}
         {/* FIXO NA ROLAGEM (auditoria visual, G1): o "Gerar contrato" e a lista
             do que falta ficam à vista enquanto se preenche o formulário. */}
-        <Card className="p-s5 lg:sticky lg:top-s6">
-          <h2 className="mb-s4 font-display text-lg font-bold text-texto">Resumo</h2>
+        {/* O PAINEL DE DESTAQUE DA TELA (`cj-destaque`, um por tela): é onde
+            o contrato se confere e de onde sai. */}
+        <Card className="cj-destaque p-s5 lg:sticky lg:top-s6">
+          <h2 className="mb-s4 font-display text-lg font-semibold tracking-[-0.01em] text-texto">Resumo</h2>
           <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-s4 gap-y-s2 text-corpo">
             <LinhaResumo rotulo="Investidor" valor={investidorNome} falta="a escolher" />
             <LinhaResumo rotulo="Categoria" valor={categoria} falta="" />
@@ -831,10 +836,11 @@ function ArquivosField({
     if (aceitos.length > 0) onAdicionar(aceitos)
   }
   return (
-    // SEM CARTÃO DENTRO DO CARTÃO (auditoria visual, G1 e §0.4): o bloco interno
-    // é a superfície 2 de canto de campo, sem borda — a borda era a segunda
-    // moldura dentro do cartão do formulário.
-    <div className="rounded-campo bg-superficie-2 p-s4">
+    // SEM CARTÃO DENTRO DO CARTÃO (auditoria visual, G1 e §0.4; v3): o bloco
+    // não tem moldura nenhuma — o título e o gênero numa linha, e logo abaixo a
+    // caixa de soltar, que já é a área do bloco. A placa cinza de antes, com a
+    // caixa tracejada dentro, era moldura dentro de moldura dentro do cartão.
+    <div className="min-w-0">
       <div className="mb-s3 flex flex-wrap items-center justify-between gap-x-s4 gap-y-s1">
         <p className="font-semibold text-texto">{titulo}</p>
         <div
@@ -885,10 +891,12 @@ function ArquivosField({
         // como na caixa do .zip das Skills: passar do ícone para o texto contava
         // como sair da caixa, e o realce de "pode soltar" piscava.
         className={`flex w-full flex-col items-center justify-center gap-s1 rounded-campo border-[1.5px] border-dashed p-s4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 [&>*]:pointer-events-none ${
-          arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie'
+          arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie-2'
         }`}
       >
-        <Upload className="h-[20px] w-[20px] text-texto-3" aria-hidden />
+        <span className="mb-s1 grid h-[36px] w-[36px] place-items-center rounded-full bg-superficie text-texto-2 shadow-nivel-1 ring-1 ring-inset ring-borda">
+          <Upload className="h-[16px] w-[16px]" aria-hidden />
+        </span>
         <span className="font-semibold text-marca-texto">
           {arquivos.length > 0 ? 'Adicionar mais arquivos' : 'Selecionar ou soltar arquivos'}
         </span>
@@ -910,7 +918,7 @@ function ArquivosField({
           {arquivos.map((f, i) => (
             <li
               key={i}
-              className="flex items-center gap-s2 rounded-controle bg-superficie py-s0.5 pl-s2 pr-s1 text-corpo text-texto"
+              className="flex items-center gap-s2 rounded-controle bg-superficie-2 py-s0.5 pl-s2 pr-s1 text-corpo text-texto"
             >
               <IconeArquivo className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
               <span className="min-w-0 flex-1 truncate" title={f.name}>
