@@ -20,6 +20,7 @@ import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
 import {
   aplicarSituacao,
   dataIncompleta,
+  faseDaTrilha,
   localizarPorDigitos,
   type PedidoDeSituacao,
 } from '@/lib/situacaoDaFase'
@@ -843,7 +844,12 @@ export function FaseProcessual({
     const encontrado = achado.processo
     if (encontrado.status === 'ativo' || encontrado.status === 'complementar') {
       setTrilha(encontrado.status)
-      const r = faseDe.get(encontrado.id)
+      // A fase só se ainda é da trilha dele (faseDaTrilha): com a de antes da
+      // troca de status, a lista abria filtrada por uma fase que não tem cartão.
+      const r = faseDaTrilha(
+        faseDe.get(encontrado.id),
+        encontrado.status === 'ativo' ? FASE_ATIVO_ORDEM : FASE_COMPLEMENTAR_ORDEM,
+      )
       setFiltro(r ? { tipo: 'fase', codigo: r.fase_codigo } : null)
     }
     onAbrirDetalhe(encontrado)
@@ -867,7 +873,9 @@ export function FaseProcessual({
     let semClassificacao = 0
     let conclusos = 0
     for (const p of daTrilha) {
-      const r = faseDe.get(p.id)
+      // FASE DE OUTRA TRILHA CONTA COMO SEM FASE (lib/situacaoDaFase.ts,
+      // 12/11/2026): o crédito que trocou de status sumia de todos os cartões.
+      const r = faseDaTrilha(faseDe.get(p.id), ordem)
       if (!r) {
         semClassificacao++
         continue
@@ -876,19 +884,21 @@ export function FaseProcessual({
       if (r.conclusao_pendente) conclusos++
     }
     return { porFase: c, semClassificacao, conclusos }
-  }, [daTrilha, faseDe])
+  }, [daTrilha, faseDe, ordem])
 
   const listaFiltrada = useMemo(() => {
     if (!filtro) return []
     return daTrilha
-      .map((p) => ({ processo: p, r: faseDe.get(p.id) }))
+      // A MESMA RÉGUA DOS CARTÕES (faseDaTrilha, 12/11/2026): a lista não pode
+      // ter quem o cartão não contou.
+      .map((p) => ({ processo: p, r: faseDaTrilha(faseDe.get(p.id), ordem) }))
       .filter(({ r }) => {
         if (!r) return false
         if (filtro.tipo === 'concluso') return r.conclusao_pendente
         return r.fase_codigo === filtro.codigo
       })
       .sort((a, b) => (b.r!.data_entrada_fase ?? '').localeCompare(a.r!.data_entrada_fase ?? ''))
-  }, [daTrilha, faseDe, filtro])
+  }, [daTrilha, faseDe, filtro, ordem])
 
   const gerar = useMutation({
     mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
@@ -1213,7 +1223,12 @@ export function FaseProcessual({
                   .map(({ p, mov, r, tratado }) => {
                     // A fase entrou na MESMA data desta movimentação = foi ela
                     // que empurrou; caso contrário, o crédito só permaneceu.
-                    const mudouDeFase = !!r && !!mov.data && r.data_entrada_fase === mov.data
+                    // O SELO SÓ COM FASE DA TRILHA (faseDaTrilha, 12/11/2026):
+                    // "Permaneceu em Sequestro" num complementar é a fase de antes
+                    // da troca de status. O `tratado` continua lendo a linha
+                    // inteira: ele não depende da trilha.
+                    const daFase = faseDaTrilha(r, ordem)
+                    const mudouDeFase = !!daFase && !!mov.data && daFase.data_entrada_fase === mov.data
                     return (
                       <li
                         key={p.id}
@@ -1272,14 +1287,14 @@ export function FaseProcessual({
                             Graça"), sem quebrar ele passava da tela do celular e a
                             página rolava de lado (revisão geral, 07/10/2026). */}
                         <div className="mt-s2">
-                          {r ? (
+                          {daFase ? (
                             mudouDeFase ? (
                               <Badge tone="blue" className={SELO_QUE_QUEBRA}>
-                                Avançou para {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}
+                                Avançou para {getLabel(FASE_PROCESSUAL, daFase.fase_codigo).label}
                               </Badge>
                             ) : (
                               <Badge tone="gray" className={SELO_QUE_QUEBRA}>
-                                Permaneceu em {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}
+                                Permaneceu em {getLabel(FASE_PROCESSUAL, daFase.fase_codigo).label}
                               </Badge>
                             )
                           ) : (
@@ -1353,7 +1368,10 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
   if (!ehFase) return null
 
   const ordem = processo.status === 'ativo' ? FASE_ATIVO_ORDEM : FASE_COMPLEMENTAR_ORDEM
-  const r = query.data
+  // SÓ A FASE DA TRILHA ATUAL (lib/situacaoDaFase.ts, 12/11/2026): a de antes
+  // da troca de status deixava o seletor com um valor fora das opções, e a
+  // Situação oferecida era a de uma fase que o crédito já não tem.
+  const r = faseDaTrilha(query.data, ordem)
   const opcoesSituacao = (situacoes.data ?? []).filter((s) => s.fase_codigo === r?.fase_codigo)
 
   return (
@@ -1372,8 +1390,11 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
           disabled={query.isLoading || override.isPending}
           onChange={(e) => e.target.value && override.mutate(e.target.value)}
         >
+          {/* FALHA NA LEITURA NÃO É "SEM FASE" (auditoria C, 12/11/2026): o
+              "Escolher fase…" afirmava que o crédito não tinha classificação e
+              convidava a sobrescrever uma fase que só não foi lida. */}
           <option value="" disabled>
-            {query.isLoading ? 'Carregando…' : 'Escolher fase…'}
+            {query.isLoading ? 'Carregando…' : query.isError ? 'Fase não lida' : 'Escolher fase…'}
           </option>
           {ordem.map((codigo) => (
             <option key={codigo} value={codigo}>
@@ -1382,6 +1403,14 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
           ))}
           </Select>
         </label>
+        {query.isError && (
+          <p role="alert" className="text-xs text-perigo">
+            Não consegui ler a fase deste crédito: {(query.error as Error)?.message ?? 'erro desconhecido'}.{' '}
+            <button type="button" className="underline" onClick={() => void query.refetch()}>
+              Tentar de novo
+            </button>
+          </p>
+        )}
 
         {r && (
           <div className="space-y-s1.5">

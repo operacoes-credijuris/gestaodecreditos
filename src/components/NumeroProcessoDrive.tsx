@@ -112,12 +112,20 @@ export function useAbrirPastaDoCredito(processo: Processo | null) {
     // aba sem aviso nenhum — o clique "não fazia nada". Mesma saída do caminho
     // lento: o link num botão do aviso.
     if (processo.drive_pasta_id) {
-      const { linkDaPasta } = await import('@/lib/peticaoPasta')
-      const link = linkDaPasta(processo.drive_pasta_id)
-      if (!abrirEmNovaAba(link)) {
-        toast.info('O navegador bloqueou a aba nova.', {
-          action: { label: 'Abrir a pasta', onClick: () => window.open(link, '_blank', 'noopener,noreferrer') },
-        })
+      // O `import()` TAMBÉM FALHA (auditoria C, 12/11/2026): depois de uma
+      // publicação nova, o pedaço do código com o nome antigo não existe mais no
+      // servidor. Fora do try, a rejeição ficava sem dono (`void abrir(e)`) e o
+      // clique simplesmente não fazia nada — o mesmo aviso do caminho lento.
+      try {
+        const { linkDaPasta } = await import('@/lib/peticaoPasta')
+        const link = linkDaPasta(processo.drive_pasta_id)
+        if (!abrirEmNovaAba(link)) {
+          toast.info('O navegador bloqueou a aba nova.', {
+            action: { label: 'Abrir a pasta', onClick: () => window.open(link, '_blank', 'noopener,noreferrer') },
+          })
+        }
+      } catch (err) {
+        toast.error((err as Error).message)
       }
       return
     }
