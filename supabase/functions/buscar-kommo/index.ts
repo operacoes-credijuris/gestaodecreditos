@@ -21,6 +21,7 @@ import { kommoFetch } from "../_shared/kommoFetch.ts";
 import { arquivosParaAnalise, lerJuntada, type ProcessoParaAnalise } from "../_shared/autosJuntos.ts";
 import { urlDoDriveDaConta } from "../_shared/driveDoKommo.ts";
 import { proximaPaginaDeArquivos } from "../_shared/paginasDeArquivos.ts";
+import { lerTodasAsLinhas } from "../_shared/leituraPaginada.ts";
 
 const CORS = corsHeaders;
 // O subdomínio da conta vem de integracao_kommo_secret, pelo contaKommo() — era
@@ -54,14 +55,20 @@ async function processosDoCard(svc: ReturnType<typeof serviceClient>, leadId: nu
     const juntado = !!j?.concluida && j.partes.length > 0;
     let soltos: { uuid: string; ordem: number }[] = [];
     if (juntado) {
-      const { data: docs } = await svc
-        .from("escavador_documento")
-        .select("kommo_file_uuid, ordem")
-        .eq("numero_cnj", p.numero_cnj)
-        .not("kommo_file_uuid", "is", null)
-        .range(0, 4999);
-      soltos = ((docs ?? []) as Array<{ kommo_file_uuid: string; ordem: number | null }>)
-        .map((d) => ({ uuid: String(d.kommo_file_uuid), ordem: Number(d.ordem) || 0 }));
+      // PAGINADA (12/11/2026): O `.range(0, 4999)` não passa do teto de 1000
+      // linhas do PostgREST, que corta calado — num processo com mais de mil
+      // documentos soltos, os de fora do corte não eram reconhecidos como já
+      // juntados nas partes e voltavam para a análise, gastando o orçamento.
+      const lidos = await lerTodasAsLinhas<{ kommo_file_uuid: string; ordem: number | null }>((de, ate) =>
+        svc
+          .from("escavador_documento")
+          .select("kommo_file_uuid, ordem")
+          .eq("numero_cnj", p.numero_cnj)
+          .not("kommo_file_uuid", "is", null)
+          .order("kommo_file_uuid")
+          .range(de, ate)
+      );
+      soltos = lidos.linhas.map((d) => ({ uuid: String(d.kommo_file_uuid), ordem: Number(d.ordem) || 0 }));
     }
     fora.push({
       cnj: p.numero_cnj,
@@ -94,6 +101,10 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const leadId = String((body as any).lead_id ?? (body as any).kommo_lead_id ?? "").trim();
     if (!leadId) return json({ erro: "lead_id é obrigatório." }, 400);
+    // SÓ NÚMERO (12/11/2026): O VALOR ia cru para a URL da Kommo, com o token
+    // da conta — "1/../../account" consultava outro endpoint, e o erro devolvia
+    // parte da resposta.
+    if (!/^\d{1,15}$/.test(leadId)) return json({ erro: "lead_id inválido." }, 400);
 
     const conta = await contaKommo();
     if (!conta) return json({ erro: "Token ou subdomínio da Kommo não configurado (integracao_kommo_secret)." }, 500);

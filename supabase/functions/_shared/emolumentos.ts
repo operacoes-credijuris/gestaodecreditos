@@ -493,10 +493,15 @@ async function conversar(
 /**
  * Uma linha 'levantando' parada mais que isto é worker morto.
  *
- * Pouco acima do teto de tempo de parede da função (400 s ≈ 6,7 min): assim a
- * morte é notada logo depois de acontecer, e não seis minutos depois.
+ * Pouco acima do teto de tempo de parede da função: assim a morte é notada logo
+ * depois de acontecer.
+ *
+ * 3 MINUTOS, E NÃO 7 (12/11/2026): O 7 vinha de um teto de 400 s que não é o
+ * desta plataforma — a invocação morre em ~150 s. Cada morte só era notada
+ * quatro minutos e meio depois, e com MAX_MORTES = 3 a tela mostrava
+ * "levantando" por mais de 20 min antes do "falhou" honesto.
  */
-const TRAVA_MINUTOS = 7
+const TRAVA_MINUTOS = 3
 /**
  * Quanto esperar depois de uma falha antes de pesquisar de novo, pelo número de
  * falhas SEGUIDAS daquele estado: 30 min, 2 h, 12 h, e daí um dia.

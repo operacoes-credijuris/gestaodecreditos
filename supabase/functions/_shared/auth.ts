@@ -105,10 +105,18 @@ export async function getCallerAtivo(req: Request, svc: SupabaseClient) {
   const user = await getCaller(req)
   if (!user) return null
   if (user.email === ADMIN_EMAIL) return user
-  const { data } = await svc
-    .from('profiles')
-    .select('ativo')
-    .eq('id', user.id)
-    .maybeSingle()
-  return data?.ativo === false ? null : user
+  // LEITURA QUE FALHOU NÃO É "SEM LINHA" (12/11/2026). O `error` era ignorado:
+  // num tropeço do PostgREST o `data` vinha nulo e o desligado passava por toda
+  // função guardada aqui — o isAdmin, ao lado, já falhava fechado. Uma segunda
+  // tentativa (o tropeço costuma ser passageiro) e, falhando de novo, nega.
+  for (let tentativa = 0; ; tentativa++) {
+    const { data, error } = await svc
+      .from('profiles')
+      .select('ativo')
+      .eq('id', user.id)
+      .maybeSingle()
+    if (!error) return data?.ativo === false ? null : user
+    if (tentativa >= 1) return null
+    await new Promise((r) => setTimeout(r, 300))
+  }
 }

@@ -50,6 +50,8 @@ type Servico = ReturnType<typeof serviceClient>
 const ORCAMENTO_DA_ATUALIZACAO_MS = 95_000
 // Um PDF de certidão é pequeno: um minuto parado é conexão morta.
 const TEMPO_DO_DOWNLOAD_MS = 60_000
+/** Teto do POST que cria o pedido (12/11/2026): sem ele, uma conexão parada segurava a invocação até morrer. */
+const TEMPO_DO_PEDIDO_MS = 45_000
 
 interface JobDaBullai {
   jobId: string
@@ -238,8 +240,28 @@ async function pedir(svc: Servico, chave: string, leadId: number, body: any, cri
 
     let job: JobDaBullai
     try {
-      job = await pedirBullai<JobDaBullai>(chave, '/jobs', { method: 'POST', body: JSON.stringify(montado.corpo) })
+      job = await pedirBullai<JobDaBullai>(chave, '/jobs', {
+        method: 'POST',
+        body: JSON.stringify(montado.corpo),
+        signal: AbortSignal.timeout(TEMPO_DO_PEDIDO_MS),
+      })
     } catch (e) {
+      // SÓ A RECUSA CLARA DEVOLVE OS ITENS (12/11/2026). Toda falha era lida como
+      // "o pedido não saiu" e liberava a reserva: um 502/504 do caminho depois de
+      // a BullAI aceitar, uma conexão caída depois do envio, um 2xx com corpo
+      // que não é JSON — o pedido podia estar pago, e o próximo clique pagava de
+      // novo, sem registro do primeiro. Agora só um 4xx (recusa da BullAI) libera;
+      // o resto mantém a reserva, que vence sozinha, e manda conferir no painel.
+      const status = (e as ErroBullai).status
+      const recusaClara = typeof status === 'number' && status >= 400 && status < 500 && status !== 408
+      if (!recusaClara) {
+        recusados.push(
+          `${sujeito.nome}: o pedido à BullAI ficou sem resposta clara (${(e as Error).message}). ` +
+            'Ele PODE ter sido aceito e cobrado: confira no painel da BullAI antes de pedir de novo. ' +
+            `Os itens ficam reservados e voltam a FALHA em ${RESERVA_VENCE_MIN} min.`,
+        )
+        continue
+      }
       // O PEDIDO NÃO SAIU: os itens voltam ao que eram, e podem ser pedidos de novo.
       const falhaDaVolta = await liberarReserva(svc, leadId, reserva, antes, [...reservados])
       recusados.push(
@@ -481,9 +503,14 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
         const bytes = new Uint8Array(await res.arrayBuffer())
         const rodada = (job.portalRuns ?? []).find((r) => r.portalKey === art.portalKey)
         const { token, id } = await pasta()
-        const nome = limparNome(`${rodada?.portalLabel ?? art.portalKey} - ${sujeito?.nome ?? p.documento}`) + '.pdf'
-        const up = await driveUploadBytes(token, nome, id, bytes, 'application/pdf', true)
+        // O SEGUNDO ARQUIVO DO MESMO PORTAL GANHA NÚMERO (12/11/2026): o nome era
+        // só portal + pessoa e o envio sobrescreve o homônimo — o portal que
+        // devolve dois PDFs deixava um só no Drive (o outro, como revisão), e as
+        // duas entradas apontavam para o mesmo arquivo.
         const lista = arquivosPorPortal.get(art.portalKey) ?? []
+        const ordem = lista.length > 0 ? ` (${lista.length + 1})` : ''
+        const nome = limparNome(`${rodada?.portalLabel ?? art.portalKey} - ${sujeito?.nome ?? p.documento}${ordem}`) + '.pdf'
+        const up = await driveUploadBytes(token, nome, id, bytes, 'application/pdf', true)
         lista.push({
           artifactId: art.artifactId,
           drive_file_id: up.id,

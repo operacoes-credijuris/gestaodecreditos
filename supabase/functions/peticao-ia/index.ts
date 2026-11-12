@@ -27,6 +27,10 @@ import { chaveAnthropic } from '../_shared/segredos.ts'
 // mesmo código rodar aqui e num teste fora do Deno — foi assim que se verificou
 // que ela reprova peça torta e aprova peça conforme.
 import { fechoDe, problemasDaPeca } from '../_shared/peticaoForma.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
+
+/** Até quando ainda cabe a reescrita da peça (outra redação inteira) na invocação. */
+const TEMPO_PARA_REESCREVER_MS = 60_000
 
 const MODELO = 'claude-sonnet-5'
 
@@ -519,6 +523,8 @@ async function colherInsumos(
 // ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  // O RELÓGIO DA INVOCAÇÃO (~150 s): ver o `chamar` da redação.
+  const inicio = Date.now()
 
   try {
     const svc = serviceClient()
@@ -782,7 +788,11 @@ Deno.serve(async (req: Request) => {
           // (problemasDaPeca) e da reescrita, não do raciocínio estendido.
           tool_choice: { type: 'tool', name: FERRAMENTA_REDIGIR.name },
           messages: [{ role: 'user', content: conteudo }],
-        })
+          // COM TETO CONTADO DO COMEÇO DA INVOCAÇÃO (12/11/2026): DUAS chamadas
+          // de até 16k tokens em série, com o SDK esperando até 10 min e
+          // repetindo duas vezes, passavam dos ~150 s — a invocação morria sem
+          // resposta, e a primeira peça, já paga, se perdia.
+        }, { signal: sinalAteOTeto(inicio, { folgaMs: 10_000 }), maxRetries: 1 })
         for (const bloco of r.content) {
           if (bloco.type === 'tool_use') {
             const i = bloco.input as Record<string, unknown>
@@ -802,12 +812,20 @@ Deno.serve(async (req: Request) => {
         // UMA reescrita. A conferência não pode virar laço caro: se a segunda
         // tentativa também sair torta, a peça volta com o aviso e o usuário
         // decide — o texto é editável antes de salvar.
-        if (problemas.length > 0) {
-          const nova = await chamar({ anterior: peca.texto, problemas })
-          const problemasNova = problemasDaPeca(nova.texto)
-          if (problemasNova.length <= problemas.length) {
-            peca = nova
-            problemas = problemasNova
+        //
+        // A REESCRITA SÓ COM RELÓGIO, E A FALHA DELA NÃO DERRUBA A PRIMEIRA PEÇA
+        // (12/11/2026): sem tempo para outra redação inteira, ou com a reescrita
+        // falhando (529, rede, tempo), a primeira peça volta com os avisos.
+        if (problemas.length > 0 && Date.now() - inicio < TEMPO_PARA_REESCREVER_MS) {
+          try {
+            const nova = await chamar({ anterior: peca.texto, problemas })
+            const problemasNova = problemasDaPeca(nova.texto)
+            if (problemasNova.length <= problemas.length) {
+              peca = nova
+              problemas = problemasNova
+            }
+          } catch (e) {
+            console.warn('peticao-ia: reescrita descartada:', mensagemDeErro(e))
           }
         }
         return jsonResponse({
@@ -819,6 +837,9 @@ Deno.serve(async (req: Request) => {
           avisos: problemas,
         })
       } catch (e) {
+        if (estourouOTempo(e)) {
+          return jsonResponse({ error: 'A redação não terminou dentro do tempo do servidor (cerca de 150 s). Tente de novo, ou peça uma peça mais curta.' }, 504)
+        }
         return jsonResponse({ error: mensagemDeErro(e) }, 502)
       }
     }

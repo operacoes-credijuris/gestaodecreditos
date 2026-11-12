@@ -77,11 +77,16 @@ export async function pastaDaAnaliseDoCard(
   leadId: number,
   nomes?: { originador?: string | null; cedente?: string | null },
 ): Promise<PastaDaAnalise> {
-  const { data: card } = await svc
+  const { data: card, error: erroCard } = await svc
     .from('kommo_leads')
     .select('nome, processo_cnj, notas, nota_texto, pipeline_id, drive_pasta_id')
     .eq('kommo_lead_id', leadId)
     .maybeSingle()
+  // LEITURA QUE FALHOU NÃO É CARD VAZIO (12/11/2026): SEM o `drive_pasta_id` o
+  // caminho era recalculado do nada — `pipeline_id` nulo mandava o card de RPV
+  // para "Precatórios", e sem nomes a pasta virava "Sem cedente". O arquivo subia
+  // lá e a resposta dizia ok. A pasta-do-cedente já recusava assim.
+  if (erroCard) throw new Error(`Não consegui ler o card ${leadId} para achar a pasta: ${erroCard.message}`)
   const linha = (card ?? {}) as Record<string, unknown>
   const token = await tokenDoGoogle()
   const doCard = pastaGravada(linha.drive_pasta_id as string | null)

@@ -15,6 +15,7 @@
 // exatamente o mapa que vivia no código. Nada quebra; só não há pesquisa.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from './respostaDoClaude.ts'
+import { estourouOTempo, sinalAteOTeto } from './relogioDaInvocacao.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 export type EsferaTeto = 'federal' | 'estadual' | 'municipal'
@@ -446,6 +447,12 @@ export async function executarPesquisaTeto(
   }
   if (!apiKey) return await falhar('a chave da Anthropic não está configurada', 'sem chave')
 
+  // O RELÓGIO DA PESQUISA (12/11/2026): ATÉ três chamadas ao Opus com busca web,
+  // em série e sem teto, passavam dos ~150 s. A invocação morria antes de
+  // `falhar()`, a linha ficava 'pesquisando' por 5 min e cada análise daquele
+  // ente saía com "TETO DA RPV NÃO CONFERIDO". Agora a chamada é interrompida
+  // antes, e a falha é gravada com o motivo.
+  const t0 = Date.now()
   try {
     const anthropic = new Anthropic({ apiKey })
     const mensagens: Anthropic.MessageParam[] = [{ role: 'user', content: pergunta(chave, esf, ano, mun) }]
@@ -465,7 +472,7 @@ export async function executarPesquisaTeto(
             { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES },
           ] as Anthropic.Tool[],
           messages: mensagens,
-        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>, { signal: sinalAteOTeto(t0, { folgaMs: 15_000 }), maxRetries: 1 })
         .finalMessage()
 
     let resposta = await pedir()
@@ -476,6 +483,8 @@ export async function executarPesquisaTeto(
     // nova — como em _shared/emolumentos.ts —, com teto de retomadas, porque
     // cada uma reenvia todo o contexto acumulado.
     for (let i = 0; i < MAX_RETOMADAS_TETO && resposta.stop_reason === 'pause_turn'; i++) {
+      // Sem relógio para outra volta inteira, não retoma: a pausa vira falha dita.
+      if (Date.now() - t0 >= RETOMA_ATE_MS) break
       mensagens.push({ role: 'assistant', content: resposta.content })
       resposta = await pedir()
     }
@@ -526,6 +535,9 @@ export async function executarPesquisaTeto(
 
     return { ok: true }
   } catch (e) {
+    if (estourouOTempo(e)) {
+      return await falhar('a pesquisa passou do tempo da função (cerca de 150 s)', 'tempo esgotado')
+    }
     const msg = (e as Error)?.message ?? String(e)
     return await falhar(msg.slice(0, 300), msg)
   }
@@ -533,6 +545,9 @@ export async function executarPesquisaTeto(
 
 /** Quantas vezes a pesquisa do teto retoma um `pause_turn` antes de desistir. */
 const MAX_RETOMADAS_TETO = 2
+
+/** Até quando (desde o começo da pesquisa) ainda cabe retomar um `pause_turn`. */
+const RETOMA_ATE_MS = 80_000
 
 /**
  * O MOTIVO DA FALHA pelo fim da resposta da pesquisa do teto, ou null quando

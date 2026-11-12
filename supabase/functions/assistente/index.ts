@@ -739,6 +739,10 @@ async function carregarPainel(
   ])
   if (creditos.erro) return { erro: creditos.erro }
   if (creditos.cortada) return { erro: LEITURA_CORTADA }
+  // A LEITURA DOS ÍNDICES QUE FALHOU NÃO É "SEM ÍNDICE" (12/11/2026): O ERRO era
+  // ignorado, e toda projeção do painel saía nula — o "a receber" e a previsão
+  // vinham menores, apresentados como exatos.
+  if (parametros.error) return { erro: `Não consegui ler os parâmetros de atualização: ${parametros.error.message}` }
   // Em Brasília, como desde()/daqui() abaixo: das 21h em diante o UTC já é amanhã.
   const hoje = hojeEmBrasilia()
   return {
@@ -2447,8 +2451,13 @@ async function executar(
       }
       const digitos = busca.replace(/\D/g, '')
       let q = svc.from('processos').select('id, numero_cnj, cedente, cessionario').limit(3)
+      // TODOS OS DÍGITOS, COMO NA FICHA DO CRÉDITO (12/11/2026): SÓ OS 7
+      // primeiros entravam no filtro. Um número fora da carteira casava com outro
+      // crédito de mesmo sequencial (0001234-56.2020… com 0001234-99.2019…) e a
+      // petição era proposta para ele; com os dois na carteira, o número inteiro
+      // nunca desempatava.
       q = digitos.length >= 6
-        ? q.ilike('numero_cnj', `%${digitos.slice(0, 7)}%`)
+        ? q.filter('numero_cnj', 'imatch', regexDosDigitos(digitos, { inteiro: digitos.length >= 20 }))
         : q.ilike('cedente', `%${busca}%`)
       const { data, error } = await q
       if (error) return JSON.stringify({ erro: error.message })

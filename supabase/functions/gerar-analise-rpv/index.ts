@@ -98,9 +98,11 @@ import {
 // análise desde 03/10/2026: as certidões calculam o mesmo caminho na falta da
 // pasta gravada no card, e precisam escrever o nome igual.
 import { tituloNome } from "../_shared/pastaDaAnalise.ts";
+import { lerTodasAsLinhas, type PaginaDoBanco } from "../_shared/leituraPaginada.ts";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import {
   chamadaDaFerramenta,
+  motivoDaRespostaIncompleta,
   pedidoParaChamarAFerramenta,
   textoDaResposta,
   type BlocoDaResposta,
@@ -1886,6 +1888,14 @@ async function extrairComFerramenta(
     if (data?.stop_reason === 'refusal') {
       throw new Error(`A IA recusou a leitura (${o.rotulo}) — filtro de segurança da Anthropic. Revise os anexos do card e rode de novo.`);
     }
+    // OS OUTROS FINS INCOMPLETOS TAMBÉM (12/11/2026): A JANELA DE CONTEXTO
+    // estourada (`model_context_window_exceeded`) corta a resposta como o
+    // max_tokens, e o `input` parcial da ferramenta passava como resultado
+    // inteiro. Ver motivoDaRespostaIncompleta.
+    {
+      const incompleta = motivoDaRespostaIncompleta(data?.stop_reason);
+      if (incompleta) throw new Error(`${incompleta} (${o.rotulo}) Rode de novo; persistindo, reduza os anexos do card.`);
+    }
 
     const content = (data?.content ?? []) as BlocoDaResposta[];
     const r = resultadoDe(content);
@@ -2126,6 +2136,7 @@ async function refinarDados(
   instrucao: string,
   historico: Array<{ papel: 'usuario' | 'ia'; texto: string }>,
   notasKommo: string,
+  inicio: number,
 ): Promise<{ dados: any; resposta: string }> {
   const anthropic = new Anthropic({ apiKey });
   const mensagens: Anthropic.MessageParam[] = [];
@@ -2154,7 +2165,13 @@ async function refinarDados(
   // 8000, e não os 4000 de antes, porque no Opus 5.5 o raciocínio (sempre
   // ligado) conta dentro do teto — e o modelo não escreve mais por ter teto
   // maior: o teto só corta.
-  const resp = await anthropic.messages
+  // O TETO DA REVISÃO CONTA DO COMEÇO DA INVOCAÇÃO (12/11/2026). As leituras
+  // já tinham `sinalAteOTeto`; esta não — o SDK esperava até 10 min e repetia
+  // duas vezes, e a revisão lenta morria calada em ~150 s, com a tela mostrando
+  // um 504 sem motivo. Agora para antes e diz por quê.
+  let resp: Anthropic.Message;
+  try {
+  resp = await anthropic.messages
     .stream({
       // A MESMA constante das extrações, e não um literal solto. Foi assim que
       // o motor de RPV ficou uma geração atrás sem ninguém ver: a revisão subiu
@@ -2166,8 +2183,17 @@ async function refinarDados(
       tools: [FERRAMENTA_REVISAO],
       output_config: { effort: ESFORCO },
       messages: mensagens,
-    } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+    } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>, { signal: sinalAteOTeto(inicio, { folgaMs: 30_000 }), maxRetries: 1 })
     .finalMessage();
+  } catch (e) {
+    if (estourouOTempo(e)) {
+      throw new Error(
+        'A revisão não terminou dentro do tempo da função (cerca de 150 s) e foi interrompida; nada foi alterado. ' +
+        'Peça de novo, de preferência em partes menores.',
+      );
+    }
+    throw e;
+  }
   // CORTADA É CORTADA, aqui também. Com o teto de saída batido, um patch grande
   // (reescrever o m2 inteiro) volta truncado e o erro chegava como "A IA não
   // devolveu a análise revisada" — que manda a pessoa reformular a pergunta
@@ -2177,6 +2203,11 @@ async function refinarDados(
       'A revisão foi CORTADA por tamanho: o pedido pediu mais alterações do que cabe numa resposta. ' +
       'Peça em partes menores — uma ou duas linhas do questionário por vez.',
     );
+  }
+  // RECUSA E OS OUTROS FINS INCOMPLETOS NÃO SÃO REVISÃO (12/11/2026).
+  {
+    const incompleta = motivoDaRespostaIncompleta(resp.stop_reason);
+    if (incompleta) throw new Error(`A revisão não foi aplicada: ${incompleta}`);
   }
   const uso = resp.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA_REVISAO.name);
   if (!uso || uso.type !== 'tool_use') {
@@ -2455,22 +2486,30 @@ async function lerDiligencia(
             'liberado_em, reprovado_em, reprovado_motivo',
         )
         .eq('kommo_lead_id', leadId),
-      sb
-        .from('dd_processo')
-        .select(
-          'historico_id, numero_processo, tribunal, objeto, polo, ha_cobranca, valor_cobrado, estagio, risco, risco_motivo',
-        )
-        .eq('kommo_lead_id', leadId),
+      // PAGINADA (12/11/2026): A dd-processos grava até 5 páginas de 100
+      // processos por alvo, e um card tem vários alvos — passa de 1000 linhas,
+      // que o PostgREST corta calado e sem ordem. O processo de cobrança fora do
+      // corte sumia das linhas 10 e 11 do questionário ("não tem dívida").
+      lerTodasAsLinhas<ProcessoDD>((de, ate) =>
+        sb
+          .from('dd_processo')
+          .select(
+            'historico_id, numero_processo, tribunal, objeto, polo, ha_cobranca, valor_cobrado, estagio, risco, risco_motivo',
+          )
+          .eq('kommo_lead_id', leadId)
+          .order('id')
+          .range(de, ate) as unknown as PromiseLike<PaginaDoBanco<ProcessoDD>>
+      ),
     ]);
     if (e1) throw new Error(e1.message);
     // `as unknown` no meio: com a lista de colunas quebrada em duas linhas o
     // PostgREST perde a inferência do tipo da linha e devolve GenericStringError[].
     const lista = (apuracoes ?? []) as unknown as ApuracaoDD[];
     if (lista.length === 0) return { hs: [], falha: null };
-    const { data: processos, error: e2 } = doisProcessos;
-    if (e2) throw new Error(e2.message);
+    if (doisProcessos.erro) throw new Error(doisProcessos.erro);
+    if (doisProcessos.cortada) throw new Error('a leitura dos processos da diligência passou do teto de páginas');
 
-    return { hs: historicoDoCredito(lista, (processos ?? []) as ProcessoDD[]), falha: null };
+    return { hs: historicoDoCredito(lista, doisProcessos.linhas), falha: null };
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e);
     return { hs: [], falha: semTabela(msg) ? null : msg };
@@ -2792,7 +2831,15 @@ Deno.serve(async (req) => {
         limparUploads = async () => {
           if (!arquivos.length) return;
           try {
-            await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map((a) => `${prefix}/${a.name}`));
+            // O STORAGE NÃO LANÇA, DEVOLVE `error` (12/11/2026): A remoção que
+            // falhava não deixava rastro nenhum — e `arquivos = []` logo abaixo
+            // impedia outra tentativa. Erro devolvido vira o mesmo aviso, e a
+            // lista fica para a próxima chamada da limpeza.
+            const { error: erroRemove } = await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map((a) => `${prefix}/${a.name}`));
+            if (erroRemove) {
+              console.warn('[gerar-analise-rpv] limparUploads falhou', prefix, arquivos.length, erroRemove.message);
+              return;
+            }
           } catch (e) {
             // NÃO DERRUBA NADA, mas deixa rastro: o bucket não tem lifecycle, e
             // uma remoção que falha em silêncio é lixo que ninguém encontra mais
@@ -2986,7 +3033,7 @@ Deno.serve(async (req) => {
       if (acao === 'refinar') {
         const instrucao = String(body.instrucao ?? '').trim();
         if (!instrucao) return errorResponse('Faltou o pedido de alteração (instrucao).');
-        const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : [], notasKommo);
+        const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : [], notasKommo, _t0);
         dados = revisao.dados;
         respostaRevisao = revisao.resposta;
         // A AUDITORIA ACOMPANHA O BRUTO CORRIGIDO. O cenário conservador foi

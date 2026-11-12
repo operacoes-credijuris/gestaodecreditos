@@ -33,6 +33,9 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import { hojeEmBrasilia } from '../_shared/dataDeBrasilia.ts'
 import { lerPorIds, lerTodasAsLinhas } from '../_shared/leituraPaginada.ts'
+import { motivoDaRespostaIncompleta } from '../_shared/respostaDoClaude.ts'
+import { tempoAteOTeto } from '../_shared/relogioDaInvocacao.ts'
+import { modeloDaFase, venceuOPrazo } from './regras.ts'
 
 // Haiku dá conta: a saída é um código fixo de uma lista curta, não prosa livre.
 const MODELO = 'claude-haiku-4-5-20251001'
@@ -46,6 +49,9 @@ const CONCORRENCIA = 5
  * os que não couberem ficam para a rodada seguinte (cron diário ou "Atualizar").
  */
 const ORCAMENTO_MS = 110_000
+
+/** A resposta de marcar_tratado/definir_situacao quando o crédito não tem linha de fase. */
+const SEM_LINHA_DE_FASE = 'Este crédito ainda não tem fase classificada; nada foi gravado.'
 
 
 // Teto de andamentos enviados ao modelo. A primeira classificação de um
@@ -288,8 +294,13 @@ async function classificar(
   modelo: string,
   trilha: 'ativo' | 'complementar',
   dossie: string,
+  inicio: number,
 ): Promise<ResultadoModelo> {
   const ferramenta = ferramentaPara(trilha)
+  // UM TETO POR CHAMADA, CONTADO DO COMEÇO DA INVOCAÇÃO (12/11/2026): O SDK
+  // espera até 10 min e repete duas vezes. Uma chamada que começava aos 109 s e
+  // empacava levava a invocação a morrer calada em ~150 s, sem resposta para a
+  // tela nem o erro na linha do crédito.
   const r = await anthropic.messages.create({
     model: modelo,
     max_tokens: 800,
@@ -303,7 +314,14 @@ async function classificar(
     tools: [ferramenta],
     tool_choice: { type: 'tool', name: ferramenta.name },
     messages: [{ role: 'user', content: `Classifique o crédito abaixo.\n\n${dossie}` }],
-  })
+  }, { timeout: tempoAteOTeto(inicio, Date.now(), { folgaMs: 20_000 }), maxRetries: 1 })
+  // RESPOSTA CORTADA OU RECUSADA NÃO É CLASSIFICAÇÃO (12/11/2026): COM A
+  // ferramenta forçada, o teto de 800 tokens corta o `input` no meio — sem
+  // `conclusao_pendente`, sem a data da intimação, ou com `fase_codigo` vazio — e
+  // isso era gravado com o `fonte_hash` atual, então as varreduras seguintes
+  // pulavam o crédito até surgir andamento novo.
+  const incompleta = motivoDaRespostaIncompleta(r.stop_reason)
+  if (incompleta) throw new Error(incompleta)
   for (const bloco of r.content) {
     if (bloco.type === 'tool_use') {
       const i = bloco.input as Record<string, unknown>
@@ -351,9 +369,13 @@ function aplicarRoteamentoAtivo(
   }
   const dataHomologacao = resultado.movimentacao_ancora_data
   if (!dataHomologacao) return { fase_codigo: resultado.fase_codigo, data_limite_pagamento: dataLimite }
-  const vencidoAntesDaHomologacao = dataLimite < dataHomologacao
+  // O PRAZO QUE VENCEU DEPOIS DA HOMOLOGAÇÃO TAMBÉM É ATV-03 (12/11/2026). Só o
+  // "vencido antes da homologação" contava: o crédito que o calendário já tinha
+  // passado a ATV-03 voltava a ATV-02 a cada andamento novo (o pedido de
+  // sequestro, justamente), até a varredura do dia seguinte o devolver — e cada
+  // ida e volta gravava duas mudanças falsas no histórico. Ver venceuOPrazo.
   return {
-    fase_codigo: vencidoAntesDaHomologacao ? 'ATV-03' : 'ATV-02',
+    fase_codigo: venceuOPrazo(dataLimite, dataHomologacao, hojeEmBrasilia()) ? 'ATV-03' : 'ATV-02',
     data_limite_pagamento: dataLimite,
   }
 }
@@ -428,7 +450,7 @@ Deno.serve(async (req: Request) => {
       const caller = await getCallerAtivo(req, svc)
       if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
       if (!body.processo_id) return jsonResponse({ error: 'Informe processo_id.' }, 400)
-      const { error } = await svc
+      const { data: marcadas, error } = await svc
         .from('processos_fase')
         .update({
           tratado: body.tratado === true,
@@ -436,9 +458,13 @@ Deno.serve(async (req: Request) => {
           tratado_movimentacao_data: body.tratado === true ? (body.movimentacao_data ?? null) : null,
         })
         .eq('processo_id', body.processo_id)
+        .select('processo_id')
       // O SUPABASE-JS NÃO LANÇA, devolve `error`: sem conferir, a falha voltava como
       // `ok` e a tela dava por gravado o que não foi. Vale para as três ações.
       if (error) return jsonResponse({ error: error.message }, 500)
+      // NENHUMA LINHA ATUALIZADA NÃO É "GRAVADO" (12/11/2026): CRÉDITO ainda sem
+      // classificação não tem linha em processos_fase, e o update vazio voltava ok.
+      if (!marcadas?.length) return jsonResponse({ error: SEM_LINHA_DE_FASE }, 404)
       return jsonResponse({ ok: true })
     }
 
@@ -447,14 +473,16 @@ Deno.serve(async (req: Request) => {
       const caller = await getCallerAtivo(req, svc)
       if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
       if (!body.processo_id) return jsonResponse({ error: 'Informe processo_id.' }, 400)
-      const { error } = await svc
+      const { data: marcadas, error } = await svc
         .from('processos_fase')
         .update({
           situacao_id: body.situacao_id ?? null,
           situacao_data: body.situacao_data ?? null,
         })
         .eq('processo_id', body.processo_id)
+        .select('processo_id')
       if (error) return jsonResponse({ error: error.message }, 500)
+      if (!marcadas?.length) return jsonResponse({ error: SEM_LINHA_DE_FASE }, 404)
       return jsonResponse({ ok: true })
     }
 
@@ -515,7 +543,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const anthropic = new Anthropic({ apiKey })
-    const modelo = body.modelo && body.modelo.trim() ? body.modelo.trim() : MODELO
+    // SÓ MODELO DA LISTA (12/11/2026): O ID vinha de qualquer usuário direto para
+    // a API — um erro de digitação, ou um Opus 5.5 (que recusa ferramenta
+    // forçada), gravava erro em TODOS os créditos da carteira. Ver modeloDaFase.
+    const modelo = modeloDaFase(body.modelo, MODELO)
 
     let lote: string[]
     let forcar = body.forcar === true
@@ -700,7 +731,7 @@ Deno.serve(async (req: Request) => {
       }
 
       try {
-        const resultado = await classificar(anthropic, modelo, trilha, montarDossie(p, movs, atual))
+        const resultado = await classificar(anthropic, modelo, trilha, montarDossie(p, movs, atual), inicio)
         const roteamento =
           trilha === 'ativo'
             ? aplicarRoteamentoAtivo(resultado, atual?.data_intimacao_lida_expedicao_rpv ?? null)
@@ -751,6 +782,11 @@ Deno.serve(async (req: Request) => {
           processo_id: p.id,
           fase_codigo: atual?.fase_codigo ?? (trilha === 'ativo' ? 'ATV-08' : 'CMP-10'),
           data_entrada_fase: atual?.data_entrada_fase ?? hojeEmBrasilia(),
+          // FONTE_HASH APAGADO NA FALHA (12/11/2026), COMO a carteira-resumo já
+          // faz: omitido, o upsert mantinha o hash da classificação anterior —
+          // igual ao atual quando não houve andamento novo (o "gerar novamente"
+          // que deu 529) —, a varredura diária pulava o crédito e o erro ficava.
+          fonte_hash: null,
           erro: String((e as Error).message ?? e).slice(0, 500),
           classificado_em: new Date().toISOString(),
         })

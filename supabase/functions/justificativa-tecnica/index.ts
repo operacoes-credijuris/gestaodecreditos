@@ -347,7 +347,15 @@ async function vigiar(req: Request, svc: SupabaseClient, body: Record<string, un
  * geração parou "pesquisando na internet".
  */
 async function vigiarTodas(svc: SupabaseClient): Promise<Response> {
-  const { data, error } = await svc.from(TABELA).select('kommo_lead_id, tentativa').eq('status', 'gerando').limit(50)
+  // AS MAIS RECENTES PRIMEIRO (12/11/2026): GERAÇÃO que morreu no planejamento ou
+  // na redação fica 'gerando' até alguém refazer, e o `limit(50)` sem ordem
+  // podia encher-se delas e deixar de fora todas as vivas.
+  const { data, error } = await svc
+    .from(TABELA)
+    .select('kommo_lead_id, tentativa')
+    .eq('status', 'gerando')
+    .order('atualizado_em', { ascending: false })
+    .limit(50)
   if (error) {
     if (ehTabelaAusente(error)) throw new TabelaAusente(error.message)
     return erro(`Não consegui ler as gerações em curso: ${error.message}`, 500)
@@ -949,11 +957,21 @@ async function gerar(req: Request, svc: SupabaseClient, body: Record<string, unk
     if (error) throw new Error(error.message)
     ganhou = (data?.length ?? 0) > 0
   } else {
+    // NÃO REFAZ POR CIMA DE UM ENVIO EM CURSO (12/11/2026). O `refazer` não olhava
+    // `enviando_desde`: com o POST ao Kommo no ar, a linha virava 'gerando' de
+    // outra tentativa, a nota entrava no card e a marca de "enviada" (que filtra
+    // pela tentativa) não achava linha nenhuma — a plataforma nunca registrava o
+    // envio. A mesma janela de TRAVA_ENVIO_MIN do envio.
+    const envioVence = new Date(Date.now() - TRAVA_ENVIO_MIN * 60_000).toISOString()
     const { data, error } = await svc.from(TABELA)
       .update(inicio).eq('kommo_lead_id', leadId).eq('tentativa', linha.tentativa ?? '').eq('status', linha.status)
+      .or(`enviando_desde.is.null,enviando_desde.lt."${envioVence}"`)
       .select('kommo_lead_id')
     if (error) throw new Error(error.message)
     ganhou = (data?.length ?? 0) > 0
+    if (!ganhou && linha.enviando_desde && Date.parse(linha.enviando_desde) > Date.parse(envioVence)) {
+      return erro('Esta justificativa está sendo enviada ao Kommo agora. Espere o envio terminar antes de gerar de novo.', 409, 'envio-em-curso')
+    }
   }
   // Outra aba (ou o clique repetido) chegou antes: a geração dela é a que vale.
   if (!ganhou) return jsonResponse({ ok: true, estado: 'gerando', motivo: 'em-curso' })
@@ -1100,8 +1118,14 @@ async function enviar(req: Request, svc: SupabaseClient, body: Record<string, un
   // A NOTA JÁ ESTÁ NO CARD: marcar como enviada é o que impede o reenvio
   // duplicado. Uma segunda tentativa se a primeira falhar; falhando as duas, a
   // trava de envio fica posta e vence em TRAVA_ENVIO_MIN — e a resposta avisa.
-  let { error: erroMarca } = await svc.from(TABELA).update(marca).eq('kommo_lead_id', leadId).eq('tentativa', tentativa)
-  if (erroMarca) ({ error: erroMarca } = await svc.from(TABELA).update(marca).eq('kommo_lead_id', leadId).eq('tentativa', tentativa))
+  // ZERO LINHAS TAMBÉM É FALHA (12/11/2026): O SUPABASE-JS não acusa update que
+  // não achou a linha (a tentativa trocou no meio), e a resposta dizia ok.
+  const marcar = async () => {
+    const { data, error } = await svc.from(TABELA).update(marca).eq('kommo_lead_id', leadId).eq('tentativa', tentativa).select('kommo_lead_id')
+    return error ?? ((data?.length ?? 0) === 0 ? { message: 'a linha desta tentativa não foi encontrada' } : null)
+  }
+  let erroMarca = await marcar()
+  if (erroMarca) erroMarca = await marcar()
   return jsonResponse({
     ok: true,
     partes: partes.length,

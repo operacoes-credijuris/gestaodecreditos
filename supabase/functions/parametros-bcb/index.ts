@@ -55,7 +55,10 @@ function pontos(json: unknown): Ponto[] {
 
 async function bcb(serie: number, quantos: number): Promise<unknown> {
   const url = `${BASE}/bcdata.sgs.${serie}/dados/ultimos/${quantos}?formato=json`
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  // COM TETO (12/11/2026): SEM ELE, uma conexão parada com o Banco Central
+  // segurava a invocação até ela morrer em ~150 s, sem resposta para o cron nem
+  // para o botão.
+  const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20_000) })
   if (!res.ok) throw new Error(`série ${serie} → HTTP ${res.status}`)
   return await res.json()
 }

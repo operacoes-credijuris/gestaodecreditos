@@ -144,14 +144,20 @@ async function buscarProcessosPorCpf(juditKey: string, cpf: string, inicio: numb
   const requestId = (pj as any)?.request_id;
   if (!requestId) return { erro: "sem request_id", resposta: pj };
   let resp: any = null;
+  // SÓ A BUSCA CONCLUÍDA VIRA RELATÓRIO (12/11/2026). A espera saía no teto de
+  // tempo, ou com a primeira página parcial, e devolvia `ok` com o que tivesse
+  // vindo — lista vazia virava o PDF verde "Nenhum processo do credor apresentou
+  // risco", gravado POR CIMA do relatório anterior; lista parcial omitia
+  // processos sem aviso. Busca que não concluiu responde "aguarde".
+  let concluida = false;
   for (let i = 0; i < 20; i++) {
     if (Date.now() - inicio > BUSCA_CPF_MAX_MS) break;
     await new Promise((r) => setTimeout(r, 2000));
     resp = safeParse(await (await fetch(`${JUDIT_RESPONSES}?request_id=${requestId}&page_size=100`, { headers: { "api-key": juditKey }, signal: AbortSignal.timeout(PEDIDO_MAX_MS) })).text());
-    const st = (resp as any)?.request_status; const pd: any[] = (resp as any)?.page_data || [];
-    if (st === "completed") break;
-    if (pd.length > 0 && i >= 3) break;
+    const st = (resp as any)?.request_status;
+    if (st === "completed") { concluida = true; break; }
   }
+  if (!concluida) return { aguarde: true, request_id: requestId };
   const pd: any[] = (resp as any)?.page_data || [];
   const seen = new Set<string>(); const procs: any[] = [];
   for (const it of pd) {
@@ -244,6 +250,9 @@ Deno.serve(async (req) => {
     // 1) lista os processos do credor
     const lista = await buscarProcessosPorCpf(juditKey, cpf, inicio);
     if ((lista as any).erro) return json(lista, 502);
+    if ((lista as any).aguarde) {
+      return json({ aguarde: true, request_id: (lista as any).request_id, mensagem: "A Judit ainda está buscando os processos deste CPF. Nenhum relatório foi gerado; rode de novo em ~2 min." }, 202);
+    }
     const processos = (lista as any).processos.slice(0, max);
 
     // 2) qualifica cada processo pelo Manual — EM PARALELO (pra caber no tempo)

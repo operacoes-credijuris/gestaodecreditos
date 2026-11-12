@@ -25,6 +25,9 @@ const BALDE = 'autos-escavador'
 /** Uma hora de validade no link assinado: o suficiente para ler, pouco para vazar. */
 const VALIDADE_DO_LINK = 60 * 60
 
+/** Ver o bloco PEDIR: o pedido pago por esta função está desligado. */
+const PEDIDO_PELA_TELA_LIGADO = false
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -143,6 +146,20 @@ Deno.serve(async (req: Request) => {
 
     // ---------------------------------------------------------------- PEDIR
     if (acao !== 'pedir') return jsonResponse({ erro: `Ação desconhecida: ${acao}.` }, 400)
+
+    // O PEDIDO PAGO POR AQUI ESTÁ DESLIGADO (12/11/2026). Nenhuma tela chama esta
+    // ação desde que a escavador-autos-rotina passou a pedir os autos — e a
+    // rotina é quem tem a cota diária no banco, a posse do pedido, o reuso de 30
+    // dias e a regra do card que saiu da análise. Aqui não havia nada disso: dois
+    // cliques ao mesmo tempo passavam pela conferência do pedido em aberto e
+    // pagavam R$ 1,34 cada, e qualquer conta ativa podia pedir qualquer processo.
+    // Para religar, leve antes a cota e a posse da rotina para cá.
+    if (!PEDIDO_PELA_TELA_LIGADO) {
+      return jsonResponse(
+        { erro: 'O pedido de autos por aqui foi desligado: a rotina dos autos pede sozinha quando o card entra na análise.' },
+        410,
+      )
+    }
 
     const tipo = corpo.tipo === 'documentos_publicos' ? 'documentos_publicos' : 'autos'
     const chave = await chaveEscavador()

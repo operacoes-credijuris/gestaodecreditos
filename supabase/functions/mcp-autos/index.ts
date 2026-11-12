@@ -702,6 +702,9 @@ async function despachar(msg: any): Promise<unknown | null> {
   }
 }
 
+/** O maior lote JSON-RPC aceito num POST (ver o teto no Deno.serve). */
+const MAX_ITENS_DO_LOTE = 10;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
@@ -730,6 +733,13 @@ Deno.serve(async (req) => {
 
   try {
     if (Array.isArray(corpo)) {
+      // LOTE COM TETO (12/11/2026): ESTA PORTA NÃO TEM LOGIN, e cada item com um
+      // código desconhecido consulta o balcão a cada 1,5 s por 45 s. Um POST
+      // com milhares de itens, todos ao mesmo tempo, virava centenas de milhares
+      // de consultas ao banco. Cliente MCP de verdade manda um pedido por vez.
+      if (corpo.length > MAX_ITENS_DO_LOTE) {
+        return resposta(erroRpc(null, -32600, `Lote grande demais (máximo ${MAX_ITENS_DO_LOTE} itens).`), 400, extras);
+      }
       const saidas = (await Promise.all(corpo.map(despachar))).filter((x) => x !== null);
       // Lote só de notificações: nada a devolver.
       return saidas.length === 0 ? new Response(null, { status: 202, headers: { ...CORS, ...extras } }) : resposta(saidas, 200, extras);

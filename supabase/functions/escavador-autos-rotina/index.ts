@@ -743,6 +743,43 @@ async function lerCards(
     const primeiraLeitura = !linha || !((linha.leituras ?? 0) > 0 || linha.lido_em)
     const entraNoRegime = notaUnica && !linha?.nota_em && primeiraLeitura
 
+    // CADA PROCESSO VIRA UMA LINHA DE PEDIDO — a chave (card, CNJ) é o que
+    // impede o segundo pedido do mesmo processo. Papel novo de um processo já
+    // conhecido só atualiza o rótulo enquanto nenhum PDF dele subiu.
+    //
+    // ANTES DE MARCAR O CARD COMO LIDO, E COM O ERRO OLHADO (12/11/2026): o card
+    // ia para LIDO primeiro e o erro do upsert era ignorado. Um tropeço do banco
+    // deixava o card lido, com os processos na coluna, e SEM as linhas de
+    // pedido — e card lido só se relê quando muda: os autos nunca eram pedidos,
+    // e nada avisava. Agora a falha devolve o card a NOVO (sem gastar leitura).
+    let falhaDosProcessos: string | null = null
+    for (const p of todos) {
+      const rotulo = rotuloDoProcesso(p.papeis, rpv)
+      const { error: erroUpsert } = await svc.from('escavador_autos_processo').upsert(
+        { kommo_lead_id: leadId, numero_cnj: p.cnj, papeis: p.papeis, rotulo, estado: 'NOVO' },
+        { onConflict: 'kommo_lead_id,numero_cnj', ignoreDuplicates: true },
+      )
+      if (erroUpsert) {
+        falhaDosProcessos = erroUpsert.message
+        break
+      }
+      await svc.from('escavador_autos_processo')
+        .update({ papeis: p.papeis, rotulo })
+        .eq('kommo_lead_id', leadId)
+        .eq('numero_cnj', p.cnj)
+        .eq('anexados', 0)
+    }
+    if (falhaDosProcessos) {
+      avisos.push(`card ${leadId}: não consegui registrar os processos (${falhaDosProcessos}); leio de novo na próxima volta.`)
+      await svc.from('escavador_autos_card').update({
+        estado: 'NOVO',
+        leituras: linha?.leituras ?? 0,
+        detalhe: `Falha ao registrar os processos: ${falhaDosProcessos}`.slice(0, 300),
+        atualizado_em: agora(),
+      }).eq('kommo_lead_id', leadId)
+      continue
+    }
+
     await svc.from('escavador_autos_card').update({
       estado: lerDeNovo ? 'NOVO' : todos.length ? 'LIDO' : 'SEM_PROCESSO',
       processos: todos,
@@ -754,22 +791,6 @@ async function lerCards(
       atualizado_em: agora(),
       ...(entraNoRegime ? { nota_em: agora() } : {}),
     }).eq('kommo_lead_id', leadId)
-
-    // CADA PROCESSO VIRA UMA LINHA DE PEDIDO — a chave (card, CNJ) é o que
-    // impede o segundo pedido do mesmo processo. Papel novo de um processo já
-    // conhecido só atualiza o rótulo enquanto nenhum PDF dele subiu.
-    for (const p of todos) {
-      const rotulo = rotuloDoProcesso(p.papeis, rpv)
-      await svc.from('escavador_autos_processo').upsert(
-        { kommo_lead_id: leadId, numero_cnj: p.cnj, papeis: p.papeis, rotulo, estado: 'NOVO' },
-        { onConflict: 'kommo_lead_id,numero_cnj', ignoreDuplicates: true },
-      )
-      await svc.from('escavador_autos_processo')
-        .update({ papeis: p.papeis, rotulo })
-        .eq('kommo_lead_id', leadId)
-        .eq('numero_cnj', p.cnj)
-        .eq('anexados', 0)
-    }
 
     // A NOTA DO CARD, UMA VEZ SÓ: criada aqui, quando os processos aparecem pela
     // primeira vez; dali em diante, só editada (`atualizarNotas`).
@@ -1067,12 +1088,20 @@ async function pedir(
 
     // O MESMO PROCESSO EM OUTRO CARD: segue o pedido dele (ou espera, se o outro
     // está no meio do pedido).
+    //
+    // O CONCLUÍDO DO OUTRO CARD SÓ VALE DENTRO DOS 30 DIAS (12/11/2026). Qualquer
+    // CONCLUIDO servia: o card novo de um processo que outro card fechou meses
+    // atrás adotava aquele pedido e anexava autos velhos, sem nunca chegar à
+    // regra de REUSO_DIAS logo abaixo. E sem ordem, um CONCLUIDO antigo podia
+    // vencer um pedido em curso.
+    const reusoDesde = new Date(Date.now() - REUSO_DIAS * 86_400_000).toISOString()
     const { data: irmao } = await svc
       .from('escavador_autos_processo')
       .select('estado, pedido_id')
       .eq('numero_cnj', cnj)
-      .in('estado', ['PEDINDO', 'AGUARDANDO', 'ANEXANDO', 'CONCLUIDO'])
+      .or(`estado.in.(PEDINDO,AGUARDANDO,ANEXANDO),and(estado.eq.CONCLUIDO,concluido_em.gte."${reusoDesde}")`)
       .neq('kommo_lead_id', leadId)
+      .order('atualizado_em', { ascending: false })
       .limit(1)
       .maybeSingle()
     if (irmao?.estado === 'PEDINDO') {

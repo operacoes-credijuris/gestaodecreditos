@@ -913,16 +913,44 @@ Deno.serve(async (req: Request) => {
         }
         continue
       }
-      const { data: apagados, error: erroDel } = await svc
-        .from('kommo_leads')
-        .delete()
-        .eq('pipeline_id', funil)
-        .not('kommo_lead_id', 'in', `(${ids.join(',')})`)
-        .select('kommo_lead_id')
-      if (erroDel) {
-        avisosEspelho.push(`Funil ${funil}: falha ao limpar o espelho — ${erroDel.message}`)
+      // O QUE SAIU DO FUNIL É CALCULADO AQUI, E O DELETE VAI EM FATIAS
+      // (12/11/2026). Era um `not in (todos os cards do funil)` numa URL só — até
+      // 10.000 ids, fechados inclusive. Passadas algumas centenas a URL estoura
+      // (o mesmo defeito que a advbox-movimentacoes já corrigiu em 23/10), o
+      // delete falhava a cada sincronização e o card apagado no Kommo, ou movido
+      // para funil sem espelho, ficava para sempre na coluna antiga — na entrada,
+      // a rotina do Escavador ainda o via. Leitura do espelho com erro ou corte →
+      // nada a apagar.
+      const noEspelho = await lerTodasAsLinhas<{ kommo_lead_id: number }>(
+        (de, ate) =>
+          svc
+            .from('kommo_leads')
+            .select('kommo_lead_id')
+            .eq('pipeline_id', funil)
+            .order('kommo_lead_id')
+            .range(de, ate),
+      )
+      if (noEspelho.erro || noEspelho.cortada) {
+        avisosEspelho.push(
+          `Funil ${funil}: NÃO limpei o espelho — a leitura dele ${noEspelho.erro ? `falhou (${noEspelho.erro})` : 'foi cortada no teto'}.`,
+        )
+        continue
       }
-      removidos += apagados?.length ?? 0
+      const vieram = new Set(ids.map(Number))
+      const sairam = noEspelho.linhas.map((l) => Number(l.kommo_lead_id)).filter((id) => !vieram.has(id))
+      for (let i = 0; i < sairam.length; i += 150) {
+        const { data: apagados, error: erroDel } = await svc
+          .from('kommo_leads')
+          .delete()
+          .eq('pipeline_id', funil)
+          .in('kommo_lead_id', sairam.slice(i, i + 150))
+          .select('kommo_lead_id')
+        if (erroDel) {
+          avisosEspelho.push(`Funil ${funil}: falha ao limpar o espelho — ${erroDel.message}`)
+          break
+        }
+        removidos += apagados?.length ?? 0
+      }
     }
 
     // Marcações internas de cards que não existem mais ficariam órfãs — a UI as

@@ -51,6 +51,11 @@ import {
 } from '../_shared/respostaDoClaude.ts'
 import { mensagemDoErroDaAnthropic } from '../_shared/falhaDaAnthropic.ts'
 import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
+import { cnpjComDvValido, cpfComDvValido } from '../_shared/qualificacaoDoCedente.ts'
+
+/** CPF ou CNPJ com o dígito verificador certo; vazio também passa (nada a conferir). */
+const documentoComDigitoValido = (d: string) =>
+  !d || (d.length === 11 ? cpfComDvValido(d) : d.length === 14 ? cnpjComDvValido(d) : false)
 import { MAX_TEXTO_CHARS } from '../_shared/orcamentoLeitura.ts'
 import {
   alvosDaCessao,
@@ -235,9 +240,15 @@ Deno.serve(async (req: Request) => {
     // devolvesse o advogado numa cessão só do principal, a tela o preencheria
     // e o Refazer procuraria dívida de quem não é parte do negócio. Obediência
     // de modelo não é garantia — a garantia é este filtro.
-    const lidos = normalizarTitulares(lido.titulares).filter((t) =>
-      alvos.papeis.includes(t.papel),
-    )
+    //
+    // DOCUMENTO COM DÍGITO ERRADO FICA VAZIO (12/11/2026): A normalização só
+    // conferia o tamanho, e um CPF inventado pela leitura ia para a tela e dali
+    // para a busca paga da dd-processos — o risco que o próprio prompt aponta. A
+    // dd-qualificacao já conferia o dígito; aqui, o mesmo. O nome fica, e quem
+    // confere preenche o documento.
+    const lidos = normalizarTitulares(lido.titulares)
+      .filter((t) => alvos.papeis.includes(t.papel))
+      .map((t) => (documentoComDigitoValido(t.documento) ? t : { ...t, documento: '' }))
 
     // O OFÍCIO POR CIMA. O titular de quem cede é conferido contra o que a IA
     // diz ter lido no ofício (documento escrito nele, dígito válido); o do

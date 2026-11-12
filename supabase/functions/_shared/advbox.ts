@@ -117,6 +117,9 @@ function trechoDoCorpo(texto: string): string {
  * Function. Agora só o `fetch` e a leitura do corpo ficam no `try`; o 4xx
  * definitivo é lançado fora dele, com o status e um trecho do corpo.
  */
+/** O teto de UMA chamada ao ADVBOX (12/11/2026). */
+const TETO_DA_CHAMADA_MS = 30_000
+
 export async function getJson(
   ctx: AdvboxCtx,
   path: string,
@@ -130,7 +133,10 @@ export async function getJson(
     let res: Response
     let texto: string
     try {
-      res = await fetch(`${ctx.base}${path}`, { headers: ctx.headers })
+      // COM TETO (12/11/2026): UMA conexão parada segurava a invocação até ela
+      // morrer em ~150 s, sem resposta e sem nada gravado. O estouro cai no
+      // catch abaixo como erro de rede, e conta como tentativa.
+      res = await fetch(`${ctx.base}${path}`, { headers: ctx.headers, signal: AbortSignal.timeout(TETO_DA_CHAMADA_MS) })
       texto = await res.text()
     } catch (e) {
       // Erro de REDE (conexão caiu, corpo interrompido): merece nova tentativa.
@@ -207,6 +213,9 @@ export async function enviarJson(
       method: metodo,
       headers: { ...ctx.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      // COM TETO (12/11/2026), PELO MESMO MOTIVO DO getJson. Aqui o estouro não
+      // se repete: escrita que pode ter chegado não se reenvia às cegas.
+      signal: AbortSignal.timeout(TETO_DA_CHAMADA_MS),
     })
     if (res.status === 429 || res.status === 403) {
       ultimoErro = `HTTP ${res.status}`

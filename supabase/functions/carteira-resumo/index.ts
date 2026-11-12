@@ -22,6 +22,16 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 import { lerTodasAsLinhas, type PaginaDoBanco } from '../_shared/leituraPaginada.ts'
 import { falhaDaResposta, resolverModeloDaCarteira } from './regras.ts'
+import { estourouOTempo, sinalAteOTeto } from '../_shared/relogioDaInvocacao.ts'
+
+/**
+ * ATÉ QUANDO UMA INVOCAÇÃO COMEÇA UM CRÉDITO NOVO (12/11/2026). A cadeia só
+ * dispara a fatia seguinte DEPOIS do lote; um lote que passava de ~150 s (429
+ * com espera, uma resposta lenta, as reescritas) matava a invocação antes do
+ * disparo, e todo o resto da carteira ficava sem resumo até a quarta seguinte.
+ * O crédito que não cabe volta para a frente da fila.
+ */
+const ORCAMENTO_MS = 95_000
 
 // O modelo padrão (Haiku) e a lista dos aceitos moram em ./regras.ts. O corpo
 // da requisição aceita `modelo` para comparar sem novo deploy — só da lista.
@@ -284,6 +294,7 @@ async function chamar(
   dossie: string,
   modelo: string,
   correcao: { anterior: Resumo; problemas: string[] } | null,
+  inicio: number,
 ): Promise<Resumo> {
   let conteudo = 'Analise o crédito abaixo e registre os dois textos.\n\n' + dossie
   if (correcao) {
@@ -302,7 +313,9 @@ async function chamar(
     tools: [FERRAMENTA],
     tool_choice: { type: 'tool', name: FERRAMENTA.name },
     messages: [{ role: 'user', content: conteudo }],
-  })
+    // O TETO DA CHAMADA CONTA DO COMEÇO DA INVOCAÇÃO (12/11/2026): O SDK
+    // esperava até 10 min, com duas repetições. Ver ORCAMENTO_MS.
+  }, { signal: sinalAteOTeto(inicio, { folgaMs: 25_000 }), maxRetries: 1 })
   // CORTADA NO TETO DE TOKENS É FALHA (23/10/2026), e não resumo: ver
   // falhaDaResposta. A reescrita cortada é descartada em gerarUm.
   const falha = falhaDaResposta(r.stop_reason)
@@ -328,8 +341,9 @@ async function gerarUm(
   anthropic: Anthropic,
   dossie: string,
   modelo: string,
+  inicio: number,
 ): Promise<Resumo> {
-  let melhor = await chamar(anthropic, dossie, modelo, null)
+  let melhor = await chamar(anthropic, dossie, modelo, null, inicio)
   let problemasMelhor = conferir(melhor)
 
   for (let i = 0; i < TENTATIVAS_CORRECAO && problemasMelhor.length > 0; i++) {
@@ -338,8 +352,11 @@ async function gerarUm(
       nova = await chamar(anthropic, dossie, modelo, {
         anterior: melhor,
         problemas: problemasMelhor,
-      })
+      }, inicio)
     } catch (e) {
+      // A REESCRITA QUE ESTOURA O RELÓGIO TAMBÉM SE DESCARTA (12/11/2026): A
+      // primeira versão, inteira, vale mais que nenhuma.
+      if (estourouOTempo(e)) break
       // A REESCRITA CORTADA SE DESCARTA (23/10/2026): a tentativa anterior,
       // inteira, continua valendo. Só a PRIMEIRA cortada derruba o crédito.
       if (e instanceof RespostaInutil) continue
@@ -419,6 +436,7 @@ function dispararProximo(fila: string[], forcar: boolean, modelo: string): void 
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  const inicio = Date.now()
 
   try {
     const cronSecret = Deno.env.get('CRON_SECRET')
@@ -627,6 +645,7 @@ Deno.serve(async (req: Request) => {
     let gerados = 0
     let pulados = encerrados.length
     let falhas = 0
+    const adiados: string[] = []
 
     await mapPool(processos, CONCORRENCIA, async (p) => {
       const d = digitsDe.get(p.id) ?? ''
@@ -662,6 +681,11 @@ Deno.serve(async (req: Request) => {
         pulados++
         return
       }
+      // SEM RELÓGIO PARA MAIS UM CRÉDITO: volta para a fila (ver ORCAMENTO_MS).
+      if (Date.now() - inicio > ORCAMENTO_MS) {
+        adiados.push(p.id)
+        return
+      }
 
       // Sem nenhum insumo não há o que resumir: gravar texto do modelo aqui
       // seria pedir invenção. Registra o motivo e segue.
@@ -678,7 +702,7 @@ Deno.serve(async (req: Request) => {
       }
 
       try {
-        const r = await gerarUm(anthropic, montarDossie(p, movs, tarefas), modelo)
+        const r = await gerarUm(anthropic, montarDossie(p, movs, tarefas), modelo, inicio)
         const { error: erroGravar } = await svc.from('carteira_resumos').upsert({
           processo_id: p.id,
           estagio_processual: r.estagio_processual,
@@ -712,6 +736,7 @@ Deno.serve(async (req: Request) => {
       }
     })
 
+    if (adiados.length) resto = [...adiados, ...resto]
     if (resto.length) dispararProximo(resto, forcar, modelo)
 
     // OK SÓ QUANDO TUDO GRAVOU (23/10/2026): com erro de gravação, a resposta

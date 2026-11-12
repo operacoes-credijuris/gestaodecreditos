@@ -55,6 +55,9 @@ async function fetchPagina(
           'User-Agent': 'Mozilla/5.0',
           'Accept-Language': 'pt-BR,pt;q=0.9',
         },
+        // COM TETO (12/11/2026): UMA conexão parada com o DJEN segurava a
+        // invocação até ela morrer em ~150 s; o estouro conta como tentativa.
+        signal: AbortSignal.timeout(20_000),
       })
       if (!res.ok) {
         // A MANUTENÇÃO DO DJEN DIZ O QUE É (09/10/2026): de 08/10 em diante o CNJ
