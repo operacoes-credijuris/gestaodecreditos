@@ -108,15 +108,6 @@ describe('Anthropic', () => {
     expect(f).not.toContain('{ signal: AbortSignal.timeout(150_000) }')
     expect(f).toContain('{ signal: AbortSignal.timeout(Math.max(10_000, restante(r))) },')
   })
-  it('dd-credor e dd-qualificar: falha da IA diz o motivo e não aprova', () => {
-    const c = ler('dd-credor/index.ts')
-    expect(c).toContain('const txt = seloDaClassificacao(c);')
-    expect(c).toContain('conclusaoDoRelatorio(dd.processos || [], !!dd.algum_reprovado)')
-    expect(c).not.toContain('return { txt: "APROVADA", cor: rgb(0.15, 0.55, 0.2) }; }')
-    const q = ler('dd-qualificar/index.ts')
-    expect(q).toContain('signal: sinalAteOTeto(inicio)')
-    expect(q).toContain('if (j?.stop_reason === "max_tokens")')
-  })
   it('planilhaJuridica: leitura que falha é erro, não "nenhum sujeito"', () => {
     const f = ler('_shared/planilhaJuridica.ts')
     expect(f).toContain('if (eSujeitos) throw new Error(')

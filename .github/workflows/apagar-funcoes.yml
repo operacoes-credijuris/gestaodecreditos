@@ -1,0 +1,36 @@
+name: Apagar Edge Functions
+
+# APAGA DO SUPABASE as funções que saíram do projeto (13/11/2026). O deploy
+# (deploy-functions.yml) só SOBE as que existem em supabase/functions: uma
+# pasta apagada daqui continua publicada lá, e respondendo, até alguém apagá-la
+# de propósito. Este workflow faz isso, só quando disparado à mão, com a lista
+# de nomes no campo — nunca sozinho num push.
+on:
+  workflow_dispatch:
+    inputs:
+      funcoes:
+        description: 'Nomes das funções a apagar, separados por espaço'
+        required: true
+
+jobs:
+  apagar:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      # UMA A UMA, e a que já não existe não derruba as outras.
+      - name: Apagar
+        env:
+          FUNCOES: ${{ github.event.inputs.funcoes }}
+        run: |
+          for f in $FUNCOES; do
+            case "$f" in
+              *[!a-z0-9-]*) echo "::error::Nome inválido: $f"; exit 1 ;;
+            esac
+            echo "Apagando $f…"
+            supabase functions delete "$f" --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" --yes || echo "::warning::$f não foi apagada (talvez já não exista)."
+          done

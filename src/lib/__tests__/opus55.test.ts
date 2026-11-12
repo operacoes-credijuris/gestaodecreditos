@@ -311,7 +311,8 @@ describe('nenhuma chamada ao Opus fica no formato antigo (varredura dos fontes)'
   })
 
   it('acha as chamadas (senão a varredura não está varrendo nada)', () => {
-    expect(doOpus.length).toBeGreaterThanOrEqual(12)
+    // DUAS A MENOS DESDE 13/11/2026: saíram dd-credor e dd-qualificar, que chamavam o Opus.
+    expect(doOpus.length).toBeGreaterThanOrEqual(10)
   })
 
   it('nenhum Opus anterior ao 5.5 sobrou no código', () => {
