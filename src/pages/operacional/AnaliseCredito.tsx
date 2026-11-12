@@ -138,7 +138,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Textarea } from '@/components/ui/Field'
 import { CorpoDaNota } from '@/components/analise/CorpoDaNota'
 import { SyncStatus } from '@/components/ui/SyncStatus'
-import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
+import { ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
 import { Chip } from '@/components/ui/Chip'
 import { CampoDeBusca } from '@/components/ui/CampoDeBusca'
 import { useToast } from '@/components/ui/Toast'
@@ -783,7 +783,11 @@ const PERIGO_CONTORNADO = 'border-perigo-borda bg-superficie text-perigo hover:b
  * "o principal". O contorno com ícone e texto no azul da marca ainda separa a
  * ação que avança das outras; o primário cheio fica só dentro das janelas.
  */
-const ACAO_DA_ETAPA = 'text-marca-texto hover:bg-marca-leve hover:text-marca-texto'
+// V3 (12/11/2026): continua o secundário com a letra na marca; o CONTORNO
+// CHAMPANHE a meia força é o "selecionado" da casa e diz, sem cor cheia, qual
+// das ações da fileira é a que avança.
+const ACAO_DA_ETAPA =
+  'border-marca-viva/50 text-marca-texto hover:border-marca-viva hover:bg-marca-leve hover:text-marca-texto'
 
 /**
  * O QUE CADA BOTÃO DO CARD FAZ, no passar do mouse (revisão de UX de 20/10/2026,
@@ -887,9 +891,14 @@ function useAoFecharACaixa(aberto: boolean, aoFechar: (() => void) | undefined) 
  * A MESMA DO `MenuDeAcoes` (revisão visual 2): `rounded-flutuante` (era o
  * `rounded-campo`, de 10 px) e, no escuro, o anel claro que a separa da página.
  * Quem a usa mede com `useCaixaNaTela` e aplica `posicaoDaCaixa`.
+ *
+ * V3 (12/11/2026): o VIDRO ELEVADO dos menus da casa (a sombra do escuro já
+ * traz o fio de luz — sai o anel claro escrito à mão). Entra com `fade-in`, e
+ * não com o `menu-in`: o deslocamento lateral do celular é um `transform` na
+ * própria caixa, e a animação de escala o desfaria por um instante.
  */
 const CAIXA_FLUTUANTE =
-  'absolute z-20 rounded-flutuante border border-borda bg-superficie p-s1.5 text-left shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
+  'cj-vidro-elevado absolute z-20 rounded-flutuante border border-borda p-s1.5 text-left shadow-nivel-2 animate-fade-in'
 
 /** Embaixo do botão (o natural) ou, sem lugar embaixo, em cima dele. */
 const posicaoDaCaixa = (a: AjusteDaCaixa) => (a.acima ? 'bottom-full mb-s1' : 'top-full mt-s1')
@@ -1580,9 +1589,11 @@ function SeletorDeEtiquetas({
         aria-label="Aplicar ou remover as etiquetas dos fundos"
         aria-expanded={aberto}
         className={cn(
-          'relative inline-flex h-[24px] items-center gap-s1 rounded-full border border-dashed px-s2 text-xs font-semibold transition-colors after:absolute after:-inset-[6px]',
+          // V3: NA ALTURA E NO CANTO DAS ETIQUETAS ao lado (22px, canto de
+          // controle) — ferramenta da mesma fileira, e não pílula solta.
+          'relative inline-flex h-[22px] items-center gap-s1 rounded-controle border border-dashed px-s2 text-xs font-semibold transition-colors duration-rapida after:absolute after:-inset-[6px]',
           aberto
-            ? 'border-marca-viva text-marca-texto'
+            ? 'border-marca-viva bg-marca-leve text-marca-texto'
             : 'border-borda-forte text-texto-2 hover:border-marca-viva hover:text-marca-texto',
         )}
       >
@@ -1600,7 +1611,7 @@ function SeletorDeEtiquetas({
           )}
           style={deslocamentoDaCaixa(ajuste)}
         >
-          <p className="px-s1 pb-s2 pt-s1 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+          <p className="cj-sobretitulo px-s1 pb-s2 pt-s1">
             Etiquetas dos fundos · uma por fundo
           </p>
           {/* NO CELULAR, SEM A COLUNA "DESDE" (revisão visual 2): a grade de
@@ -1617,11 +1628,11 @@ function SeletorDeEtiquetas({
           >
             <span />
             {COLUNAS_DO_SELETOR.map((ato) => (
-              <span key={ato} className="text-center text-xs font-bold uppercase tracking-normal text-texto-3 sm:tracking-[0.06em]">
+              <span key={ato} className="cj-sobretitulo text-center max-sm:tracking-normal">
                 {ato}
               </span>
             ))}
-            <span className="hidden text-right text-xs font-bold uppercase tracking-[0.06em] text-texto-3 sm:block">
+            <span className="cj-sobretitulo hidden text-right sm:block">
               Desde
             </span>
             {etiquetasPorDestino(oferecidas).map((grupo) => {
@@ -1635,7 +1646,7 @@ function SeletorDeEtiquetas({
                   <span
                     className={cn(
                       'flex min-w-0 items-center gap-s1',
-                      marcada ? 'font-bold text-texto' : 'font-medium text-texto-2',
+                      marcada ? 'font-semibold text-texto' : 'font-medium text-texto-2',
                     )}
                   >
                     <span className="truncate" title={grupo.destino}>
@@ -1854,7 +1865,7 @@ function BotaoEscolherProposta({
               </p>
               {cotacaoDe(fundo) && (
                 <div className="mx-s3 mt-s1 flex items-center justify-between gap-s4 rounded-campo bg-superficie-2 px-s3 py-s2">
-                  <span className="text-xs font-bold uppercase tracking-[.06em] text-texto-3">Proposta</span>
+                  <span className="cj-sobretitulo">Proposta</span>
                   <ValoresDaCotacao cotacao={cotacaoDe(fundo)} />
                 </div>
               )}
@@ -1881,6 +1892,15 @@ function BotaoEscolherProposta({
 /** Quanto o passar do mouse espera para abrir a caixa das propostas, e para fechá-la (ms). */
 const ATRASO_DE_ABRIR = 200
 const ATRASO_DE_FECHAR = 150
+
+/**
+ * A PÍLULA DAS PROPOSTAS E O "+" AO LADO (v3, 12/11/2026): a placa champanhe
+ * (`ouro-suave`, contorno `ouro-borda`, letra `ouro-texto`), 28px como os links
+ * da linha. Sob o mouse o contorno firma; aberta, o halo fino do selecionado.
+ */
+const PILULA_DAS_PROPOSTAS =
+  'inline-flex h-[28px] items-center gap-s1.5 rounded-full border border-ouro-borda bg-ouro-suave text-sm font-semibold text-ouro-texto transition-[border-color,box-shadow,background-color] duration-rapida ease-saida hover:border-ouro-forte'
+const PILULA_ABERTA = 'border-ouro-forte ring-[3px] ring-ouro/20'
 
 /**
  * VER AS PROPOSTAS CADASTRADAS (pedido do dono, 07/10/2026): na Produção de
@@ -1984,11 +2004,13 @@ function BotaoVerPropostas({
           aria-label={rotulo}
           title={rotulo}
           // NA COR DA MARCA, EM PÍLULA (07/10/2026, pedido do dono): em cinza ele
-          // sumia no meio do texto cinza da linha de metadados.
+          // sumia no meio do texto cinza da linha de metadados. V3: a PLACA
+          // CHAMPANHE da casa (`ouro-suave` + `ouro-borda`, letra `ouro-texto`)
+          // — o selo que se lê, nos dois temas.
           className={cn(
-            LINK_BTN,
-            'ml-0 rounded-full border border-marca-viva/45 bg-marca-leve px-s2.5 text-marca-texto hover:border-marca-viva',
-            aberto && 'border-marca-viva ring-[3px] ring-marca-viva/15',
+            PILULA_DAS_PROPOSTAS,
+            'px-s3',
+            aberto && PILULA_ABERTA,
           )}
         >
           <Scale className={IC} aria-hidden />
@@ -2056,10 +2078,10 @@ function BotaoCotarProposta({
         title={rotulo}
         // NA COR DA PÍLULA DAS PROPOSTAS, para se ler como parte dela.
         className={cn(
-          LINK_BTN,
-          'ml-0 rounded-full border border-marca-viva/45 bg-marca-leve text-marca-texto hover:border-marca-viva disabled:opacity-50',
-          vazio ? 'px-s2.5' : 'w-[28px] justify-center px-0',
-          aberto && 'border-marca-viva ring-[3px] ring-marca-viva/15',
+          PILULA_DAS_PROPOSTAS,
+          'disabled:opacity-50',
+          vazio ? 'px-s3' : 'w-[28px] justify-center px-0',
+          aberto && PILULA_ABERTA,
         )}
       >
         <Plus className={IC} aria-hidden />
@@ -2174,7 +2196,8 @@ function ChecksDosFundos({
     <div
       role="group"
       aria-label="Envio aos fundos"
-      className="mt-[10px] flex flex-wrap items-center gap-s2 rounded-campo border border-dashed border-borda-forte bg-superficie-2 px-s3 py-s2 sm:w-fit sm:max-w-full"
+      // V3: o bloco interno sem contorno (§8) — as pílulas já têm o delas.
+      className="mt-s3 flex flex-wrap items-center gap-s2 rounded-campo bg-superficie-2 px-s3 py-s2 sm:w-fit sm:max-w-full"
     >
       {fundos.map((f) => {
         const ato = atoFeito(f, lead.tags)
@@ -2556,7 +2579,7 @@ function JanelaDoEnvioAoFundo({
           {pedeCotacao ? (
             <section aria-labelledby={`${idDaJanela}-cotacao`} className="space-y-s3">
               <div>
-                <h3 id={`${idDaJanela}-cotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+                <h3 id={`${idDaJanela}-cotacao`} className="cj-sobretitulo">
                   Cotação {doFundo(fundo)}
                 </h3>
                 <p className="mt-s1 text-xs text-texto-3">
@@ -2579,7 +2602,7 @@ function JanelaDoEnvioAoFundo({
             </section>
           ) : null}
           <section aria-labelledby={`${idDaJanela}-anotacao`} className="space-y-s3">
-            <h3 id={`${idDaJanela}-anotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+            <h3 id={`${idDaJanela}-anotacao`} className="cj-sobretitulo">
               Anotação e print
             </h3>
             {anotacao}
@@ -2873,7 +2896,7 @@ function BotaoFechado({
           >
             <Handshake className="h-[20px] w-[20px]" />
           </span>
-          <p className="font-display text-corpo font-bold text-texto">O cedente aceitou a proposta?</p>
+          <p className="font-display text-corpo font-semibold text-texto">O cedente aceitou a proposta?</p>
           <p className="mt-1 text-corpo text-texto-2">
             {cedente} vai para <strong className="text-texto">{destino}</strong> no Kommo.
           </p>
@@ -3076,7 +3099,7 @@ function JanelaNaoFechou({
                 <Clock className="mt-0.5 h-[20px] w-[20px] flex-none text-aviso" aria-hidden />
               )}
               <span className="min-w-0">
-                <span className="block text-corpo font-bold text-texto">{o.rotulo}</span>
+                <span className="block text-corpo font-semibold text-texto">{o.rotulo}</span>
                 <span className="block text-sm text-texto-2">
                   {o.apoio} · vai para <i>{nomeDaColuna(opcoes[t]!.statusId)}</i>
                 </span>
@@ -3413,14 +3436,17 @@ function CardCredito({
       data-lead={lead.kommo_lead_id}
       tabIndex={-1}
       className={cn(
-        'relative grid grid-cols-1 gap-x-6 gap-y-2 rounded-cartao border border-borda bg-superficie px-[18px] shadow-nivel-1 transition-[border-color,box-shadow] duration-150 hover:border-borda-forte hover:shadow-nivel-2 focus:outline-none focus-visible:border-marca-viva focus-visible:ring-[3px] focus-visible:ring-marca-viva/20 min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
-        'py-4',
+        // V3 (12/11/2026): o cartão da casa — linha fina, sombra de contato e,
+        // sob o mouse, sobe 1px com a sombra crescendo (`cj-ergue`, que respeita
+        // o movimento reduzido). 20px de lado (`p-s5`, o cartão do kit), 16px
+        // no celular.
+        'cj-ergue relative grid grid-cols-1 gap-x-s6 gap-y-s2 rounded-cartao border border-borda bg-superficie px-s5 py-s4 shadow-nivel-1 hover:border-borda-forte focus:outline-none focus-visible:border-marca-viva focus-visible:ring-[3px] focus-visible:ring-marca-viva/20 max-sm:px-s4 min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
         realcado && 'border-marca-viva ring-[3px] ring-marca-viva/20',
       )}
     >
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-display text-lg font-bold leading-snug tracking-tight text-texto">
+        <div className="flex flex-wrap items-center gap-s2">
+          <h3 className="font-display text-lg font-semibold leading-snug tracking-[-0.01em] text-texto">
             {/* O NOME VIRA LINK PARA A PASTA DO CEDENTE no Drive, quando ela já
                 existe — e é onde estão as planilhas daquele processo. LINK DE
                 VERDADE: o id vem gravado no card (migração 0059). Sem id fica
@@ -3432,7 +3458,7 @@ function CardCredito({
                 target="_blank"
                 rel="noreferrer"
                 title="Abrir a pasta deste cedente no Drive"
-                className="underline decoration-borda-forte decoration-1 underline-offset-[3px] hover:text-marca-texto"
+                className="underline decoration-borda-forte decoration-1 underline-offset-[4px] transition-colors duration-rapida hover:text-marca-texto hover:decoration-marca-viva"
               >
                 {titulo}
               </a>
@@ -3479,7 +3505,9 @@ function CardCredito({
                 continua separado. Quem avisa da falta é o selo do cadastro. */}
             {campos.numero && (
               <>
-                <span className="inline-flex items-center gap-0.5 font-medium tabular-nums tracking-[.01em] text-texto">
+                {/* SEM `tabular-nums` (v3, §3): número de identificação — na
+                    Inter o modo tabular alarga também o ponto e o hífen do CNJ. */}
+                <span className="inline-flex items-center gap-s0.5 font-medium text-texto">
                   {campos.numero}
                   <button
                     type="button"
@@ -3520,7 +3548,9 @@ function CardCredito({
         )}
 
         {resultadoAnalise && (
-          <div className="mt-[10px] rounded-campo border border-borda bg-superficie-2 px-4 py-[10px] text-corpo">
+          // O BLOCO INTERNO DA V3: `rounded-campo bg-superficie-2`, sem contorno —
+          // contornado, era cartão dentro de cartão (§8).
+          <div className="mt-s3 rounded-campo bg-superficie-2 px-s4 py-s3 text-corpo">
             {/* OS RAMOS DE REPROVAÇÃO SAÍRAM: eles nunca renderizavam. Este
                 painel só existe depois de `onSalvo`, e salvar exige
                 `!atual.reprovado`. */}
@@ -3588,7 +3618,7 @@ function CardCredito({
             lado; a data exata no passar do mouse. O seletor fica no fim, e
             aparece mesmo no card que ainda não tem etiqueta. */}
         {mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
-          <div className="mt-[10px] flex flex-wrap items-center gap-1.5">
+          <div className="mt-s3 flex flex-wrap items-center gap-s1.5">
             {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
               const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
               const idade = idadeCurta(quando)
@@ -3603,12 +3633,22 @@ function CardCredito({
               const nomeNaTela = etiquetaCanonica(t) ?? semEntidadesHtml(t)
               return (
                 <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : 'Etiqueta do Kommo'}>
-                  <Badge size="sm" tone={tom} className={cn('h-[22px] gap-1 px-2', tiravel && 'pr-0.5')}>
+                  <Badge size="sm" tone={tom} className={cn('h-[22px] gap-s1 px-s2', tiravel && 'pr-s0.5')}>
                     {iconeDaEtiqueta(tom, t)}
                     {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
                         PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
                     {nomeNaTela}
-                    {idade && <span className="font-medium opacity-80"> · {idade}</span>}
+                    {/* A IDADE NUM SEGUNDO TEMPO (v3): um fio na cor da etiqueta e o
+                        número mais leve — o ato e o fundo se leem primeiro. */}
+                    {idade && (
+                      <>
+                        <span aria-hidden className="mx-s0.5 h-[10px] w-px bg-current opacity-30" />
+                        <span className="font-medium tabular-nums opacity-80">
+                          <span className="sr-only"> · </span>
+                          {idade}
+                        </span>
+                      </>
+                    )}
                     {tiravel && (
                       <button
                         type="button"
@@ -3658,7 +3698,7 @@ function CardCredito({
             função respondeu (ver `PreparoDosAutos`). */}
         {preparoDosAutos && (
           <CaixaDeAviso
-            className="mt-[10px] px-4 py-[10px]"
+            className="mt-s3 px-s4 py-s3"
             tom={
               preparoDosAutos.estado === 'pronto'
                 ? 'sucesso'
@@ -3679,10 +3719,10 @@ function CardCredito({
             {preparoDosAutos.estado === 'falhou' && (
               // O QUE A CONVERSA VAI DIZER, dito aqui primeiro: do outro lado o
               // Claude só sabe que não achou o código.
-              <p className="font-bold">Os autos não subiram — o Claude não vai achá-los por este código.</p>
+              <p className="font-semibold">Os autos não subiram — o Claude não vai achá-los por este código.</p>
             )}
             {preparoDosAutos.estado === 'parcial' && (
-              <p className="font-bold">Os autos chegaram incompletos ao Claude.</p>
+              <p className="font-semibold">Os autos chegaram incompletos ao Claude.</p>
             )}
             <p
               className={cn(
@@ -3711,14 +3751,14 @@ function CardCredito({
           </CaixaDeAviso>
         )}
         {analisandoJuridico && (
-          <CaixaDeAviso tom="neutro" className="mt-[10px] px-4 py-[10px]" icone={<Clock className={IC} aria-hidden />}>
+          <CaixaDeAviso tom="neutro" className="mt-s3 px-s4 py-s3" icone={<Clock className={IC} aria-hidden />}>
             ⏳ Rodando a análise jurídica antiga — a planilha vai para o Drive quando terminar.
           </CaixaDeAviso>
         )}
         {resultadoJuridico && (
           <CaixaDeAviso
             tom={resultadoJuridico.erro ? 'perigo' : 'sucesso'}
-            className="mt-[10px] px-4 py-[10px]"
+            className="mt-s3 px-s4 py-s3"
           >
             {resultadoJuridico.erro ? (
               <p>Erro: {resultadoJuridico.erro}</p>
@@ -3773,7 +3813,9 @@ function CardCredito({
             // histórico aberto.
             const miniaturas = grupoDeMiniaturas(arquivos)
             return (
-              <div className="mt-[10px] flex min-w-0 items-center gap-s3 rounded-r-controle border-l-[3px] border-borda-forte bg-superficie-2 px-[10px] py-2 text-corpo text-texto-2">
+              // V3: o bloco interno (`rounded-campo bg-superficie-2`) com o FIO
+              // CHAMPANHE à esquerda — a citação da casa, linha e não mancha.
+              <div className="mt-s3 flex min-w-0 items-center gap-s3 rounded-r-campo border-l-2 border-ouro-borda bg-superficie-2 px-s3 py-s2 text-corpo text-texto-2">
                 <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 sm:flex-nowrap">
                   {/* SEM OS SEGUNDOS NO RESUMO (23/10/2026): eles existem para
                       ordenar as notas em rajada, e isso é no histórico aberto,
@@ -3815,8 +3857,15 @@ function CardCredito({
           {/* O TEMPO NA ETAPA EM 14PX SEMIBOLD (auditoria visual, A2): em 18px
               negrito ele disputava com o nome do card, que é o que se lê
               primeiro. */}
-          <span className="block text-xs text-texto-3">Nesta etapa</span>
-          <span className={cn('text-corpo font-semibold tabular-nums', parado ? 'text-aviso' : 'text-texto')}>
+          {/* V3: o rótulo em sobretítulo e o número na régua dos indicadores
+              (`cj-numero`), no mesmo tamanho de antes. */}
+          <span className="cj-sobretitulo block">Nesta etapa</span>
+          <span
+            className={cn(
+              'cj-numero mt-s0.5 block text-corpo font-semibold',
+              parado ? 'text-aviso' : 'text-texto',
+            )}
+          >
             {textoDosDias(dias)}
           </span>
         </div>
@@ -3830,7 +3879,11 @@ function CardCredito({
           quebravam. Agora o miolo usa a largura toda, e os links, as datas e os
           botões dividem a última linha. Em tela estreita os botões descem para
           baixo do rodapé, como antes. */}
-      <div className="col-span-full mt-[4px] flex flex-wrap items-end justify-between gap-x-6 gap-y-s3">
+      {/* V3: O RODAPÉ DO CARTÃO SEPARADO POR UM FIO — em cima quem é o crédito e
+          o que se sabe dele; embaixo os caminhos (histórico, Kommo, propostas,
+          datas) e as ações. */}
+      <div className="col-span-full mt-s1 flex flex-wrap items-end justify-between gap-x-s6 gap-y-s3 border-t border-borda pt-s3">
+
         {/* O RODAPÉ CEDE A LARGURA AOS BOTÕES: a base de 280px os deixa na mesma
             linha sempre que cabem, e as datas é que descem para baixo dos links —
             e não a fileira de botões para uma linha só dela. */}
@@ -3847,7 +3900,10 @@ function CardCredito({
                 {aberto ? 'Ocultar histórico' : 'Ver histórico'}
                 {!aberto && posteriores > 0 && ` (+${posteriores})`}
               </span>
-              <ChevronDown className={cn('h-[14px] w-[14px] transition-transform', aberto && 'rotate-180')} aria-hidden />
+              <ChevronDown
+                className={cn('h-[14px] w-[14px] transition-transform duration-media ease-saida', aberto && 'rotate-180')}
+                aria-hidden
+              />
             </button>
           )}
           <a
@@ -4118,7 +4174,9 @@ function CardCredito({
       </div>
 
       {aberto && notas.length > 0 && (
-        <div className="col-span-full mt-1 border-t border-borda pt-3">
+        // V3: o histórico aberto chega com o `fade-in` (zerado com o movimento
+        // reduzido), na grade de 4px.
+        <div className="col-span-full mt-s1 animate-fade-in border-t border-borda pt-s3">
           {/* A LINHA DO TEMPO (amostra), da mais antiga à mais nova. O ANEXO
               VOLTA PARA A ANOTAÇÃO DELE: no Kommo o arquivo é uma nota separada,
               sem texto, escrita segundos antes ou depois do comentário que o
@@ -4243,7 +4301,7 @@ function Seg<K extends string>({
       // larguras numa coluna de 343px. Esticados, as opções dividem a linha — e
       // com 36px, a régua de toque da casa (eram 28px, o alvo do mouse).
       className={cn(
-        'inline-flex gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-[3px] max-sm:flex max-sm:w-full',
+        'inline-flex gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-[3px] dark:bg-superficie-2 max-sm:flex max-sm:w-full',
         className,
       )}
     >
@@ -4256,8 +4314,14 @@ function Seg<K extends string>({
             aria-pressed={ativo}
             onClick={() => onChange(it.key)}
             className={cn(
-              'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-colors max-sm:h-controle max-sm:flex-1 max-sm:justify-center',
-              ativo ? 'bg-superficie text-marca-texto shadow-nivel-1' : 'text-texto-2 hover:text-texto',
+              // V3, O DESENHO DO `Segmented` DE ui: a escolhida em relevo
+              // (`elevada` + sombra de contato + linha fina), a letra na tinta
+              // — quem diz "escolhida" é o relevo — e o ícone no champanhe
+              // que se lê, como o do item aceso do menu.
+              'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-[background-color,color,box-shadow] duration-rapida ease-saida max-sm:h-controle max-sm:flex-1 max-sm:justify-center',
+              ativo
+                ? 'bg-elevada text-texto shadow-nivel-1 ring-1 ring-borda dark:bg-superficie-3 [&>svg]:text-ouro-texto'
+                : 'text-texto-2 hover:text-texto',
             )}
           >
             {it.icone}
@@ -4265,8 +4329,8 @@ function Seg<K extends string>({
             {it.n !== undefined && (
               <span
                 className={cn(
-                  'rounded-full px-s1.5 text-xs tabular-nums',
-                  ativo ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
+                  'rounded-full px-s1.5 py-s0.5 text-xs font-semibold leading-none tabular-nums',
+                  ativo ? 'bg-ouro-suave text-ouro-texto' : 'bg-borda/70 text-texto-2',
                 )}
               >
                 {it.n}
@@ -4275,6 +4339,100 @@ function Seg<K extends string>({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * O QUADRO DE FASES CHEGANDO (v3, 12/11/2026): quatro cartões com o esqueleto
+ * de um cabeçalho e das linhas de etapa, na grade do quadro de verdade, e o
+ * texto visível embaixo (só o esqueleto, numa conexão lenta, parecia quebrado).
+ * O brilho do `skeleton` para com o movimento reduzido (index.css).
+ */
+function QuadroCarregando({ label }: { label: string }) {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className="mb-s4">
+      <div
+        aria-hidden
+        className="grid gap-s2 min-[621px]:grid-cols-2 min-[1180px]:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,0.85fr)]"
+      >
+        {[4, 4, 4, 3].map((linhas, i) => (
+          <div
+            key={i}
+            className={cn(
+              'rounded-cartao border border-borda p-s3 shadow-nivel-1',
+              i === 3 ? 'bg-superficie-2' : 'bg-superficie',
+              i > 0 && 'max-[620px]:hidden',
+            )}
+          >
+            <div className="flex items-center gap-s2 px-s1 pb-s3">
+              <div className="skeleton h-[22px] w-[22px] rounded-full" />
+              <div className="skeleton h-[12px] w-[45%] rounded-controle" />
+              <div className="skeleton ml-auto h-[12px] w-[16px] rounded-controle" />
+            </div>
+            <div className="grid gap-s3 px-s2 pb-s1">
+              {Array.from({ length: linhas }, (_, j) => (
+                <div key={j} className="flex items-center gap-s3">
+                  <div className="skeleton h-[10px] rounded-controle" style={{ width: `${70 - j * 9}%` }} />
+                  <div className="skeleton ml-auto h-[10px] w-[10px] rounded-controle" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-s2 flex items-center gap-s1.5 text-xs text-texto-3">
+        <RefreshCw className="h-[14px] w-[14px] animate-spin" aria-hidden />
+        {label}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * OS CARDS CHEGANDO (v3, 12/11/2026): três cartões com o esqueleto do card de
+ * verdade — o nome, a linha dos campos, a última nota e o rodapé com os
+ * botões —, e o "Carregando…" visível, como o `Loading` de ui.
+ */
+function CardsCarregando() {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true">
+      <div aria-hidden className="grid gap-s3">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="rounded-cartao border border-borda bg-superficie px-s5 py-s4 shadow-nivel-1 max-sm:px-s4"
+            style={{ opacity: 1 - i * 0.22 }}
+          >
+            <div className="flex items-start justify-between gap-s4">
+              <div className="min-w-0 flex-1">
+                <div className="skeleton h-[16px] w-[38%] rounded-controle" />
+                <div className="mt-s3 flex flex-wrap gap-s3">
+                  <div className="skeleton h-[12px] w-[18%] rounded-controle" />
+                  <div className="skeleton h-[12px] w-[26%] rounded-controle" />
+                  <div className="skeleton h-[12px] w-[12%] rounded-full" />
+                </div>
+              </div>
+              <div className="hidden w-[64px] min-[900px]:block">
+                <div className="skeleton ml-auto h-[10px] w-[56px] rounded-controle" />
+                <div className="skeleton ml-auto mt-s2 h-[12px] w-[36px] rounded-controle" />
+              </div>
+            </div>
+            <div className="skeleton mt-s3 h-[36px] w-full rounded-campo" />
+            <div className="mt-s3 flex items-center justify-between gap-s4 border-t border-borda pt-s3">
+              <div className="skeleton h-[12px] w-[30%] rounded-controle" />
+              <div className="flex gap-s2">
+                <div className="skeleton h-[32px] w-[84px] rounded-controle" />
+                <div className="skeleton h-[32px] w-[120px] rounded-controle max-sm:hidden" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-s3 flex items-center gap-s1.5 text-xs text-texto-3">
+        <RefreshCw className="h-[14px] w-[14px] animate-spin" aria-hidden />
+        Carregando…
+      </p>
     </div>
   )
 }
@@ -6699,10 +6857,14 @@ export default function AnaliseCredito() {
               <div
                 key={f.nome ?? 'etapas'}
                 className={cn(
-                  'relative min-w-0 flex-none snap-start scroll-ml-s4 rounded-cartao border p-s3 shadow-nivel-1 dark:shadow-none min-[621px]:w-auto',
+                  // V3 (12/11/2026): o cartão da casa (linha fina + sombra de
+                  // contato, que no escuro já traz o fio de luz — sai o
+                  // `dark:shadow-none`), e a FASE ABERTA COM O CONTORNO
+                  // CHAMPANHE e um halo fino: o "selecionado" da casa.
+                  'relative min-w-0 flex-none snap-start scroll-ml-s4 rounded-cartao border p-s3 shadow-nivel-1 transition-[border-color,box-shadow] duration-media ease-saida min-[621px]:w-auto',
                   fasesDoFunil.length > 1 ? 'w-[82%]' : 'w-full',
                   f.discreta ? 'bg-superficie-2' : 'bg-superficie',
-                  atual ? 'border-marca-viva/45 ring-[3px] ring-marca-viva/10' : 'border-borda',
+                  atual ? 'border-ouro/80 ring-[3px] ring-ouro/15' : 'border-borda',
                 )}
               >
                 <div className="flex items-center gap-s2 px-s1 pb-s2">
@@ -6710,8 +6872,12 @@ export default function AnaliseCredito() {
                     <span
                       aria-hidden
                       className={cn(
-                        'font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full text-xs font-bold',
-                        atual ? 'bg-marca text-marca-contraste' : 'bg-superficie-3 text-texto-2',
+                        // O NÚMERO DA FASE: disco cheio na aberta; nas outras,
+                        // só o contorno fino — a ordem se lê sem pesar.
+                        'font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full text-xs font-semibold tabular-nums',
+                        atual
+                          ? 'bg-marca text-marca-contraste'
+                          : 'bg-superficie text-texto-3 ring-1 ring-inset ring-borda-forte',
                       )}
                     >
                       {f.discreta ? <X className="h-[12px] w-[12px]" aria-hidden /> : i + 1}
@@ -6719,13 +6885,20 @@ export default function AnaliseCredito() {
                   )}
                   <h2
                     className={cn(
-                      'font-display text-corpo font-bold',
+                      'font-display text-corpo font-semibold tracking-[-0.005em]',
                       f.discreta ? 'text-texto-2' : 'text-texto',
                     )}
                   >
                     {f.nome ?? 'Etapas'}
                   </h2>
-                  <span className="ml-auto text-sm font-bold tabular-nums text-texto-2">{total}</span>
+                  <span
+                    className={cn(
+                      'ml-auto text-sm font-semibold tabular-nums',
+                      atual ? 'text-ouro-texto' : 'text-texto-3',
+                    )}
+                  >
+                    {total}
+                  </span>
                 </div>
                 <ul className="m-0 grid list-none gap-s0.5 p-0">
                   {f.abas.map((a) => {
@@ -6742,7 +6915,7 @@ export default function AnaliseCredito() {
                           title={`${nome} — ${n} ${busca.trim() ? 'resultado(s) da busca' : 'crédito(s)'}`}
                           className={cn(
                             // 36PX NO CELULAR: é alvo de toque (no computador, 32px, A1a).
-                            'relative grid h-controle w-full min-[621px]:h-[32px] grid-cols-[minmax(0,1fr)_auto] items-center gap-s2 rounded-controle px-s2 pb-s0.5 text-left transition-colors',
+                            'relative grid h-controle w-full min-[621px]:h-[32px] grid-cols-[minmax(0,1fr)_auto] items-center gap-s2 rounded-controle px-s2 pb-s0.5 text-left transition-colors duration-rapida ease-saida',
                             ativa ? 'bg-marca-suave' : 'hover:bg-superficie-3',
                           )}
                         >
@@ -6750,7 +6923,7 @@ export default function AnaliseCredito() {
                             className={cn(
                               'truncate text-sm',
                               ativa
-                                ? 'font-bold text-marca-texto'
+                                ? 'font-semibold text-marca-texto'
                                 : vazia
                                   ? 'font-medium text-texto-3'
                                   : 'font-medium text-texto',
@@ -6761,7 +6934,7 @@ export default function AnaliseCredito() {
                           <span
                             className={cn(
                               'text-right text-sm tabular-nums',
-                              ativa ? 'font-bold text-marca-texto' : vazia ? 'font-medium text-texto-3' : 'font-bold text-texto',
+                              ativa ? 'font-semibold text-marca-texto' : vazia ? 'font-medium text-texto-3' : 'font-semibold text-texto',
                             )}
                           >
                             {n}
@@ -6779,8 +6952,11 @@ export default function AnaliseCredito() {
                           >
                             <span
                               className={cn(
-                                'block h-full rounded-full',
-                                ativa ? 'bg-marca-viva' : f.discreta ? 'bg-texto-3/50' : 'bg-marca-viva/70',
+                                // A RÉGUA EM CHAMPANHE (v3): firme na etapa aberta,
+                                // clara nas outras; cinza nos perdidos. A largura
+                                // desliza quando a busca troca as contagens.
+                                'block h-full rounded-full transition-[width] duration-lenta ease-saida',
+                                ativa ? 'bg-marca-viva' : f.discreta ? 'bg-texto-3/40' : 'bg-ouro/70',
                               )}
                               style={{ width: `${larguraDaBarra(n, maior)}%` }}
                             />
@@ -6794,7 +6970,7 @@ export default function AnaliseCredito() {
                 {!f.discreta && proxima && !proxima.discreta && (
                   <span
                     aria-hidden
-                    className="absolute -right-[13px] top-[14px] z-[1] hidden h-[18px] w-[18px] place-items-center rounded-full bg-papel text-texto-3 min-[1180px]:grid"
+                    className="absolute -right-[13px] top-[14px] z-[1] hidden h-[18px] w-[18px] place-items-center rounded-full bg-superficie text-texto-3 shadow-nivel-1 ring-1 ring-borda min-[1180px]:grid"
                   >
                     <ChevronRight className="h-[14px] w-[14px]" />
                   </span>
@@ -6804,9 +6980,9 @@ export default function AnaliseCredito() {
           })}
         </section>
       ) : etapas.isLoading ? (
-        <Card className="mb-6 p-4">
-          <Loading label="Carregando as etapas do Kommo…" />
-        </Card>
+        // V3: O ESQUELETO DO PRÓPRIO QUADRO, e não o de uma tabela — a página
+        // chega com a forma que vai ter.
+        <QuadroCarregando label="Carregando as etapas do Kommo…" />
       ) : etapas.isError ? (
         // A MENSAGEM REAL, não um palpite: se o problema fosse permissão de
         // leitura da tabela, sincronizar de novo não mudaria nada.
@@ -6818,7 +6994,9 @@ export default function AnaliseCredito() {
         // Espelho vazio: o kommo-sync não gravou a estrutura do kanban. Dizer
         // isso é melhor que mostrar uma tela vazia, que se leria como "não tem
         // crédito nenhum".
-        <Card className="mb-6">
+        // SEM O CARTÃO EM VOLTA (v3): o EmptyState já tem a moldura tracejada,
+        // e dentro de um Card virava cartão dentro de cartão (§8).
+        <div className="mb-s6">
           <EmptyState
             title="Ainda não sei as etapas deste funil"
             description={
@@ -6829,7 +7007,7 @@ export default function AnaliseCredito() {
               </>
             }
           />
-        </Card>
+        </div>
       )}
 
       <section aria-live="polite" aria-label="Cards da etapa">
@@ -6840,15 +7018,20 @@ export default function AnaliseCredito() {
           // H2 DE 18PX (auditoria visual, A2): em 24px extrabold a etapa tinha
           // quase o tamanho do título da página. A FRASE NUMA LINHA SÓ (A1a), com
           // o texto inteiro no `title`: em duas linhas ela empurrava os cards.
-          <div className="mb-s3 min-w-0">
+          //
+          // V3 (12/11/2026): o sobretítulo da casa (`cj-sobretitulo`) no
+          // champanhe que se lê, o H2 de seção (`text-xl font-semibold`) e a
+          // contagem na placa champanhe — a mesma da contagem acesa do
+          // segmentado. Entra com o `fade-in` ao trocar de etapa (a `key`).
+          <div key={abaAtual.key} className="mb-s4 min-w-0 animate-fade-in">
             {faseAberta?.nome && (
-              <p className="font-display text-xs font-bold uppercase tracking-[.06em] text-marca-texto">
+              <p className="cj-sobretitulo text-ouro-texto">
                 {faseAberta.discreta ? 'Fora do fluxo' : `Fase ${indiceDaFase + 1} · ${faseAberta.nome}`}
               </p>
             )}
-            <h2 className="font-display mt-s0.5 flex items-center gap-s2 text-xl font-bold tracking-tight text-texto">
+            <h2 className="font-display mt-s1 flex items-center gap-s2 text-xl font-semibold tracking-[-0.01em] text-texto">
               {nomeDaColuna(abaAtual.label)}
-              <span className="rounded-full bg-marca-suave px-s2 py-s0.5 text-sm font-bold tabular-nums text-marca-texto">
+              <span className="rounded-full bg-ouro-suave px-s2 py-s0.5 text-sm font-semibold leading-none tabular-nums text-ouro-texto ring-1 ring-inset ring-ouro-borda">
                 {lista.length}
               </span>
             </h2>
@@ -6898,7 +7081,10 @@ export default function AnaliseCredito() {
                 ))}
               </div>
             )}
-            <label className="ml-auto flex h-controle w-[270px] items-center gap-s2 rounded-campo border border-borda-controle bg-superficie px-s3 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20 max-[900px]:w-full">
+            {/* V3: o campo da casa — sombra de contato, contorno que firma sob o
+                mouse, halo champanhe no foco e a seta fina do `cj-select` (a
+                nativa do Windows vinha grossa e clara demais no escuro). */}
+            <label className="ml-auto flex h-controle w-[270px] items-center gap-s2 rounded-campo border border-borda-controle bg-superficie pl-s3 text-texto-3 shadow-nivel-1 transition-colors duration-rapida hover:border-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20 max-[900px]:w-full">
               <span className="sr-only">Ordenar</span>
               <History className={IC} aria-hidden />
               <select
@@ -6908,7 +7094,7 @@ export default function AnaliseCredito() {
                   setOrdem(nova)
                   gravarPreferencia(PREF_ORDEM_DA_ANALISE, nova)
                 }}
-                className="w-full min-w-0 cursor-pointer bg-transparent text-corpo text-texto outline-none"
+                className="cj-select h-full w-full min-w-0 cursor-pointer bg-transparent pr-s8 text-corpo text-texto outline-none"
               >
                 <option value="recente">Entrada mais recente na etapa</option>
                 <option value="parado">Mais tempo na etapa</option>
@@ -6918,9 +7104,9 @@ export default function AnaliseCredito() {
         )}
 
         {leads.isLoading ? (
-          <Card>
-            <Loading />
-          </Card>
+          // V3: O ESQUELETO DOS PRÓPRIOS CARDS (nome, campos, nota, rodapé), com
+          // o brilho que passa — a lista chega com a forma que vai ter.
+          <CardsCarregando />
         ) : leads.isError ? (
           <Card>
             <ErrorState message={(leads.error as Error)?.message} onRetry={() => leads.refetch()} />
@@ -6957,19 +7143,19 @@ export default function AnaliseCredito() {
               />
             </Card>
           ) : (
-            <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie">
-              <EmptyState
-                title={`Nenhum card em ${abaAtual ? nomeDaColuna(abaAtual.label) : 'nenhuma etapa'}`}
-                description={
-                  abaAtual?.descricaoVazia ??
-                  'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.'
-                }
-              />
-            </div>
+            // A MOLDURA TRACEJADA É DO PRÓPRIO EmptyState (v3): a de fora, que
+            // a repetia, saiu — eram dois tracejados, um dentro do outro.
+            <EmptyState
+              title={`Nenhum card em ${abaAtual ? nomeDaColuna(abaAtual.label) : 'nenhuma etapa'}`}
+              description={
+                abaAtual?.descricaoVazia ??
+                'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.'
+              }
+            />
           )
         ) : (
           <>
-            <div className="grid gap-s2">
+            <div className="grid gap-s3">
               {filtrados.map((l) => (
                 <CardCredito
                   key={l.kommo_lead_id}

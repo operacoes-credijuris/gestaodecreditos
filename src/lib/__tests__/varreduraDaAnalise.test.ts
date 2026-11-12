@@ -96,7 +96,7 @@ describe('a passada de UI/UX de 23/10/2026 na Análise de crédito', () => {
   it('os botões dividem a última linha com o rodapé, e não espremem o miolo do card', () => {
     // O RODAPÉ E OS BOTÕES NUMA LINHA QUE ATRAVESSA O CARD, e a zona de ações
     // deixou de ser uma coluna da altura dele.
-    expect(tela).toContain('col-span-full mt-[4px] flex flex-wrap items-end justify-between')
+    expect(tela).toContain('col-span-full mt-s1 flex flex-wrap items-end justify-between')
     expect(tela).toContain('flex-[1_1_280px]')
     expect(tela).not.toContain('min-[900px]:flex-col min-[900px]:items-end')
   })
