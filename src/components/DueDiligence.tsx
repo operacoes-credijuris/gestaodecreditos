@@ -171,7 +171,7 @@ export function DueDiligence({
    * segundo lugar produziria duas versões da mesma razão.
    */
   async function recusarVerba(texto: string) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('dd_historico')
       // A RECUSA DESFAZ UM "SEGUIR" ANTERIOR. O check da 0063 proíbe liberado e
       // reprovado na mesma linha: quem tinha clicado em Seguir e reabria a
@@ -188,7 +188,17 @@ export function DueDiligence({
       .eq('kommo_lead_id', leadId)
       .in('papel', papeisRecusados)
       .eq('status', 'APURADO')
+      // QUANTAS LINHAS A RECUSA PEGOU (12/11/2026), como no `seguir`: com uma
+      // nova apuração no ar, nenhuma linha está APURADA, o update não grava nada
+      // — e a nota ia ao Kommo e a janela fechava como se a verba tivesse caído.
+      .select('id')
     if (error) throw new Error(error.message)
+    if (!data || data.length === 0) {
+      throw new Error(
+        'A recusa não foi gravada: nenhum processo apurado desta verba foi encontrado agora ' +
+          '(a busca pode estar rodando de novo). Espere a lista atualizar e recuse outra vez.',
+      )
+    }
     // A ANOTAÇÃO FALHANDO NÃO DESFAZ A RECUSA: ela já está no banco e já governa
     // a análise. O card sem a nota é um registro incompleto, não uma decisão
     // perdida — e avisar é melhor do que reverter.

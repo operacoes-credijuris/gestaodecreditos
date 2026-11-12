@@ -50,6 +50,7 @@ import { Aviso as CaixaDeAviso } from '@/components/operacional/Pecas'
 import { CreditoFormModal } from '@/components/CreditoFormModal'
 import type { Apenso, Processo } from '@/lib/types'
 import { perguntarDescarte } from '@/lib/descarte'
+import { ehFalhaDeCarga } from '@/lib/telaSobDemanda'
 import {
   apagarRascunhoDaPeticao,
   gravarRascunhoDaPeticao,
@@ -118,7 +119,8 @@ export function PeticaoModal({
    * Id da tarefa no ADVBOX. É a CHAVE DO CACHE do panorama: a mesma execução
    * recebe várias tarefas ao longo do tempo, e cada uma se analisa com um recorte
    * diferente do mesmo processo (ver migração 0035). `null` quando não há tarefa
-   * (ex: aberto a partir do assistente) — só o cache do panorama fica sem efeito.
+   * (ex: aberto a partir do assistente) — SEM ELA NÃO HÁ PANORAMA NENHUM (o
+   * servidor o recusa), e a seção some da aba da IA (12/11/2026).
    */
   tarefaId: string | null
   /**
@@ -605,14 +607,20 @@ export function PeticaoModal({
       // justamente aqui porque a biblioteca de .docx é carregada sob demanda — quem abriu a
       // plataforma antes do deploy e só depois clicou em gerar cai nisto.
       // "Failed to fetch" seco não diz nada a quem está tentando protocolar.
-      const versaoVelha =
-        /dynamically imported module|Importing a module script failed|Failed to fetch/i.test(
-          msg,
-        )
-      if (versaoVelha) {
+      //
+      // MAS O "Failed to fetch" SECO NÃO É VERSÃO NOVA (12/11/2026): é o que o
+      // `fetch` do Drive (lib/drive.ts) lança com a internet caída, a VPN ou o
+      // googleapis bloqueado — e a tela mandava recarregar, o que não resolve
+      // nada. O pedaço que não baixa tem mensagem própria (`ehFalhaDeCarga`).
+      if (ehFalhaDeCarga(err)) {
         toast.error(
           'A plataforma foi atualizada enquanto esta aba estava aberta. ' +
             'Recarregue a página e gere novamente.',
+        )
+      } else if (/^Failed to fetch$|NetworkError|Load failed/i.test(msg)) {
+        toast.error(
+          `A conexão falhou (${msg}) e a peça não foi salva. Confira a internet e salve de novo — ` +
+            'o texto continua aqui.',
         )
       } else {
         toast.error(msg)
@@ -710,6 +718,29 @@ export function PeticaoModal({
         <Tabs items={ABAS} value={aba} onChange={setAba} />
       </div>
 
+      {/* NAS DUAS ABAS (12/11/2026): a peça da IA também cai no download quando
+          a pasta não resolve, e o motivo e o caminho só apareciam na aba Modelo —
+          na da IA, ficava o aviso curto, sem dizer onde subir à mão. */}
+      {semPasta && (
+        <div className="mb-s4">
+        <Aviso tom="atencao">
+          <p className="font-medium">
+            O arquivo foi baixado no seu computador, mas não subiu no Drive.
+          </p>
+          <p className="mt-s1">{semPasta.motivo}</p>
+          {semPasta.caminho.length > 0 && (
+            <p className="mt-s1">
+              Desci até: <strong>{semPasta.caminho.join(' › ')}</strong>
+            </p>
+          )}
+          <p className="mt-s1">
+            Suba o arquivo à mão nessa pasta, ou crie a pasta que falta e gere de
+            novo.
+          </p>
+        </Aviso>
+        </div>
+      )}
+
       {naIA ? (
         <div className="space-y-s4">
           {!processo ? (
@@ -720,6 +751,10 @@ export function PeticaoModal({
           ) : (
             <>
               {/* ---------- Panorama ---------- */}
+              {/* SÓ COM TAREFA (12/11/2026): o panorama é lido por tarefa (o
+                  servidor recusa sem ela), e aberta pelo assistente a janela
+                  mostrava o título sobre um vazio, sem carregando nem erro. */}
+              {tarefaId && (
               <section>
                 <div className="mb-s2 flex items-center justify-between gap-s3">
                   {/* O RÓTULO DE SEÇÃO DA CASA (§0.5): cinza, e não azul — em azul
@@ -774,6 +809,7 @@ export function PeticaoModal({
                   </div>
                 ) : null}
               </section>
+              )}
 
               {/* ---------- Comando do advogado ---------- */}
               <section>
@@ -913,24 +949,6 @@ export function PeticaoModal({
           )}
 
           {erroMd && <Aviso tom="erro">{erroMd}</Aviso>}
-
-          {semPasta && (
-            <Aviso tom="atencao">
-              <p className="font-medium">
-                O arquivo foi baixado no seu computador, mas não subiu no Drive.
-              </p>
-              <p className="mt-s1">{semPasta.motivo}</p>
-              {semPasta.caminho.length > 0 && (
-                <p className="mt-s1">
-                  Desci até: <strong>{semPasta.caminho.join(' › ')}</strong>
-                </p>
-              )}
-              <p className="mt-s1">
-                Suba o arquivo à mão nessa pasta, ou crie a pasta que falta e gere de
-                novo.
-              </p>
-            </Aviso>
-          )}
 
           {semRotuloNenhum && (
             <Aviso tom="erro">

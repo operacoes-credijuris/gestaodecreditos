@@ -296,7 +296,13 @@ export function JanelaJustificativa({
       } catch (e) {
         // A RESPOSTA É DESTE CARD (09/10/2026): voltando com a janela já noutro,
         // o erro não pode aparecer como se fosse do outro — vai para o aviso.
-        if (cardAberto.current !== leadId) toast.error(`A justificativa de outro card não foi gerada: ${(e as Error).message}`)
+        // FECHADA (0) NÃO É "OUTRO CARD" (12/11/2026): o aviso dizia "de outro
+        // card" sobre o mesmo card cuja janela a pessoa tinha acabado de fechar.
+        if (cardAberto.current !== leadId) {
+          toast.error(
+            `${cardAberto.current === 0 ? 'A justificativa' : 'A justificativa de outro card'} não foi gerada: ${(e as Error).message}`,
+          )
+        }
         else if (codigoDoErro(e) === 'migracao-pendente') setMigracaoPelaFuncao(true)
         else setErroDoPedido((e as Error).message)
       } finally {
@@ -358,7 +364,12 @@ export function JanelaJustificativa({
       // FECHADA (0) AINDA É DELE: o Fechar salva a edição pendente, e o estado
       // tem de voltar a "salvo" — reaberta, a janela do mesmo card não recarrega
       // o campo, e um "salvando" preso desligaria o Enviar.
-      const daJanela = () => cardAberto.current === doCard || cardAberto.current === 0
+      //
+      // PELO DONO DO CAMPO, e não pelo card aberto (12/11/2026): fechado A e
+      // aberto B ainda gerando (B não carrega o campo), a resposta do salvamento
+      // de A era descartada, e A reaberto — sem recarregar, o campo é o mesmo —
+      // ficava em "Salvando rascunho…" com o Enviar desligado para sempre.
+      const daJanela = () => carregado.current?.startsWith(`${doCard}:`) ?? false
       setRascunho('salvando')
       try {
         const r = await invokeFunction<{ rascunho_em: string }>(FUNCAO, {
@@ -422,8 +433,12 @@ export function JanelaJustificativa({
   }
 
   // FECHAR NÃO PERDE NADA: a edição que ainda esperava a pausa sai agora.
+  //
+  // E A QUE FALHOU AO SALVAR TAMBÉM (12/11/2026): no estado de erro não há
+  // relógio, e o Fechar do rodapé fechava sem tentar de novo — a edição ficava
+  // só na memória da janela, e o próximo card carregado a apagava.
   function fechar() {
-    if (relogio.current !== null) {
+    if (relogio.current !== null || rascunho === 'erro') {
       cancelarRelogio()
       void salvarRascunho(texto)
     }
@@ -443,6 +458,10 @@ export function JanelaJustificativa({
     // estado do React mudar, e o segundo subiria a nota duas vezes.
     travas.current = comecarNoCard(travas.current, leadId, true)
     setEnviandoPorCard(travas.current)
+    // A EDIÇÃO QUE ESPERAVA A PAUSA (12/11/2026): o envio cancela o relógio, e
+    // falhando o envio nada a salvava — "Alterações por salvar…" ficava na tela
+    // e a edição, fora do banco. Falhou, ela é salva (ver o `catch`).
+    const haviaEdicaoPorSalvar = relogio.current !== null
     cancelarRelogio()
     try {
       const r = await invokeFunction<{ partes: number; aviso: string | null; nota_kommo_ids?: number[] }>(FUNCAO, {
@@ -462,6 +481,7 @@ export function JanelaJustificativa({
       if (cardAberto.current === leadId) onFechar()
     } catch (e) {
       toast.error(`${(e as Error).message}`)
+      if (haviaEdicaoPorSalvar) void salvarRascunho(texto)
       await atualizar()
     } finally {
       travas.current = terminarNoCard(travas.current, leadId)

@@ -612,9 +612,19 @@ export function Assistente({
     return proxima
   }
 
+  /**
+   * O FOCO VOLTA À PERGUNTA ao sair do histórico por uma escolha (12/11/2026):
+   * ficava no botão da lista, que some com ela, e o Tab seguinte recomeçava
+   * de lugar nenhum.
+   */
+  function focarPergunta() {
+    window.requestAnimationFrame(() => campo.current?.focus())
+  }
+
   function novaConversa() {
     setConversaAtualId(novoIdDeConversa())
     setHistoricoAberto(false)
+    focarPergunta()
   }
 
   function carregarConversa(c: ConversaSalva) {
@@ -626,6 +636,7 @@ export function Assistente({
     if (!jaAberta) setConversas((atual) => (atual[c.id] ? atual : { ...atual, [c.id]: msgs }))
     setConversaAtualId(c.id)
     setHistoricoAberto(false)
+    focarPergunta()
     void renovarLinks(c.id, msgs)
   }
 
@@ -646,9 +657,15 @@ export function Assistente({
       ),
     ]
     if (caminhos.length === 0) return
-    const { data, error } = await supabase.storage
-      .from(BUCKET_ARQUIVOS)
-      .createSignedUrls(caminhos, 3600)
+    // EM try/catch (12/11/2026): chamado com `void`, a rede caindo aqui virava
+    // rejeição sem dono no console. Falhando, ficam os links antigos.
+    let resposta: Awaited<ReturnType<ReturnType<typeof supabase.storage.from>['createSignedUrls']>>
+    try {
+      resposta = await supabase.storage.from(BUCKET_ARQUIVOS).createSignedUrls(caminhos, 3600)
+    } catch {
+      return
+    }
+    const { data, error } = resposta
     if (error || !data) return
     const novos = new Map<string, string>()
     for (const d of data) if (d.path && d.signedUrl && !d.error) novos.set(d.path, d.signedUrl)
@@ -677,6 +694,10 @@ export function Assistente({
     // recria a conversa (ver `gravarNoBanco`).
     excluidas.current.add(id)
     try {
+      // ESPERA A GRAVAÇÃO EM CURSO DESTA CONVERSA (12/11/2026): o `insert` da
+      // pergunta já no ar, chegando ao banco depois do `delete`, recriava a
+      // conversa excluída. A fila nunca rejeita (ver `gravarNoBanco`).
+      await filaDeGravacao.current.get(id)
       // O supabase-js NÃO LANÇA: devolve `{ error }`. Sem conferir, a falha
       // passava calada — a conversa continuava no banco, e a atual perdia o
       // vínculo com ela, de modo que a próxima pergunta abria uma conversa nova
@@ -699,15 +720,21 @@ export function Assistente({
   }
 
   /** Pergunta nova, do campo ou de uma sugestão. */
-  function enviar(pergunta: string) {
+  function enviar(pergunta: string, origem: 'campo' | 'sugestao' = 'campo') {
     const limpa = pergunta.trim()
     if (!limpa || carregando) return
+    // A SUGESTÃO NÃO LEVA O CAMPO (12/11/2026): tocar numa sugestão com uma
+    // pergunta pela metade no campo apagava o rascunho (e o guardado junto) e
+    // mandava, com a sugestão, os anexos que eram para a pergunta digitada.
+    const doCampo = origem === 'campo'
     // O AVISO JÁ ESTÁ À VISTA, acima do campo (`anexosSemLeitor`): a pergunta não
-    // sai para ser recusada pelo servidor.
-    if (anexosSemLeitor.length > 0) return
+    // sai para ser recusada pelo servidor. (A sugestão não leva os anexos.)
+    if (doCampo) {
+      if (anexosSemLeitor.length > 0) return
+    }
 
     const id = conversaAtualId
-    const anexos = arquivos
+    const anexos = doCampo ? arquivos : []
     const nomes = anexos.map((f) => f.name)
     const msgPergunta: Mensagem = {
       role: 'user',
@@ -722,11 +749,13 @@ export function Assistente({
     // pergunta atual separada, no campo `pergunta`.
     const historico = mudar(mensagens).slice(0, -1)
     mudarConversa(id, mudar)
-    setTexto('')
-    // OS ANEXOS SAEM DO CAMPO E VÃO PARA A BOLHA DA PERGUNTA (12/11/2026): ficando
-    // no campo durante a espera, iam junto com a próxima pergunta, até em outra
-    // conversa. O "Tentar de novo" os reenvia (ficam no pedido).
-    setArquivos([])
+    if (doCampo) {
+      setTexto('')
+      // OS ANEXOS SAEM DO CAMPO E VÃO PARA A BOLHA DA PERGUNTA (12/11/2026): ficando
+      // no campo durante a espera, iam junto com a próxima pergunta, até em outra
+      // conversa. O "Tentar de novo" os reenvia (ficam no pedido).
+      setArquivos([])
+    }
     // A PERGUNTA É GRAVADA JÁ: se a resposta falhar, ou a pessoa sair da
     // conversa, ela está lá quando a conversa for reaberta.
     void gravarNoBanco(id, mudar)
@@ -851,15 +880,37 @@ export function Assistente({
     void gravarNoBanco(id, mudar)
   }
 
+  /**
+   * UM CONFIRMAR POR VEZ (12/11/2026): o botão segue aceso enquanto o crédito
+   * é lido, e o duplo clique fazia duas leituras — dois avisos de falha, ou a
+   * revisão da petição montada duas vezes.
+   */
+  const confirmando = useRef(false)
+
   /** Confirmar: carrega o crédito e abre a MESMA tela de revisão da Execução. */
   async function confirmarAcao(a: AcaoProposta, indice: number) {
-    const { data, error } = await supabase
-      .from('processos')
-      .select('*')
-      .eq('id', a.processo_id)
-      .maybeSingle()
-    if (error || !data) {
-      toast.error('Não foi possível carregar o crédito para gerar a petição.')
+    if (confirmando.current) return
+    confirmando.current = true
+    let data: unknown = null
+    let causa: string | null = null
+    try {
+      const r = await supabase.from('processos').select('*').eq('id', a.processo_id).maybeSingle()
+      data = r.data
+      causa = r.error?.message ?? null
+    } catch (e) {
+      // A REDE CAINDO LANÇA (o `void` do clique deixava a rejeição sem dono).
+      causa = (e as Error)?.message ?? String(e)
+    } finally {
+      confirmando.current = false
+    }
+    if (causa || !data) {
+      // A CAUSA VAI JUNTO (12/11/2026): "não foi possível" sozinho não separava
+      // a rede caída do crédito excluído depois da proposta.
+      toast.error(
+        `Não foi possível carregar o crédito para gerar a petição${
+          causa ? `: ${causa}` : ' — ele não foi encontrado (pode ter sido excluído).'
+        }`,
+      )
       return
     }
     resolverAcao(indice, 'confirmada')
@@ -1102,7 +1153,7 @@ export function Assistente({
                       <button
                         key={s}
                         type="button"
-                        onClick={() => enviar(s)}
+                        onClick={() => enviar(s, 'sugestao')}
                         className={cn(
                           'rounded-campo border border-borda bg-superficie-2 px-s3 py-[10px] text-left text-sm text-texto',
                           'transition-colors hover:border-marca-viva hover:bg-marca-leve',
@@ -1456,8 +1507,6 @@ export function Assistente({
 
               {/* SEMPRE À VISTA desde 12/11/2026: a Base do Kommo é um item fixo
                   da lista, e não depende de skill cadastrada em Configurações. */}
-              {(
-
                 <div className="sm:relative" ref={skillsRef}>
                   <Button
                     type="button"
@@ -1546,7 +1595,6 @@ export function Assistente({
                     </div>
                   )}
                 </div>
-              )}
 
               <input
                 ref={inputArquivos}

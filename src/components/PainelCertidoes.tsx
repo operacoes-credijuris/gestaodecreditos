@@ -956,6 +956,12 @@ export function PainelCertidoes({
 
   const [ufs, setUfs] = useState<string[]>([])
   const [municipios, setMunicipios] = useState<Record<string, string[]>>({})
+  // A LISTA MAIS RECENTE, para quem lê depois de um `await` (12/11/2026): a
+  // leitura automática da IA começa num render em que a lista do IBGE pode
+  // ainda não ter chegado, e o `municipios` daquele render, vazio, deixava a
+  // grafia da IA ("Sao Paulo") ir para o campo e para o banco.
+  const municipiosRef = useRef(municipios)
+  municipiosRef.current = municipios
 
   // A lista do IBGE tem 5571 municípios: importada sob demanda, como em
   // DadosPessoaisBancarios, para não entrar no bundle de quem nunca abre isto.
@@ -1393,9 +1399,15 @@ export function PainelCertidoes({
   // Com alteração não salva, a volta só atualiza o checklist e o placar.
   const sujoNaVolta = useRef(false)
   sujoNaVolta.current = editando && mexeu
+  // E SÓ LENDO O CADASTRO, A VOLTA TAMBÉM NÃO RECARREGA TUDO (12/11/2026): o
+  // `recarregar` põe o painel em "Carregando…", que desmonta a emissão pela
+  // BullAI — ir à aba de Processos e voltar apagava as certidões desmarcadas e
+  // as acrescentadas do catálogo. O cadastro não muda na outra aba.
+  const soLendoNaVolta = useRef(false)
+  soLendoNaVolta.current = !editando
   useEffect(() => {
     if (!ativo) return
-    if (sujoNaVolta.current) void recarregarItens()
+    if (sujoNaVolta.current || (carregouUmaVez.current && soLendoNaVolta.current)) void recarregarItens()
     else void recarregar()
     // `recarregarItens` não entra: ele só serve à volta com o formulário sujo,
     // e muda junto com `recarregar` (os dois dependem de `leadId`).
@@ -1485,7 +1497,7 @@ export function PainelCertidoes({
   /** O nome do município como o IBGE escreve, para o campo aceitar. */
   function municipioDoIbge(uf: string, nome: string): string {
     const sem = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
-    return (municipios[uf] ?? []).find((m) => sem(m) === sem(nome)) ?? nome
+    return (municipiosRef.current[uf] ?? []).find((m) => sem(m) === sem(nome)) ?? nome
   }
 
   function aplicarLeitura(q: QualificacaoLida) {
@@ -2696,6 +2708,14 @@ export function PainelCertidoes({
       {erro && (
         <CaixaDeAviso tom="perigo" role="alert" className="mb-s3">
           {erro}
+          {/* A LEITURA QUE FALHOU SE REFAZ DAQUI (12/11/2026): sem o cadastro
+              lido, o Gravar recusa (`carregouUmaVez`), e a única saída era
+              fechar a janela e abrir de novo. */}
+          {!carregando && !carregouUmaVez.current && (
+            <Button size="sm" variant="secondary" className="ml-s2" onClick={() => void recarregar()}>
+              Tentar de novo
+            </Button>
+          )}
         </CaixaDeAviso>
       )}
       {erroMunicipios && (
@@ -3315,7 +3335,9 @@ export function PainelCertidoes({
             />
           )}
 
-          {sujeitos.length === 0 && (
+          {/* SÓ COM A LEITURA FEITA (12/11/2026): com ela falhando, `sujeitos`
+              fica vazio e a caixa dizia que o crédito não tinha ninguém. */}
+          {sujeitos.length === 0 && carregouUmaVez.current && (
             <CaixaSuave>
               Nenhum sujeito cadastrado neste crédito. Clique em <b>Editar</b> para começar pelo cedente.
             </CaixaSuave>
