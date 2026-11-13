@@ -1,0 +1,25 @@
+name: Diagnóstico do Supabase
+
+# O ESTADO DO PROJETO NO SUPABASE, só leitura (13/11/2026): quando a plataforma
+# cai, diz se o projeto está ativo, pausado ou com algum serviço doente (banco,
+# login, API), pela API de gestão — a mesma chave que o deploy já usa. Disparo
+# manual; não muda nada no projeto.
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - name: Estado do projeto
+        run: |
+          echo "== projeto"
+          curl -s -H "Authorization: Bearer $TOKEN" "https://api.supabase.com/v1/projects/$REF" \
+            | jq '{status, region, created_at, database: (.database // {} | {version, host: (.host|tostring|.[0:12])})}'
+          echo "== saúde dos serviços"
+          curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://api.supabase.com/v1/projects/$REF/health?services=auth&services=db&services=rest&services=realtime&services=storage&services=pooler" \
+            | jq '.[] | {name, status, healthy, error: (.error // null)}'
